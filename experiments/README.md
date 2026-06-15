@@ -8,7 +8,7 @@ using `populace.calibrate` and Populace build artifacts as the implementation
 surface:
 
 - L0/Hard Concrete runs through Populace `calibrate(..., target_records=...)`.
-- Baselines use the same Populace target matrix/loss surface where possible.
+- Baselines use the same Populace target matrix/loss surface.
 - Result artifacts carry the Populace commit, target registry/build artifact
   identity, solver options, and random seeds.
 

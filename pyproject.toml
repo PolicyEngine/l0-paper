@@ -1,0 +1,54 @@
+[project]
+name = "l0-paper"
+version = "0.1.0"
+description = "Paper and Populace-backed experiments for L0 dataset reduction"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2",
+    "pandas>=2.3",
+    "scipy>=1.13",
+    "populace-frame>=0.1,<0.2",
+    "populace-calibrate>=0.1,<0.2",
+    "populace-build>=0.1,<0.2",
+]
+
+[project.optional-dependencies]
+data = [
+    "populace-data>=0.1,<0.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.8",
+]
+
+[tool.uv.sources]
+populace-frame = { path = "../populace/packages/populace-frame", editable = true }
+populace-fit = { path = "../populace/packages/populace-fit", editable = true }
+populace-calibrate = { path = "../populace/packages/populace-calibrate", editable = true }
+populace-build = { path = "../populace/packages/populace-build", editable = true }
+populace-data = { path = "../populace/packages/populace-data", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["l0_paper", "populace"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/l0_paper"]

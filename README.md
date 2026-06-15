@@ -3,10 +3,10 @@
 Paper and experiment workspace for PolicyEngine's L0 dataset-reduction work on
 the Populace stack.
 
-The initial manuscript narrative was imported from the archived
-`PolicyEngine/microplex-us` paper draft. It remains LaTeX-first for now, with a
-Quarto entry point that includes the existing section files so the paper can be
-rendered and revised incrementally while the implementation moves to
+The initial manuscript narrative was built in relation to the old
+`PolicyEngine/policyengine-us-data` paper draft. It remains LaTeX-first for now, 
+with a Quarto entry point that includes the existing section files so the paper 
+can be rendered and revised incrementally while the implementation moves to
 `PolicyEngine/populace`.
 
 ## Layout
@@ -17,7 +17,32 @@ rendered and revised incrementally while the implementation moves to
 - `paper/tables/` - generated/result tables included by the paper.
 - `paper/figures/` - figure outputs.
 - `paper/bibliography/references.bib` - references.
-- `experiments/` - Populace-compatible experiment code will live here.
+- `src/l0_paper/` - Python helpers for Populace-backed experiments.
+- `tests/` - tests that exercise the active Populace API surface.
+- `experiments/` - notebooks/configs/result scripts for paper experiments.
+
+## Development
+
+This repo expects to be cloned next to `PolicyEngine/populace`:
+
+```text
+PolicyEngine/
+  l0-paper/
+  populace/
+```
+
+The `pyproject.toml` points `uv` at the sibling Populace packages, so local
+tests use the active checkout rather than archived Microplex internals.
+
+```bash
+uv sync --all-extras --dev
+uv run pytest
+uv run ruff check .
+```
+
+The smoke test runs a tiny `populace.calibrate.calibrate(...,
+target_records=...)` L0 calibration to verify the experiment repo is wired to
+Populace's implementation.
 
 ## Render
 
@@ -41,4 +66,3 @@ New code in this repository should target active Populace APIs rather than
 archived `microplex` or `microplex-us` internals. The imported manuscript still
 contains old Microplex wording in places; updating the narrative to Populace is
 part of the next migration pass.
-
