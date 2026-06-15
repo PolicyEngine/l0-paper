@@ -1,0 +1,55 @@
+---
+title: "$L_0$ regularization for subnational microsimulation calibration"
+author:
+  - name: Maria Juaristi
+    affiliation: PolicyEngine
+    email: maria@policyengine.org
+  - name: Nikhil Woodruff
+    affiliation: PolicyEngine
+  - name: Ben Ogorek
+    affiliation: PolicyEngine
+  - name: Max Ghenis
+    affiliation: PolicyEngine
+date: ""
+bibliography: bibliography/references.bib
+cite-method: natbib
+biblio-style: plainnat
+format:
+  pdf:
+    documentclass: article
+    classoption: 11pt
+    include-in-header:
+      - preamble.tex
+    keep-tex: true
+---
+
+\input{sections/abstract}
+\input{sections/introduction}
+\input{sections/background}
+\input{sections/data}
+\input{sections/methodology}
+\input{sections/results}
+\input{sections/discussion}
+\input{sections/conclusion}
+
+\section*{Conflict of interest}
+The authors declare no conflict of interest.
+
+\section*{Funding}
+This work was supported by PolicyEngine, a 501(c)(3) nonprofit organization.
+
+\section*{Data and code availability}
+The paper and experiment code live at
+\url{https://github.com/PolicyEngine/l0-paper}. The current implementation
+target is the Populace stack at
+\url{https://github.com/PolicyEngine/populace}. Historical prototype code was
+developed in the archived Microplex repositories and is retained only as a
+migration reference.
+
+\section*{Use of generative AI}
+The authors used Claude (Anthropic) and Codex (OpenAI) for code assistance and
+manuscript drafting. All technical content, methodology, and analysis were
+designed and validated by the authors.
+
+\input{sections/appendix}
+

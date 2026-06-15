@@ -1,0 +1,68 @@
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{What the sampling comparison establishes}
+
+The comparison against random sampling is the core test. If informed $L_0$ selection reaches lower
+out-of-sample error than random selection at the same record budget, then the gates are doing useful
+work, because they spend the budget on records the targets constrain. If the two methods are close,
+the added machinery is harder to justify on accuracy grounds, and the case for the method rests on
+its controls instead. Reporting out-of-sample error keeps that distinction honest, since a method can
+always match the targets it was fit to more tightly than a method that was not.
+
+\subsection{What the controls establish}
+
+The second contribution is operational: the same framework produces datasets of different sizes by
+changing one penalty, focuses on a geographic level by weighting its targets, and bounds weight
+magnitudes by changing another penalty. A random-sampling baseline can also produce a dataset of a
+chosen size, but it cannot make the choice of records respond to the targets, and it controls weight
+magnitudes only through the reweighting step. The value here is that size, geographic focus, and
+weight stability are set through explicit parameters in one optimization rather than through separate
+heuristics.
+
+\subsection{Trade-offs and limitations}
+
+The method does not remove modelling judgment, and several choices stay consequential.
+
+\subsubsection{Target selection}
+
+The target set is a prioritized subset, not a complete inventory. The reasons for including each
+family are stated in Appendix~\ref{app:targets}, and the empirical claims are tied to the exact
+targets in each run's manifest. A different target set could change the comparison, and the paper
+does not claim the chosen set is maximal.
+
+\subsubsection{When informed selection helps}
+
+Informed selection should help most when the targets are specific and local, so the choice of
+records matters. When the targets are few and broad, a random draw may already contain the records
+needed to match them, and the advantage of informed selection narrows. The paper reports the regimes
+it tests and does not extrapolate beyond them.
+
+\subsubsection{Relation to convex sparse methods}
+
+$L_0$ with Hard Concrete is one way to obtain a sparse, positively weighted sample. Convex sparse
+penalties such as $L_1$ are another, and they can be more stable to optimize. The case for the $L_0$
+approach here rests on the joint selection-and-weighting framing and the explicit control over the
+retained count, not on a claim that it is the most accurate sparse method in every setting. A
+comparison with convex sparse methods is a natural extension.
+
+\subsubsection{Hyperparameter sensitivity}
+
+The method has parameters. The gate temperature, the initialization, and the two penalties all
+affect the path the optimizer takes. The configuration is reported in
+Appendix~\ref{app:hyperparameters} and is part of the method specification rather than a detail.
+
+\subsubsection{Computational cost}
+
+Building the calibration matrix and running gradient-based optimization cost more than a small
+classical calibration. That cost is justified only when the problem requires it, which is why the
+comparison against a simpler random-sampling baseline matters.
+
+\subsection{Generalizability}
+
+The data engineering here is specific to the United States, but the question is general. Many
+microsimulation projects combine sources into a candidate dataset larger than they can ship, and then
+have to reduce it. Where the reduction has to respect calibration targets and keep weights usable,
+framing it as informed sampling, rather than as a random draw followed by reweighting, may carry over
+to other countries and other engines. \microplex{} makes that portability concrete, since the method
+is a configuration choice rather than a fixed pipeline.

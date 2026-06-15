@@ -1,0 +1,41 @@
+# Quarto outputs
+/.quarto/
+/_output/
+/.jupyter_cache/
+
+# Python local state
+/.venv/
+__pycache__/
+*.py[cod]
+
+# LaTeX auxiliary files
+*.aux
+*.lof
+*.log
+*.lot
+*.fls
+*.out
+*.toc
+*.fmt
+*.fot
+*.cb
+*.cb2
+.*.lb
+*.nav
+*.snm
+*.vrb
+*.fdb_latexmk
+*.synctex
+*.synctex(busy)
+*.synctex.gz
+*.synctex.gz(busy)
+*.pdfsync
+*.bbl
+*.bcf
+*.blg
+*-blx.aux
+*-blx.bib
+*.run.xml
+
+# Generated PDFs
+paper/main.pdf

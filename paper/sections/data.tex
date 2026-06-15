@@ -1,0 +1,89 @@
+\section{Data}
+\label{sec:data}
+
+The calibration problem is defined by two inputs: the household microdata that form the candidate
+universe, and the administrative targets the calibrated dataset must reproduce. This section
+describes how \microplex{} assembles the candidate microdata and how this study selects its targets.
+The pipeline is the harness that produces the calibration problem; it is not itself the object of
+evaluation.
+
+\subsection{Microplex as a construction engine}
+
+\microplex{} builds a microsimulation dataset from a declarative specification. The specification
+names the data sources, the variables each source contributes, the rule for combining sources into
+one record universe, the imputation graph that fills missing variables, the geographic assignment,
+the calibration targets, and the calibration method. \microplex{} provides the engine and all
+execution logic: it reads that specification and runs the stages in order, while the country-specific
+content is supplied as a country pack that becomes the input to the engine's functions rather than
+living in the engine itself. The engine validates the specification before running and pins external
+inputs by content hash, so a build is reproducible.
+
+Because each stage is declared rather than hard-coded, the imputation model and the calibration
+method are interchangeable: a different imputation model, or a different calibration routine, can be
+substituted without rewriting the pipeline, and the method studied here is one calibration option
+among several the engine supports. The same declarative structure makes the steps that enlarge the
+candidate universe explicit, namely combining sources, imputing onto more records, and creating
+geographic variants, so the size of the candidate dataset is a property of the configuration rather
+than an accident of the code.
+
+\begin{figure}[ht]
+    \centering
+    \fbox{\parbox{0.9\textwidth}{\centering\textit{[Pipeline overview diagram to be inserted]}}}
+    \caption{\microplex{} pipeline for the configuration used in this paper: load and combine the
+    source surveys, impute missing variables, assign geography, construct the calibration targets,
+    and calibrate. The calibration stage is the focus of this paper.}
+    \label{fig:pipeline}
+\end{figure}
+
+\tbc[configuration-specific pipeline description for this build]
+
+\subsection{Base microdata}
+
+\subsubsection{Current Population Survey}
+
+The primary source is the Current Population Survey Annual Social and Economic Supplement
+\citep[CPS ASEC;][]{census2024}, a nationally representative household survey from the US Census
+Bureau and the Bureau of Labor Statistics. The CPS provides demographic structure, household
+relationships, labour income, transfer income, and reported participation in programmes such as
+SNAP, Medicaid, SSI, and TANF.
+
+The CPS is not a complete tax-benefit dataset on its own. Some tax variables are missing, others are
+measured with error, and top incomes are imperfectly captured relative to tax records
+\citep{burkhauser2012}. Benefit receipt is also underreported relative to administrative sources
+\citep{rothbaum2021, meyer2021}. The pipeline therefore augments the CPS before calibration.
+
+\subsubsection{Imputation from administrative and survey sources}
+
+The pipeline imputes tax variables from the IRS Public Use File (PUF) onto CPS records following
+\citet{woodruff2024}. The PUF carries detailed tax-return information but lacks household structure
+and demographic coverage. Quantile regression forests \citep{meinshausen2006quantile} predict the
+tax variables on the CPS from the PUF, imputing variables in sequence so that later variables
+condition on earlier imputed values. The pipeline draws additional variables from other surveys
+where the CPS is thin, including rent and real-estate tax, asset and net-worth components, and
+selected income items. \tbc[exact source and variable list for this build]
+
+Each imputation step adds information, and several add variants of the same household. Combined with
+geographic assignment, these steps expand the candidate universe well beyond the size of the
+original survey.
+
+\subsubsection{Geographic variation}
+
+To support subnational targets, the pipeline assigns records to geographies below the level the
+survey identifies. A record can appear in more than one candidate placement, which raises the
+candidate count and gives the calibration step the freedom to match local totals.
+\tbc[geographic assignment configuration and the resulting candidate count]
+
+\subsection{Calibration targets}
+
+The target system combines aggregates from several administrative sources at the national, state,
+and district levels. This study does not calibrate to every target the pipeline could construct. It
+calibrates to a prioritized subset, and it reports that subset explicitly rather than describing it
+as a complete or maximal target set. Appendix~\ref{app:targets} lists the target families used and
+the reason for including them. The exact counts come from each experiment's run manifest rather than
+from a pipeline-wide inventory.
+
+\input{tables/target_subset}
+
+Some targets depend on programme take-up, which the pipeline draws at the record level using
+deterministic seeds, so a record's contribution to a target stays consistent with the dataset it is
+later assembled into. \tbc[uprating and cross-geography reconciliation details for this build]

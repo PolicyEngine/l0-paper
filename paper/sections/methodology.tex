@@ -1,0 +1,108 @@
+\section{Methodology}
+\label{sec:methodology}
+
+This section describes the calibration method that selects and weights records, and then the design
+of the experiment that evaluates the method as a sampler.
+
+\subsection{Selection and weighting as one optimization}
+
+The calibration matrix $\mathbf{M} \in \mathbb{R}^{m \times n}$ maps $n$ candidate records to $m$
+targets. Entry $M_{ji}$ is the contribution of candidate $i$ to target $j$: an indicator or count
+for count targets, and a simulated tax or benefit value for dollar targets. The matrix is built from
+\policyengine{} simulations evaluated under the policy rules that apply to each record's assigned
+geography, and is stored in sparse form.
+
+Given $\mathbf{M}$, the target vector $\mathbf{t}$, and a weight vector $\mathbf{w} \in \mathbb{R}^n$,
+the optimizer minimizes
+\begin{equation}
+    \mathcal{L}(\mathbf{w}, \boldsymbol{\alpha}) =
+    \frac{1}{m} \sum_{j=1}^{m}
+    \left(\frac{\hat{t}_j - t_j}{|t_j|}\right)^2 +
+    \lambda_{L_0} \sum_{i=1}^{n} \bar{z}_i +
+    \lambda_{L_2} \|\mathbf{w}\|_2^2,
+    \label{eq:loss}
+\end{equation}
+where
+\begin{equation}
+    \hat{t}_j = \sum_{i=1}^{n} M_{ji} w_i z_i.
+    \label{eq:estimate}
+\end{equation}
+The weights are parameterized in log space so the fitted weights stay positive. The gate $z_i$ is a
+Hard Concrete random variable with expected activation $\bar{z}_i$ \citep{louizos2018}. This is the
+production optimizer that jointly fits positive log-weights and gates, rather than a configuration
+that applies a gate on top of a separately fitted weight.
+
+Read as a sampler, the three terms have distinct jobs. The first is a relative calibration loss, so
+a one per cent error on a small target and on a large target count the same; it keeps the retained
+sample faithful to the targets. The second penalizes the expected number of open gates, which is the
+size of the retained sample, so $\lambda_{L_0}$ sets how aggressively the optimizer prunes records.
+The third penalizes the squared weights, so $\lambda_{L_2}$ bounds how much population mass any
+single retained record can carry. The last two terms matter separately, because an $L_0$ penalty on
+its own can reach a sparse solution that is still unusable: the optimizer could match the targets by
+placing large weights on a few retained records. The two penalties therefore act on different
+properties of the solution, $\lambda_{L_0}$ on how many records remain and $\lambda_{L_2}$ on how
+concentrated their weights become, and having both as separate knobs lets the pipeline trade off
+calibration fit, sample size, and weight stability. Appendix~\ref{app:hyperparameters} lists the full
+configuration, and Algorithm~\ref{alg:l0} gives the optimization loop.
+
+The gates and the weights are learned together: the gate decides whether a record is in the sample,
+and the weight decides how much it counts. Because both are fit against the same calibration loss,
+selection is informed by the targets: a record survives when keeping it helps match a target that
+would otherwise be missed. This is the sense in which the method is a target-informed sampler rather
+than a reweighting of a fixed random draw.
+
+\subsection{From fitted weights to a dataset}
+
+After optimization the gates are evaluated deterministically, so the retained-record count is read
+from the solution rather than chosen by a post-hoc cutoff. The retained records and their weights are
+assembled into a dataset for \policyengine{}. Appendix~\ref{app:assembly} summarizes the assembly
+step, which matters operationally but is not the object of the experiment.
+
+\subsection{Sampling experiment design}
+\label{sec:experiment_design}
+
+The experiment evaluates whether informed selection produces a better dataset than the alternative
+samplers at the same record budget. From one candidate universe and one target set, we compare four
+methods, which span where calibration enters the reduction (Section~\ref{sec:reduction_methods}):
+
+\begin{itemize}
+    \item \textbf{Informed $L_0$ sampling with Hard Concrete gates.} The method above selects records
+    and fits weights jointly at a chosen budget, set through $\lambda_{L_0}$.
+    \item \textbf{Random sampling with gradient-descent reweighting.} A random subset of the candidate
+    universe of the same size is drawn, and its weights are fit to the same targets by gradient
+    descent, using the same calibration loss without the gate term. This is the reduce-first,
+    calibrate-after baseline.
+    \item \textbf{Survey-weight sampling.} The full universe is first reweighted to the targets by
+    gradient descent, and records are then sampled with probability proportional to those weights
+    (integerisation) down to the budget. This is the calibrate-then-reduce baseline.
+    \item \textbf{Combinatorial optimisation.} Records are selected by simulated annealing to minimize
+    aggregate target error directly, without gradients. This is the discrete, gradient-free
+    counterpart to informed $L_0$ selection. \tbc[search configuration and cooling schedule]
+\end{itemize}
+
+Holding the candidate universe and the target set fixed isolates the effect of how records are
+chosen. \tbc[the record budgets compared, for example a target of 100{,}000 retained records]
+
+\subsection{Out-of-sample target evaluation}
+\label{sec:oos}
+
+A sampler can match the targets it is fit to and still generalize poorly. To test generalization,
+the design separates the targets used to fit the weights from the targets used to score the result.
+\tbc[the in-sample, out-of-sample, and fully held-out target split, pending a review of the
+evaluation and scoring tools that \microplex{} exposes] At a minimum, the comparison reports error
+on a set of targets held out of every method's fit, so the methods are compared on quantities none
+of them optimized.
+
+\subsection{Evaluation metrics}
+\label{sec:metrics}
+
+Each run reports:
+\begin{itemize}
+    \item mean, median, and maximum absolute relative error across the scored targets, reported
+    in-sample and out-of-sample;
+    \item the retained-record count and the effective sample size;
+    \item the distribution of fitted weights, including the largest weights;
+    \item runtime.
+\end{itemize}
+Errors are reported by geographic level as well as in aggregate, because a sampler can match national
+totals while missing local ones. Target counts are read from each run's manifest.

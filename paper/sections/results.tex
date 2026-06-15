@@ -1,0 +1,69 @@
+\section{Results}
+\label{sec:results}
+
+The results address the three questions from the introduction: whether informed $L_0$ selection
+beats the random, survey-weight, and combinatorial-optimisation baselines at a fixed budget, whether
+the retained sample generalizes to held-out targets, and whether the size, geography, and weight
+controls behave as intended. All numerical
+entries are placeholders pending completed runs.
+
+\subsection{Informed versus uninformed sampling}
+
+Table~\ref{tab:sampling_comparison} compares informed $L_0$ sampling with the three baseline
+samplers, random sampling with reweighting, survey-weight sampling, and combinatorial optimisation,
+at a matched record budget. The methods share the candidate universe and the target set and differ
+only in how records are selected. The comparison reports in-sample and out-of-sample error,
+the effective sample size, the spread of fitted weights, and runtime.
+
+\input{tables/sampling_comparison}
+
+The central hypothesis is that informed selection lowers calibration error at a fixed budget,
+because the gates retain records the targets actually constrain. The out-of-sample columns test
+whether that advantage reflects generalization rather than a tighter fit to the in-sample targets.
+
+\begin{figure}[ht]
+    \centering
+    \fbox{\parbox{0.9\textwidth}{\centering\textit{[Accuracy-versus-budget frontier to be
+    generated]}}}
+    \caption{Out-of-sample calibration error against the retained-record budget, for informed $L_0$
+    sampling and for random sampling with reweighting.}
+    \label{fig:budget_frontier}
+\end{figure}
+
+\subsection{The size, geography, and weight controls}
+
+A second question is whether the framework gives usable control over the output. Increasing
+$\lambda_{L_0}$ should reduce the retained-record count, and increasing $\lambda_{L_2}$ should reduce
+the largest fitted weights, without either change destroying the calibration fit.
+Figure~\ref{fig:operability} shows those sweeps.
+
+\begin{figure}[ht]
+    \centering
+    \fbox{\parbox{0.9\textwidth}{\centering\textit{[Control sweeps to be generated]}}}
+    \caption{Effect of the two penalties. Increasing $\lambda_{L_0}$ reduces the retained-record
+    count; increasing $\lambda_{L_2}$ reduces the largest fitted weights. Each panel also reports the
+    calibration error along the sweep.}
+    \label{fig:operability}
+\end{figure}
+
+\subsection{Accuracy by geography}
+
+Table~\ref{tab:calibration_accuracy} reports absolute relative error by geographic level for the
+informed $L_0$ run, since a sampler can match national totals while leaving local totals off.
+
+\input{tables/calibration_accuracy}
+
+\subsection{Sparsity and convergence}
+
+The sparsity penalty produces exact zeros, so the dataset size is an output of the optimization
+rather than a post-processing choice. Figure~\ref{fig:convergence} plots calibration error over
+training epochs for the reported $L_0$ runs.
+
+\begin{figure}[ht]
+    \centering
+    \fbox{\parbox{0.9\textwidth}{\centering\textit{[Convergence curves to be generated from
+    calibration logs]}}}
+    \caption{Convergence diagnostics for representative $L_0$ runs, reporting calibration loss over
+    epochs.}
+    \label{fig:convergence}
+\end{figure}

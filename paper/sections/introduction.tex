@@ -1,0 +1,60 @@
+\section{Introduction}
+\label{sec:introduction}
+
+Tax-benefit microsimulation models apply policy rules to household microdata to estimate fiscal and
+distributional effects. At the national level, that usually means starting from a survey such as the
+Current Population Survey (CPS), improving measured incomes and program participation, and adjusting
+weights so the dataset reproduces known aggregates. Subnational work is harder. Analysts often want
+estimates for states, congressional districts, or local areas, but the underlying survey was not
+designed to support all of those geographies at once.
+
+That gap matters in practice, because many reforms are proposed, administered, or debated below the
+national level. A state tax proposal needs state-specific incomes, filing patterns, and benefit
+participation. District-level analysis needs those same outcomes to aggregate correctly within each
+district while staying consistent with state and national totals. A usable subnational dataset
+therefore has to satisfy a hierarchical calibration problem rather than a single national one.
+
+One way to meet that demand is to build a dataset that carries as much of the relevant variation as
+possible. A pipeline can combine several surveys and administrative files, impute the variables that
+any single source lacks, and place records across geographies so that local detail is present in the
+candidate data. Each of these steps adds records, or variants of records. The result is a candidate
+dataset rich enough to represent the variation the targets describe, and large enough that it
+becomes expensive to store, calibrate, and simulate. A file with millions of active records supports
+detailed subnational work but is slow to run; a much smaller file is easier to ship, but only if the
+loss in fidelity is acceptable.
+
+The candidate dataset therefore has to be reduced to a size that can be shipped and simulated, and
+this paper treats that reduction as a sampling problem: given the large candidate universe and a
+fixed record budget, which records should the final dataset keep, and what weight should each kept
+record carry? The simplest answer is to draw a random subset
+and reweight it to the targets. We study an alternative in which the selection itself is informed by
+the targets.
+
+The method is $L_0$ regularization with the Hard Concrete relaxation \citep{louizos2018}. Each
+candidate record receives a gate that the optimizer can drive toward zero or one, and the expected
+number of open gates enters the objective directly. Minimizing calibration error and the gate count
+together selects a subset of records and fits their weights in one optimization. The retained-record
+count becomes a quantity the optimizer controls rather than a fixed draw, and a separate weight
+penalty limits how concentrated the fitted weights can become. In practical terms, one framework can
+target a compact national dataset or a larger subnational dataset, at a chosen record budget, with
+weights kept inside a usable range.
+
+We build this pipeline on \microplex{}, a declarative engine for microsimulation dataset
+construction. \microplex{} provides the engine and the execution logic, and takes the country-specific content as
+a country pack of inputs, so the data sources, the imputation model, the geographic assignment, and
+the calibration method are configuration choices rather than fixed code. The paper describes the engine at the level
+needed to follow the calibration step, and then describes the configuration used here.
+
+The empirical question is whether informed selection earns its added complexity. We ask three
+things. First, does $L_0$ selection reproduce the targets more accurately than random sampling,
+survey-weight sampling, and combinatorial optimisation at the same record budget? Second, does the retained sample generalize, in the sense that it also
+matches targets held out of the fit? Third, does the framework give usable control over the size of
+the output, the geographic level it focuses on, and the magnitude of the fitted weights?
+
+The rest of the paper follows that structure. Section~\ref{sec:background} places the work in the
+literature on spatial microsimulation, survey calibration, and sparse selection.
+Section~\ref{sec:data} describes the base microdata, the \microplex{} pipeline, and the
+administrative targets. Section~\ref{sec:methodology} presents the calibration method and the
+sampling experiment design. Section~\ref{sec:results} reports the comparison against the sampling
+baselines and the behaviour of the size, geography, and weight controls. Section~\ref{sec:discussion}
+interprets those results and discusses their limits, and Section~\ref{sec:conclusion} concludes.

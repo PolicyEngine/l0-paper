@@ -1,0 +1,24 @@
+\begin{abstract}
+Subnational microsimulation needs survey microdata that reproduce administrative totals across
+nested geographies while staying usable inside a policy model. A pipeline built for fidelity can
+combine many data sources and add record-level variation, which produces a candidate dataset that
+is rich enough to represent the variation the targets describe and also large enough to be expensive
+to store, calibrate, and simulate. That dataset has to be reduced to a workable size, and the
+question is which records to keep.
+
+We study this reduction as a sampling problem. Using $L_0$ regularization with the Hard Concrete
+relaxation of \citet{louizos2018}, the method jointly selects which records to retain and assigns
+each retained record a positive weight. Selection responds to the calibration targets rather than
+being drawn at random, so the retained sample is informed by the quantities the dataset must
+reproduce. The gates make the retained-record count an explicit optimization variable, so one
+framework can produce a compact national dataset or a larger subnational one, while a separate
+penalty bounds how large individual weights can grow. Because the optimization that selects records
+also calibrates them, the reduced dataset continues to match its targets.
+
+We implement the pipeline on \microplex{}, a declarative engine for microsimulation dataset
+construction, and compare informed $L_0$ sampling with random sampling followed by gradient-descent
+reweighting at matched record budgets. \tbc[empirical comparison pending benchmark runs]
+\end{abstract}
+
+\noindent\textbf{Keywords:} microsimulation, survey calibration, subsampling, $L_0$ regularization,
+subnational analysis

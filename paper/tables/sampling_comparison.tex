@@ -1,0 +1,23 @@
+\begin{table}[ht]
+\centering
+{\tablefont
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{p{0.2\textwidth}rrrrrr}
+\toprule
+Method & Budget & In-sample mean ARE (\%) & Out-of-sample mean ARE (\%) & ESS & Max weight & Runtime \\
+\midrule
+Informed $L_0$ & \tbc & \tbc & \tbc & \tbc & \tbc & \tbc \\
+Random + reweight & \tbc & \tbc & \tbc & \tbc & \tbc & \tbc \\
+Survey-weight sampling & \tbc & \tbc & \tbc & \tbc & \tbc & \tbc \\
+Combinatorial optim.\ & \tbc & \tbc & \tbc & \tbc & \tbc & \tbc \\
+\bottomrule
+\end{tabular}
+}
+}
+\caption{Informed $L_0$ sampling against random and stratified sampling at a matched record budget.
+All methods share the candidate universe and the target set. ARE is absolute relative error across
+the scored targets; ESS is the effective sample size.}
+\label{tab:sampling_comparison}
+\tablenote{The record budget and target counts are read from each run's manifest. Out-of-sample
+columns score targets held out of every method's fit.}
+\end{table}

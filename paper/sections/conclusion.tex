@@ -1,0 +1,19 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+This paper studies $L_0$ regularization as a way to subsample a large microsimulation dataset down to
+a usable size. The problem arises because a pipeline built for fidelity combines many sources and
+adds record-level variation, which produces more candidate records than a deployable dataset can
+hold. The reduction to a fixed budget is a sampling choice, and the paper treats it as one.
+
+The method uses Hard Concrete gates to select records and fit their weights in one optimization, with
+selection driven by the calibration targets. That makes the retained-record count an explicit control
+and keeps the reduced dataset calibrated to its targets. We compare the method against random
+sampling with reweighting at matched budgets and report how the size, geography, and weight controls
+behave.
+
+The contribution is therefore twofold: a target-informed sampling method, and an open pipeline, built
+on \microplex{}, that makes the method a configuration choice other projects can reuse. Future work
+can benchmark the sampler against classical calibration estimators and convex sparse methods,
+formalize the out-of-sample target evaluation, and extend the geographic detail of the candidate
+universe.

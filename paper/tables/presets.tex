@@ -1,0 +1,18 @@
+\begin{table}[ht]
+\centering
+{\tablefont
+\begin{tabular}{llrl}
+\toprule
+Preset & $\lambda_{L_0}$ & Retained records & Use case \\
+\midrule
+Compact & larger & \tbc & National, interactive simulation \\
+Detailed & smaller & \tbc & Subnational policy analysis \\
+\bottomrule
+\end{tabular}
+}
+\caption{Sample-size presets. A larger $\lambda_{L_0}$ prunes more records and yields a smaller
+dataset; a smaller $\lambda_{L_0}$ retains more. The presets differ only in $\lambda_{L_0}$ and the
+epoch count; all other hyperparameters are shared (Appendix~\ref{app:hyperparameters}).}
+\label{tab:presets}
+\tablenote{Retained-record counts are build-specific and reported with each run.}
+\end{table}
