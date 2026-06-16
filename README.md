@@ -3,6 +3,9 @@
 Paper and experiment workspace for PolicyEngine's L0 dataset-reduction work on
 the Populace stack.
 
+This work is being prepared for presentation at IMA 2026 (Brussels),
+July 1, 2026: <https://ima26.brussels/blog/presentation_maria_juaristi/>.
+
 The initial manuscript narrative was built in relation to the old
 `PolicyEngine/policyengine-us-data` paper draft. It remains LaTeX-first for now, 
 with a Quarto entry point that includes the existing section files so the paper 
@@ -63,6 +66,6 @@ latexmk -pdf main.tex
 ## Compatibility Direction
 
 New code in this repository should target active Populace APIs rather than
-archived `microplex` or `microplex-us` internals. The imported manuscript still
-contains old Microplex wording in places; updating the narrative to Populace is
-part of the next migration pass.
+archived `microplex` or `microplex-us` internals. The manuscript narrative has
+been migrated from the old Microplex wording to Populace; the archived
+repositories are referenced only as a migration reference.

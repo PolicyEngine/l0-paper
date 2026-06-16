@@ -6,7 +6,7 @@
 \title{$L_0$ regularization for subnational microsimulation calibration}
 
 \author{
-    Maria Juaristi\thanks{PolicyEngine. Corresponding author: maria@policyengine.org} \and
+    María Juaristi\thanks{PolicyEngine. Corresponding author: maria@policyengine.org} \and
     Nikhil Woodruff\footnotemark[1] \and
     Ben Ogorek\footnotemark[1] \and
     Max Ghenis\footnotemark[1]
@@ -34,11 +34,11 @@ The authors declare no conflict of interest.
 This work was supported by PolicyEngine, a 501(c)(3) nonprofit organization.
 
 \section*{Data and code availability}
-The construction pipeline is defined as a declarative content package in
-\texttt{microplex-us} and executed by the \microplex{} engine, both open source at
-\url{https://github.com/PolicyEngine/microplex-us} and
-\url{https://github.com/PolicyEngine/microplex}. The \texttt{l0-python} PyTorch package that
-implements the Hard Concrete optimizer is available at
+The paper and experiment code are at \url{https://github.com/PolicyEngine/l0-paper}. The construction
+and calibration pipeline is implemented in \populace{}, PolicyEngine's microsimulation data stack,
+open source at \url{https://github.com/PolicyEngine/populace}; earlier prototype code in the archived
+\texttt{microplex} and \texttt{microplex-us} repositories is retained only as a migration reference.
+The \texttt{l0-python} PyTorch package that implements the Hard Concrete optimizer is available at
 \url{https://github.com/PolicyEngine/l0-python}. Calibrated datasets are hosted on HuggingFace at
 \texttt{policyengine/policyengine-us-data}. The IRS Public Use File requires a restricted-access
 agreement; all other data sources are publicly available.

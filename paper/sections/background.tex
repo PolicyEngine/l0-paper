@@ -19,7 +19,7 @@ The spatial microsimulation literature supplies further context. \citet{williams
 approaches that search over record assignments area by area. \citet{tanton2011} and
 \citet{lovelace2016} discuss reweighting for small-area estimation and policy analysis. These
 methods usually target one geographic layer at a time, whereas our setting asks one weighted dataset
-to reproduce district, state, and national targets together.
+to reproduce state and national targets together.
 
 \subsection{Survey calibration}
 
@@ -40,7 +40,7 @@ geography: district totals should sum to state totals, which should sum to natio
 uprating and reconciliation. At production scale this yields a large target system with substantial
 collinearity across rows.
 
-\subsection{Classical calibration estimators}
+\subsection{Calibration estimators}
 
 Two classical methods are the standard references for this kind of problem. Generalized regression
 (GREG) minimizes a distance from the initial weights subject to the calibration equations
@@ -56,11 +56,26 @@ avoids matrix inversion, which makes it a natural choice for count-style margins
 is built for categorical margins rather than arbitrary linear dollar targets and does not encode a
 large mixed hierarchical system in one pass.
 
+A third approach treats calibration as an optimization problem to be solved numerically. The two
+methods above are special cases of one problem: \citet{deville1992} define the calibrated weights as
+those closest to the design weights, under a chosen distance, subject to reproducing the targets,
+with GREG and raking the closed-form solutions for particular distances. When the target system is
+large, collinear, mixes count and dollar constraints, and restricts weights to be positive, the
+classical Newton and Lagrange solvers become hard to apply or fail to converge, which motivates
+minimizing the calibration objective directly. \citet{espuny2018} do so with a global optimization
+that enforces the range restrictions on the weights explicitly, and minimum-distance reweighting has
+long been used this way in tax microsimulation \citep{creedy2003}. At the scale of an enhanced
+microdata file the practical solver is stochastic gradient descent: the weights are parameterized to
+stay positive, typically in log space; a loss measures the relative discrepancy between the weighted
+estimates and the targets; and an optimizer such as Adam \citep{kingma2015} minimizes it, which
+scales to thousands of mixed, hierarchical targets without inverting a matrix. \citet{woodruff2024}
+calibrate PolicyEngine's enhanced CPS in exactly this way.
+
 These estimators answer a calibration question rather than a sampling one: given a fixed set of
 records, they find weights that match the targets. The method studied here selects records and fits
-weights at the same time. A direct head-to-head benchmark of the sampling method against GREG and
-IPF is left to future work; here they serve as the calibration context the sampler is expected to
-respect.
+weights at the same time, extending the gradient-based calibration just described with explicit
+record selection. A direct head-to-head benchmark of the sampling method against GREG and IPF is left
+to future work; here they serve as the calibration context the sampler is expected to respect.
 
 \subsection{Reducing microdata by selecting records}
 \label{sec:reduction_methods}
@@ -173,14 +188,14 @@ variable rather than the result of a separate thresholding step.
 
 \subsection{Microsimulation dataset engines}
 
-\citet{woodruff2024} developed a national pipeline that imputes tax variables from the IRS Public Use
-File onto CPS records and then calibrates the dataset to national administrative totals. That
-calibration is itself a gradient-descent reweighting: it adjusts the household weights with the Adam
-optimizer under a relative-error loss, and it regularizes with dropout rather than an explicit
-selection mechanism. The present work keeps that gradient-based calibration but replaces dropout with
-the $L_0$ and Hard Concrete gates of the previous subsection, so that record selection becomes
-explicit and the fitted weights are exactly sparse. It also runs on \microplex{}, an engine that
-expresses dataset construction as a declarative specification. The data sources, the imputation model, the geographic assignment,
-and the calibration method are configuration the engine reads rather than fixed steps, which lets
-the same engine support different countries and different methodological choices.
-Section~\ref{sec:data} describes the engine and the configuration used here.
+Beyond the calibration step itself, \citet{woodruff2024} embed that gradient-based reweighting in a
+national pipeline that first imputes tax variables from the IRS Public Use File onto CPS records, and
+that regularizes the weights with dropout rather than an explicit selection mechanism. The present
+work keeps the gradient-based calibration but replaces dropout with the $L_0$ and Hard Concrete gates
+of the previous subsection, so that record selection becomes explicit and the fitted weights are
+exactly sparse. It also runs within \populace{}, a pipeline that
+expresses dataset construction as a sequence of modular stages over a shared data structure. The data
+sources, the imputation model, the geographic assignment, and the calibration method are
+interchangeable components rather than fixed steps, which lets the same pipeline support different
+countries and different methodological choices.
+Section~\ref{sec:data} describes the pipeline and the configuration used here.
