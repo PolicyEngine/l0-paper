@@ -15,9 +15,10 @@ framework can produce a compact national dataset or a larger subnational one, wh
 penalty bounds how large individual weights can grow. Because the optimization that selects records
 also calibrates them, the reduced dataset continues to match its targets.
 
-We implement the pipeline on \microplex{}, a declarative engine for microsimulation dataset
-construction, and compare informed $L_0$ sampling with random sampling followed by gradient-descent
-reweighting at matched record budgets. \tbc[empirical comparison pending benchmark runs]
+We implement the calibration step within \populace{}, PolicyEngine's pipeline for microsimulation
+dataset construction, and present a proof of concept on its current target surface, comparing
+informed $L_0$ sampling with random sampling followed by gradient-descent reweighting at matched
+record budgets. \tbc[empirical comparison pending benchmark runs]
 \end{abstract}
 
 \noindent\textbf{Keywords:} microsimulation, survey calibration, subsampling, $L_0$ regularization,

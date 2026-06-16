@@ -39,11 +39,19 @@ penalty limits how concentrated the fitted weights can become. In practical term
 target a compact national dataset or a larger subnational dataset, at a chosen record budget, with
 weights kept inside a usable range.
 
-We build this pipeline on \microplex{}, a declarative engine for microsimulation dataset
-construction. \microplex{} provides the engine and the execution logic, and takes the country-specific content as
-a country pack of inputs, so the data sources, the imputation model, the geographic assignment, and
-the calibration method are configuration choices rather than fixed code. The paper describes the engine at the level
-needed to follow the calibration step, and then describes the configuration used here.
+We situate this work in \populace{} \citep{populace2026}, PolicyEngine's pipeline for microsimulation
+dataset construction. \populace{} passes a single weighted data structure through a sequence of
+modular stages---source loading, imputation, geographic assignment, target construction, and
+calibration---each implemented as a separate package operating on that shared structure. Because the
+stages are modular, the data sources, the imputation model, the geographic assignment, and the
+calibration method are interchangeable components rather than fixed code, and the calibration step
+studied here is one such component. The paper describes the pipeline at the level needed to follow the
+calibration step, and then describes the configuration used here.
+
+This paper is a proof of concept on \populace{}'s current target surface: it asks whether
+$L_0$ selection with Hard Concrete gates can produce a sparse, calibrated dataset on the targets
+\populace{} assembles today. Local-area and subnational calibration are the production motivation for
+the method and a future application of it, rather than results this paper presents.
 
 The empirical question is whether informed selection earns its added complexity. We ask three
 things. First, does $L_0$ selection reproduce the targets more accurately than random sampling,
@@ -53,7 +61,7 @@ the output, the geographic level it focuses on, and the magnitude of the fitted 
 
 The rest of the paper follows that structure. Section~\ref{sec:background} places the work in the
 literature on spatial microsimulation, survey calibration, and sparse selection.
-Section~\ref{sec:data} describes the base microdata, the \microplex{} pipeline, and the
+Section~\ref{sec:data} describes the base microdata, the \populace{} pipeline, and the
 administrative targets. Section~\ref{sec:methodology} presents the calibration method and the
 sampling experiment design. Section~\ref{sec:results} reports the comparison against the sampling
 baselines and the behaviour of the size, geography, and weight controls. Section~\ref{sec:discussion}

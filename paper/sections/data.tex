@@ -3,33 +3,30 @@
 
 The calibration problem is defined by two inputs: the household microdata that form the candidate
 universe, and the administrative targets the calibrated dataset must reproduce. This section
-describes how \microplex{} assembles the candidate microdata and how this study selects its targets.
+describes how \populace{} assembles the candidate microdata and how this study selects its targets.
 The pipeline is the harness that produces the calibration problem; it is not itself the object of
 evaluation.
 
-\subsection{Microplex as a construction engine}
+\subsection{Populace as a construction pipeline}
 
-\microplex{} builds a microsimulation dataset from a declarative specification. The specification
-names the data sources, the variables each source contributes, the rule for combining sources into
-one record universe, the imputation graph that fills missing variables, the geographic assignment,
-the calibration targets, and the calibration method. \microplex{} provides the engine and all
-execution logic: it reads that specification and runs the stages in order, while the country-specific
-content is supplied as a country pack that becomes the input to the engine's functions rather than
-living in the engine itself. The engine validates the specification before running and pins external
-inputs by content hash, so a build is reproducible.
+\populace{} builds a microsimulation dataset by passing a single weighted data structure---a sampling
+frame holding the records, their weights, and provenance---through a sequence of stages. Each stage is
+a separate package that reads and writes that shared frame: it loads the source surveys, combines them
+into one record universe, imputes missing variables, assigns geography, constructs the calibration
+targets, and calibrates. Because every stage operates on the same structure, the imputation model and
+the calibration method are components that can be swapped without rewriting the pipeline, and the
+method studied here is one calibration option among those the pipeline supports.
 
-Because each stage is declared rather than hard-coded, the imputation model and the calibration
-method are interchangeable: a different imputation model, or a different calibration routine, can be
-substituted without rewriting the pipeline, and the method studied here is one calibration option
-among several the engine supports. The same declarative structure makes the steps that enlarge the
-candidate universe explicit, namely combining sources, imputing onto more records, and creating
-geographic variants, so the size of the candidate dataset is a property of the configuration rather
-than an accident of the code.
+This modular structure makes the steps that enlarge the candidate universe explicit, namely combining
+sources, imputing onto more records, and creating geographic variants, so the size of the candidate
+dataset is a property of the configuration rather than an accident of the code. \populace{} follows a
+generate-big-then-prune design: these middle stages grow the candidate universe well beyond the
+original survey, and calibration prunes it back to a deployable budget.
 
 \begin{figure}[ht]
     \centering
     \fbox{\parbox{0.9\textwidth}{\centering\textit{[Pipeline overview diagram to be inserted]}}}
-    \caption{\microplex{} pipeline for the configuration used in this paper: load and combine the
+    \caption{\populace{} pipeline for the configuration used in this paper: load and combine the
     source surveys, impute missing variables, assign geography, construct the calibration targets,
     and calibrate. The calibration stage is the focus of this paper.}
     \label{fig:pipeline}
