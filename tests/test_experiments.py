@@ -1,0 +1,227 @@
+"""Offline end-to-end tests for the experiment harness.
+
+These exercise both calibration conditions, scoring, holdout splitting, artifact
+summaries, and table rendering on the toy Populace frame -- no PolicyEngine-US and
+no network, so CI stays fast and self-contained. The real-data path is driven by
+``experiments/run_poc.py``.
+"""
+
+import json
+
+import numpy as np
+
+from l0_paper.experiments import artifacts, holdout, metrics, tables
+from l0_paper.experiments.conditions import (
+    run_dense_then_sample,
+    run_l0,
+    weighted_sample,
+)
+from l0_paper.populace_smoke import make_toy_frame, make_toy_targets
+from populace.calibrate import Target, TargetSet
+
+
+def _toy():
+    frame, truths = make_toy_frame(seed=0, n=120)
+    return frame, make_toy_targets(truths)
+
+
+def test_split_targets_partitions():
+    _, targets = _toy()
+    fit, held = holdout.split_targets(targets, holdout_frac=0.34, seed=0)
+    assert len(fit) + len(held) == len(targets)
+    assert len(held) >= 1
+    # Deterministic for a fixed seed.
+    _, held2 = holdout.split_targets(targets, holdout_frac=0.34, seed=0)
+    assert [t.name for t in held] == [t.name for t in held2]
+
+
+def test_run_l0_prunes_at_budget():
+    frame, targets = _toy()
+    result = run_l0(
+        frame, targets, target_records=60, seed=0, epochs=120,
+        learning_rate=0.15, mass="free",
+    )
+    assert result.method == "informed_l0"
+    assert result.n_selected < result.n_records
+    assert result.l0_lambda > 0
+    assert result.final_loss < result.initial_loss
+    # l2_lambda is recorded for reporting even though Populace applies no L2 term.
+    assert result.l2_lambda == 0.0
+    assert hasattr(result, "max_weight_ratio")
+
+
+def test_dense_then_sample_matched_budget():
+    frame, targets = _toy()
+    result = run_dense_then_sample(
+        frame, targets, n_sample=40, seed=0, epochs=120,
+        learning_rate=0.15, mass="free",
+    )
+    assert result.method == "dense_sample"
+    assert result.l0_lambda == 0.0
+    assert result.n_selected == 40  # distinct draws without replacement
+    assert result.sampling["n_sample"] == 40
+
+
+def test_weighted_sample_conserves_mass():
+    weights = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    full = weighted_sample(weights, 3, seed=0)
+    assert np.count_nonzero(full) == 3
+    assert np.isclose(full.sum(), weights.sum())
+
+
+def test_metrics_score_reports_are_and_weights():
+    frame, targets = _toy()
+    result = run_l0(
+        frame, targets, target_records=60, seed=0, epochs=120,
+        learning_rate=0.15, mass="free",
+    )
+    scored = metrics.score(frame, result.weights, targets, label="in_sample")
+    assert scored["n_targets"] == len(targets)
+    assert scored["ess"] > 0
+    assert scored["max_weight"] > 0
+    assert "national" in scored["by_geography"]
+    assert scored["by_family"]  # toy targets group into at least one family
+    assert scored["mean_are"] is not None
+
+
+def test_zero_value_targets_report_absolute_error_not_are():
+    frame, _targets = _toy()
+    weights = frame.weights_for("household").values
+    zero_target = Target(
+        name="zero_renters",
+        entity="household",
+        aggregation="sum",
+        measure="is_renter",
+        value=0.0,
+    )
+    zero_targets = TargetSet((zero_target,))
+
+    scored = metrics.score(frame, weights, zero_targets)
+    rows = metrics.target_diagnostics(frame, weights, zero_targets)
+
+    assert scored["n_zero_value_targets"] == 1
+    assert scored["mean_are"] is None
+    assert scored["zero_value_absolute_error"]["n"] == 1
+    assert scored["zero_value_absolute_error"]["max_absolute_error"] > 0
+    assert rows[0]["relative_error"] is None
+    assert rows[0]["absolute_relative_error"] is None
+
+
+def test_dense_sample_npz_uses_sampled_weight_diagnostics(tmp_path):
+    frame, targets = _toy()
+    fit, held = holdout.split_targets(targets, holdout_frac=0.34, seed=1)
+    result = run_dense_then_sample(
+        frame,
+        fit,
+        n_sample=20,
+        seed=0,
+        epochs=60,
+        learning_rate=0.15,
+        mass="free",
+    )
+
+    path = artifacts.save_method_npz(
+        tmp_path / "dense_sample.npz",
+        result,
+        frame=frame,
+        fit_targets=fit,
+        holdout_targets=held,
+    )
+
+    expected_sampled = np.asarray(
+        [target.achieved_value(frame, result.weights) for target in fit],
+        dtype=np.float64,
+    )
+    dense_pre_sample = np.asarray(
+        [
+            target.achieved_value(frame, result.calibration_result.weights)
+            for target in fit
+        ],
+        dtype=np.float64,
+    )
+    with np.load(path, allow_pickle=True) as payload:
+        assert np.allclose(payload["fit_achieved_values"], expected_sampled)
+        assert np.allclose(payload["final_estimates"], expected_sampled)
+        assert not np.allclose(payload["fit_achieved_values"], dense_pre_sample)
+        assert len(payload["holdout_target_names"]) == len(held)
+
+
+def test_manifest_is_strict_json_with_empty_holdout(tmp_path):
+    frame, targets = _toy()
+    result = run_l0(
+        frame,
+        targets,
+        target_records=60,
+        seed=0,
+        epochs=60,
+        learning_rate=0.15,
+        mass="free",
+    )
+    in_sample = metrics.score(frame, result.weights, targets)
+    out_of_sample = metrics.score(frame, result.weights, [], label="out_of_sample")
+    summary = artifacts.method_summary(
+        result,
+        in_sample,
+        out_of_sample,
+        artifact_path=tmp_path / "informed_l0.npz",
+    )
+    path = artifacts.write_run_manifest(
+        tmp_path / "run_manifest.json",
+        {"methods": {"informed_l0": summary}},
+    )
+    text = path.read_text()
+
+    def fail_constant(value):
+        raise AssertionError(f"non-standard JSON constant emitted: {value}")
+
+    loaded = json.loads(text, parse_constant=fail_constant)
+    assert "NaN" not in text
+    assert loaded["methods"]["informed_l0"]["out_of_sample"]["mean_are"] is None
+
+
+def test_method_summary_and_table_rendering():
+    frame, targets = _toy()
+    fit, held = holdout.split_targets(targets, holdout_frac=0.34, seed=1)
+
+    l0 = run_l0(frame, fit, target_records=60, seed=0, epochs=120, learning_rate=0.15, mass="free")
+    dense = run_dense_then_sample(
+        frame, fit, n_sample=l0.n_selected, seed=0, epochs=120, learning_rate=0.15, mass="free",
+    )
+
+    summaries = {}
+    for run in (l0, dense):
+        in_sample = metrics.score(frame, run.weights, fit)
+        out_of_sample = metrics.score(frame, run.weights, held)
+        summary = artifacts.method_summary(
+            run,
+            in_sample,
+            out_of_sample,
+            artifact_path=f"/tmp/{run.method}.npz",
+        )
+        assert summary["retained_records"] == run.n_selected
+        assert summary["artifact_path"] == f"/tmp/{run.method}.npz"
+        assert "solver_initial_loss" in summary
+        assert "solver_final_loss" in summary
+        assert "initial_loss" not in summary
+        assert "final_loss" not in summary
+        summaries[run.method] = summary
+
+    # method_summary records the weight-concentration controls.
+    assert "l2_lambda" in summaries["informed_l0"]
+    assert "max_weight_ratio" in summaries["informed_l0"]
+    assert summaries["informed_l0"]["solver_options"]["budget_iters"] == 10
+    assert summaries["informed_l0"]["solver_options"]["target_loss_cap"] == 10.0
+
+    geo = metrics.score(frame, l0.weights, targets)
+    sampling_tex = tables.render_sampling_comparison(summaries, budget=l0.n_selected)
+    accuracy_tex = tables.render_calibration_accuracy(geo)
+    family_tex = tables.render_calibration_accuracy_by_family(geo)
+
+    assert "Informed $L_0$" in sampling_tex
+    assert "Survey-weight sampling" in sampling_tex
+    assert "Combinatorial optim. &" in sampling_tex
+    assert "Combinatorial optim.\\ &" not in sampling_tex
+    assert "\\tbc" in sampling_tex  # the two unimplemented methods stay placeholders
+    assert "Target family" in family_tex
+    assert "Geographic level" in accuracy_tex
+    assert "All scored targets" in accuracy_tex

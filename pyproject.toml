@@ -16,6 +16,12 @@ dependencies = [
 [project.optional-dependencies]
 data = [
     "populace-data>=0.1,<0.2",
+    # Heavy real-data path: the rules engine that materializes calibration target
+    # measures, plus the HuggingFace base-frame download and H5 I/O. Matches the
+    # version Populace pins. The toy/CI smoke tests do not need these.
+    "policyengine-us>=1.729,<2",
+    "huggingface-hub>=0.20",
+    "h5py>=3",
 ]
 
 [dependency-groups]

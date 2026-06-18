@@ -5,6 +5,7 @@
 
 # Python local state
 /.venv/
+.DS_Store
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -16,6 +17,7 @@ build/
 # Experiment outputs
 artifacts/
 benchmarks/results/
+experiments/runs/
 results/
 
 # LaTeX auxiliary files
