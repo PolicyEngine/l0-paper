@@ -28,7 +28,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from l0_paper.experiments import artifacts, holdout, metrics, tables
-from l0_paper.experiments.conditions import run_dense_then_sample, run_l0
+from l0_paper.experiments.conditions import (
+    run_dense_then_sample,
+    run_l0,
+    run_random_then_reweight,
+)
 from l0_paper.precalibration import (
     MANIFEST_JSON,
     build_precalibration_dataset,
@@ -150,9 +154,13 @@ def main() -> None:
     )
     print(f"Dense + sampling retained {dense.n_selected:,} records.")
 
-    # 5. Score both, in- and out-of-sample.
+    # 4c. Condition C: uniform random subset + gradient-descent reweight (matched budget).
+    random_rw = run_random_then_reweight(frame, fit_targets, n_sample=budget, **optimizer)
+    print(f"Random + reweight retained {random_rw.n_selected:,} records.")
+
+    # 5. Score each, in- and out-of-sample.
     summaries: dict[str, dict] = {}
-    for run in (l0, dense):
+    for run in (l0, dense, random_rw):
         in_sample = metrics.score(frame, run.weights, fit_targets, label="in_sample")
         out_of_sample = metrics.score(frame, run.weights, holdout_targets, label="out_of_sample")
         artifact_path = artifacts.save_method_npz(

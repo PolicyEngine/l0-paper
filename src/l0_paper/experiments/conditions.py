@@ -24,9 +24,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from populace.calibrate import calibrate
 from populace.calibrate.target import TargetSet
+from populace.frame import MassChange, Weights
 
 # Default Hard-Concrete / optimizer hyperparameters (Appendix table in the paper).
 DEFAULT_EPOCHS = 256
@@ -252,5 +254,125 @@ def run_dense_then_sample(
             "sample_seed": int(draw_seed),
             "replace": bool(replace),
             "reweight": reweight,
+        },
+    )
+
+
+def run_random_then_reweight(
+    frame,
+    fit_targets: TargetSet,
+    *,
+    weight_entity: str = "household",
+    n_sample: int,
+    seed: int = 0,
+    epochs: int = DEFAULT_EPOCHS,
+    learning_rate: float = DEFAULT_LEARNING_RATE,
+    mass: str = "free",
+    max_weight_ratio: float | None = None,
+    l2_lambda: float = 0.0,
+    target_loss_weights: np.ndarray | None = None,
+    target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
+    sample_seed: int | None = None,
+) -> RunResult:
+    """Condition C: uniform random subset, then gradient-descent reweight.
+
+    The paper's reduce-first "Random + reweight" baseline. Selection is *not*
+    informed by the targets: an equal-probability random subset of ``n_sample``
+    records is drawn first, and only that subset is reweighted to the targets by a
+    dense calibration (gates off). The subset is first weighted up to the full
+    population total, so the reweighting targets the same population as the
+    full-frame conditions A and B.
+    """
+    start = time.perf_counter()
+    id_column = f"{weight_entity}_id"
+    membership_column = f"person_{weight_entity}_id"
+    ids = frame.table(weight_entity)[id_column].to_numpy()
+    n_full = ids.size
+    n_sample = min(n_sample, n_full)
+    draw_seed = seed if sample_seed is None else sample_seed
+    rng = np.random.default_rng(draw_seed)
+    chosen = rng.choice(ids, size=n_sample, replace=False)
+
+    person_mask = (
+        frame.table("person")[membership_column].isin(set(chosen.tolist())).to_numpy()
+    )
+    subset = frame.select(person_mask)
+
+    # Weight the random subset up to the full population total before reweighting,
+    # so it represents the same population as the full-frame conditions.
+    full_total = float(frame.weights_for(weight_entity).values.sum())
+    subset_weights = subset.weights_for(weight_entity)
+    subset_total = float(subset_weights.values.sum())
+    n_subset = len(subset_weights.values)
+    uniform = np.full(n_subset, full_total / n_subset, dtype=np.float64)
+    subset = subset.with_weights(
+        weight_entity,
+        Weights(values=uniform, kind=subset_weights.kind),
+        mass=MassChange(
+            factor=full_total / subset_total,
+            reason="weight uniform random subset up to population total",
+        ),
+    )
+
+    result = calibrate(
+        subset,
+        fit_targets,
+        weight_entity=weight_entity,
+        epochs=epochs,
+        learning_rate=learning_rate,
+        mass=mass,
+        max_weight_ratio=max_weight_ratio,
+        target_records=None,
+        l0_lambda=0.0,
+        seed=seed,
+        target_loss_weights=target_loss_weights,
+        target_loss_cap=target_loss_cap,
+    )
+
+    # Map the subset's fitted weights back onto the full candidate universe
+    # (zeros for unselected records), keyed by id so Frame.select reordering is safe.
+    subset_ids = subset.table(weight_entity)[id_column].to_numpy()
+
+    def _to_full(values: np.ndarray) -> np.ndarray:
+        return (
+            pd.Series(np.asarray(values, dtype=np.float64), index=subset_ids)
+            .reindex(ids)
+            .fillna(0.0)
+            .to_numpy()
+        )
+
+    weights = _to_full(result.weights)
+    runtime = time.perf_counter() - start
+    options = dict(result.options)
+    options.update(
+        {
+            "l2_lambda": l2_lambda,
+            "target_loss_cap": target_loss_cap,
+            "gates": "off",
+            "selection": "uniform_random",
+        }
+    )
+
+    return RunResult(
+        method="random_reweight",
+        weight_entity=weight_entity,
+        weights=weights,
+        initial_weights=_to_full(result.initial_weights),
+        n_records=n_full,
+        n_selected=int(np.count_nonzero(weights)),
+        l0_lambda=0.0,
+        l2_lambda=float(l2_lambda),
+        max_weight_ratio=max_weight_ratio,
+        loss_trajectory=np.asarray(result.loss_trajectory, dtype=np.float64),
+        initial_loss=float(result.initial_loss),
+        final_loss=float(result.final_loss),
+        runtime_s=runtime,
+        seed=seed,
+        options=options,
+        calibration_result=result,
+        sampling={
+            "strategy": "uniform_random",
+            "n_sample": int(n_sample),
+            "sample_seed": int(draw_seed),
         },
     )

@@ -20,15 +20,24 @@ frozen artifact.
 
 [`l0_paper.experiments.conditions`](../src/l0_paper/experiments/conditions.py):
 
-1. **Informed L0** — `calibrate(..., target_records=N)` jointly fits weights and
-   Hard-Concrete gates to retain ~N records.
-2. **Dense + weighted sampling** — `calibrate(..., target_records=None,
-   l0_lambda=0.0)` fits all weights, then draws a probability-proportional sample
-   of `n = ` (the L0 retained count) and reweights it (integerisation).
+1. **Informed L0** (`run_l0`) — `calibrate(..., target_records=N)` jointly fits
+   weights and Hard-Concrete gates to retain ~N records.
+2. **Survey-weight sampling** (`run_dense_then_sample`) — calibrate-then-reduce:
+   `calibrate(..., target_records=None, l0_lambda=0.0)` fits all weights, then
+   draws a **probability-proportional (PPS) random** sample of `n = ` (the L0
+   retained count), each record drawn with probability ∝ its fitted weight, and
+   reweights it (integerisation). This is the paper's method 3 — it is *not*
+   "keep the largest weights" (that would be deterministic top-weight selection).
+3. **Random + reweight** (`run_random_then_reweight`) — reduce-first: draw a
+   **uniform** (equal-probability) random subset of size `n`, weight it up to the
+   population total, then reweight just that subset to the targets by gradient
+   descent (gates off). The paper's method 2.
 
-Both return a full-length weight vector (zero for unretained records), scored
+All three return a full-length weight vector (zero for unretained records), scored
 in- and out-of-sample by [`metrics`](../src/l0_paper/experiments/metrics.py) with
-targets held out via [`holdout`](../src/l0_paper/experiments/holdout.py).
+targets held out via [`holdout`](../src/l0_paper/experiments/holdout.py). The
+sampling-comparison table now fills three of its four method rows (combinatorial
+optimisation remains `\tbc`).
 
 ## Getting the Ledger facts file
 

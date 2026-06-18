@@ -57,7 +57,7 @@ def render_sampling_comparison(summaries: dict[str, dict[str, Any]], budget: int
     rows = "\n".join(
         [
             row("Informed $L_0$", "informed_l0"),
-            row("Random + reweight", None),
+            row("Random + reweight", "random_reweight"),
             row("Survey-weight sampling", "dense_sample"),
             row("Combinatorial optim.", None),
         ]

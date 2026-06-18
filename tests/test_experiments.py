@@ -14,6 +14,7 @@ from l0_paper.experiments import artifacts, holdout, metrics, tables
 from l0_paper.experiments.conditions import (
     run_dense_then_sample,
     run_l0,
+    run_random_then_reweight,
     weighted_sample,
 )
 from l0_paper.populace_smoke import make_toy_frame, make_toy_targets
@@ -60,6 +61,37 @@ def test_dense_then_sample_matched_budget():
     assert result.l0_lambda == 0.0
     assert result.n_selected == 40  # distinct draws without replacement
     assert result.sampling["n_sample"] == 40
+
+
+def test_run_random_then_reweight_matched_budget():
+    frame, targets = _toy()
+    result = run_random_then_reweight(
+        frame, targets, n_sample=40, seed=0, epochs=120,
+        learning_rate=0.15, mass="free",
+    )
+    assert result.method == "random_reweight"
+    assert result.l0_lambda == 0.0
+    assert result.n_records == 120
+    assert result.weights.size == 120
+    assert result.n_selected == 40  # uniform subset of distinct households
+    assert result.sampling["strategy"] == "uniform_random"
+    assert result.sampling["n_sample"] == 40
+
+
+def test_random_reweight_fills_table_row():
+    frame, targets = _toy()
+    fit, held = holdout.split_targets(targets, holdout_frac=0.34, seed=1)
+    run = run_random_then_reweight(
+        frame, fit, n_sample=40, seed=0, epochs=80, learning_rate=0.15, mass="free",
+    )
+    summary = artifacts.method_summary(
+        run,
+        metrics.score(frame, run.weights, fit),
+        metrics.score(frame, run.weights, held),
+    )
+    tex = tables.render_sampling_comparison({"random_reweight": summary}, budget=40)
+    random_row = next(line for line in tex.splitlines() if line.startswith("Random + reweight"))
+    assert "\\tbc" not in random_row
 
 
 def test_weighted_sample_conserves_mass():
