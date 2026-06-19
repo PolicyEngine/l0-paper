@@ -257,3 +257,63 @@ def test_method_summary_and_table_rendering():
     assert "Target family" in family_tex
     assert "Geographic level" in accuracy_tex
     assert "All scored targets" in accuracy_tex
+
+
+def test_drop_unsupported_filter_targets():
+    """The harness drops only targets the materializer flags, keeps the rest."""
+    from l0_paper.precalibration import _drop_unsupported_filter_targets
+
+    class _Spec:
+        def __init__(self, name):
+            self.name = name
+
+    class _StubDriver:
+        # Stands in for the Populace driver's classifier (the supported-key check
+        # itself lives in populace and is exercised there); here we only verify the
+        # harness drops exactly the flagged targets and reports them.
+        @staticmethod
+        def _unsupported_ledger_filter_metadata(specs):
+            return {"soi/4_3/agi": ["ledger_filter_income_percentile_range"]}
+
+    specs = (_Spec("soi/1_1/total"), _Spec("soi/4_3/agi"), _Spec("jct/salt"))
+    kept, dropped = _drop_unsupported_filter_targets(_StubDriver, specs)
+    assert [s.name for s in kept] == ["soi/1_1/total", "jct/salt"]
+    assert dropped == {"soi/4_3/agi": ["ledger_filter_income_percentile_range"]}
+
+    class _CleanDriver:
+        @staticmethod
+        def _unsupported_ledger_filter_metadata(specs):
+            return {}
+
+    kept2, dropped2 = _drop_unsupported_filter_targets(_CleanDriver, specs)
+    assert kept2 == specs
+    assert dropped2 == {}
+
+
+def test_absolute_path_preserves_h5_symlink_suffix(tmp_path):
+    """PolicyEngine requires the visible H5 path suffix, not the resolved blob."""
+    from l0_paper.precalibration import _absolute_path
+
+    blob = tmp_path / "f0af25192d6c8a7efc2638da2bd8ec4278b066a"
+    blob.write_text("placeholder")
+    link = tmp_path / "populace_us_2024.h5"
+    link.symlink_to(blob)
+
+    assert _absolute_path(link) == link
+    assert _absolute_path(link).suffix == ".h5"
+    assert _absolute_path(link).resolve().suffix == ""
+
+
+def test_validation_only_families_tracks_populace():
+    """Returns Populace-classified validation-only families (cbo), never hard ones."""
+    fams = holdout.validation_only_families()
+    # cbo income/revenue projections are validation-only per Populace's source coverage.
+    assert "cbo" in fams
+    # Hard-target families must never be excluded from the fit.
+    assert fams.isdisjoint({"irs_soi", "census_population", "jct", "cms_aca", "ssa"})
+    # The set is gated by Populace: every returned family is currently classified
+    # validation-only there (translated from the coverage family ids).
+    from populace.build.us.source_coverage import validation_only_family_ids
+
+    classified = set(validation_only_family_ids())
+    assert "cbo_income_revenue_projection" in classified

@@ -72,13 +72,43 @@ Target values come from a PolicyEngine Ledger `consumer_facts.jsonl`, produced b
 > `--allow-partial-facts` (dynamic references only; for wiring/smoke, not paper
 > numbers).
 
+### Complete target set — off-year sources (`build_targets.py`)
+
+`arch build-bundle --year 2023` looks up each source's artifact at the literal
+`--year`, so it **silently skips** sources pinned to another year — including
+`jct-tax-expenditures-2024` (required by the production registry compile), the
+census ACS age (`s0101`) / SNAP-by-district (`s2201`) sources, and the CMS ACA
+enrollment sources. The complete target set is reproduced by
+[`build_targets.py`](build_targets.py), which builds those off-year sources at
+their pinned years (`build-suite`) and merges them into the base bundle:
+
+```bash
+# Cheap: reuse a default-source bundle (the output of `arch build-bundle --year 2023`):
+uv run python experiments/build_targets.py --base /path/to/base/consumer_facts.jsonl
+# From scratch (slow base build; needs arch-data source access / ARCH_SOURCE_ARTIFACT_FETCH=1):
+uv run python experiments/build_targets.py --build-base --year 2023
+```
+
+It writes the full target set to `data/targets/consumer_facts.jsonl` plus a
+`targets_manifest.json` provenance record. Every off-year artifact is local in
+arch-data's `db/` package, so the merge needs no network or R2 auth.
+
+A few granular IRS SOI targets (table 2.5 `qualifying_children`, table 4.3
+`income_percentile_range`) carry filter dimensions the US fiscal materializer
+cannot compute. They stay in the bundle file; `build_precalibration_dataset`
+drops them **at materialization time** (recorded in the pre-calibration manifest
+as `unsupported_filter_dropped`). Pass `--keep-unsupported-targets` to
+`run_poc.py` to retain them and let materialization abort loudly instead.
+
 ## Running
 
 ```bash
 # Full proof-of-concept (downloads the published base frame from HuggingFace,
-# runs the PolicyEngine-US materialization, then both conditions):
+# runs the PolicyEngine-US materialization, then all conditions). Uses the
+# complete in-repo target set; no --allow-partial-facts needed:
 uv run python experiments/run_poc.py \
-    --ledger-facts /path/to/consumer_facts.jsonl \
+    --ledger-facts data/targets/consumer_facts.jsonl \
+    --period 2024 \
     --out experiments/runs/poc \
     --subsample 20000 --target-records 5000 --seed 0
 
@@ -116,6 +146,15 @@ Holdout note: Populace itself uses **rotated k-fold** holdout
 out-of-sample reform validation. The current `holdout.split_targets` is a single
 fixed split; `split_registry_by_family` does family-level holdout. Aligning fully
 with rotated k-fold is a planned follow-up.
+
+**Validation-only families** (Populace's `source_coverage` marks e.g. `cbo`
+income/revenue projections as diagnostics, not contemporaneous calibration
+targets) are **excluded from every method's fit by default** and scored
+out-of-sample only — `holdout.validation_only_families()` derives the set from
+Populace's live classification (`validation_only_family_ids()`), so it tracks
+Populace rather than a hardcoded list. Pass `--fit-validation-only` to include
+them in the fit. The set is recorded per run in
+`run_manifest.json` → `target_split.validation_only_families`.
 
 ## Full candidate universe (generate-big build)
 

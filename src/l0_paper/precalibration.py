@@ -60,6 +60,20 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _absolute_path(path: str | Path) -> Path:
+    """Return an absolute path without dereferencing symlinks.
+
+    HuggingFace dataset snapshots expose ``*.h5`` files as symlinks to content
+    blobs whose filenames are hashes. PolicyEngine-US validates the path suffix,
+    so resolving that symlink turns a valid ``populace_us_2024.h5`` path into an
+    invalid blob path with no ``.h5`` extension.
+    """
+    expanded = Path(path).expanduser()
+    if expanded.is_absolute():
+        return expanded
+    return Path.cwd() / expanded
+
+
 def _populace_commit() -> str | None:
     try:
         return subprocess.run(
@@ -129,6 +143,34 @@ def _compile_registry(driver, facts, *, period: int, allow_partial: bool) -> Tar
     return compile_ledger_target_references(materialized, references, country="us")
 
 
+def _drop_unsupported_filter_targets(
+    driver, target_specs: tuple
+) -> tuple[tuple, dict[str, list[str]]]:
+    """Drop targets the US fiscal materializer cannot compute, before calibration.
+
+    ``driver._materialize_target_frame`` hard-asserts (rather than silently
+    ignoring) on any ``ledger_filter*`` metadata key outside the driver's
+    ``SUPPORTED_LEDGER_FILTER_METADATA_KEYS`` -- e.g. ``income_percentile_range``
+    (IRS SOI table 4.3) or ``qualifying_children`` (table 2.5). PolicyEngine's
+    production build never feeds those tables; arch-data's *default* bundle does.
+    We remove the affected targets here so the rest of the full target set
+    materializes, and return the dropped ``{name: [keys]}`` so the reduction in
+    target surface stays auditable (it is recorded in the pre-calibration
+    manifest). This is the only place targets are removed for solver capability,
+    so reruns are deterministic.
+    """
+    unsupported = driver._unsupported_ledger_filter_metadata(target_specs)
+    if not unsupported:
+        return target_specs, {}
+    kept = tuple(
+        spec
+        for spec in target_specs
+        if str(getattr(spec, "name", "")) not in unsupported
+    )
+    dropped = {name: list(keys) for name, keys in sorted(unsupported.items())}
+    return kept, dropped
+
+
 def build_precalibration_dataset(
     *,
     ledger_facts: str | Path,
@@ -141,6 +183,7 @@ def build_precalibration_dataset(
     subsample: int | None = None,
     subsample_seed: int = 0,
     allow_partial_facts: bool = False,
+    drop_unsupported_filters: bool = True,
 ) -> PreCalibrationArtifact:
     """Build the pre-calibration ``(frame, registry)`` and freeze it to ``out_dir``.
 
@@ -158,6 +201,10 @@ def build_precalibration_dataset(
             ``"household"``.
         aca_seed: Seed for the ACA marketplace source runtime (only used when ACA
             targets are present).
+        drop_unsupported_filters: When True (default), drop targets whose
+            ``ledger_filter`` metadata the US fiscal materializer cannot compute
+            (recorded in the manifest) instead of letting materialization abort.
+            See :func:`_drop_unsupported_filter_targets`.
 
     Returns:
         A :class:`PreCalibrationArtifact` with the in-memory frame and registry.
@@ -172,7 +219,19 @@ def build_precalibration_dataset(
     )
     target_specs = registry.specs
 
-    base_path = Path(base_h5).expanduser().resolve() if base_h5 else driver._download_base_h5()
+    dropped_unsupported: dict[str, list[str]] = {}
+    if drop_unsupported_filters:
+        target_specs, dropped_unsupported = _drop_unsupported_filter_targets(
+            driver, target_specs
+        )
+        if dropped_unsupported:
+            print(
+                f"Dropping {len(dropped_unsupported)} target(s) with unsupported "
+                "ledger_filter metadata before materialization: "
+                + ", ".join(sorted(dropped_unsupported))
+            )
+
+    base_path = _absolute_path(base_h5) if base_h5 else driver._download_base_h5()
     frame = driver._load_frame(base_path)
 
     if subsample is not None:
@@ -212,6 +271,9 @@ def build_precalibration_dataset(
         "subsample": subsample,
         "subsample_seed": subsample_seed if subsample is not None else None,
         "allow_partial_facts": allow_partial_facts,
+        "drop_unsupported_filters": drop_unsupported_filters,
+        "unsupported_filter_dropped_count": len(dropped_unsupported),
+        "unsupported_filter_dropped": dropped_unsupported,
         "base_h5_path": str(base_path),
         "base_h5_sha256": _sha256(base_path),
         "ledger_facts_path": str(facts_path),

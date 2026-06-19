@@ -62,6 +62,16 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Tolerate a facts file that doesn't cover every reference (smoke only).",
     )
+    parser.add_argument(
+        "--keep-unsupported-targets",
+        action="store_true",
+        help=(
+            "Keep targets whose ledger_filter metadata the US materializer cannot "
+            "compute (e.g. SOI income-percentile / qualifying-children slices). "
+            "Default drops them before materialization and records them in the "
+            "pre-calibration manifest."
+        ),
+    )
 
     # Optimizer.
     parser.add_argument("--epochs", type=int, default=256)
@@ -72,6 +82,15 @@ def _parse_args() -> argparse.Namespace:
     # Out-of-sample split.
     parser.add_argument("--holdout-frac", type=float, default=0.2)
     parser.add_argument("--holdout-families", nargs="*", default=None)
+    parser.add_argument(
+        "--fit-validation-only",
+        action="store_true",
+        help=(
+            "Include Populace's validation-only families (e.g. cbo income/revenue "
+            "projections) in the calibration fit. Default excludes them from the "
+            "fit and scores them out-of-sample only."
+        ),
+    )
 
     # Sampling.
     parser.add_argument("--sample-reweight", choices=("equal_mass", "renorm_kept"), default="equal_mass")
@@ -106,23 +125,35 @@ def main() -> None:
             subsample=args.subsample,
             subsample_seed=args.seed,
             allow_partial_facts=args.allow_partial_facts,
+            drop_unsupported_filters=not args.keep_unsupported_targets,
         )
         precal_dir = artifact.directory
         frame, registry = artifact.frame, artifact.registry
         precal_manifest = artifact.manifest
 
-    # 2. Hold targets out of every method's fit.
+    # 2. Hold targets out of every method's fit. Populace's validation-only families
+    #    (e.g. cbo) are diagnostics, not fit targets, so they are always excluded from
+    #    the fit (scored out-of-sample only) unless --fit-validation-only is set.
     all_targets = registry.to_target_set()
-    if args.holdout_families:
+    validation_only = (
+        set() if args.fit_validation_only else holdout.validation_only_families(registry)
+    )
+    holdout_families = sorted(set(args.holdout_families or ()) | validation_only)
+    if holdout_families:
         fit_targets, holdout_targets = holdout.split_registry_by_family(
             registry,
-            holdout_families=args.holdout_families,
+            holdout_families=holdout_families,
             extra_holdout_frac=args.holdout_frac,
             seed=args.seed,
         )
     else:
         fit_targets, holdout_targets = holdout.split_targets(
             all_targets, holdout_frac=args.holdout_frac, seed=args.seed
+        )
+    if validation_only:
+        print(
+            "Validation-only families excluded from the fit (scored out-of-sample "
+            f"only): {sorted(validation_only)}"
         )
     print(
         f"Targets: {len(all_targets)} total -> {len(fit_targets)} fit, "
@@ -202,6 +233,7 @@ def main() -> None:
             "fit": len(fit_targets),
             "holdout": len(holdout_targets),
             "holdout_families": args.holdout_families,
+            "validation_only_families": sorted(validation_only),
             "holdout_frac": args.holdout_frac,
         },
         "budget": budget,

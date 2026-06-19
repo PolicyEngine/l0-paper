@@ -20,6 +20,9 @@ benchmarks/results/
 experiments/runs/
 results/
 
+# Generated calibration-target bundles (regenerate with experiments/build_targets.py)
+/data/
+
 # LaTeX auxiliary files
 *.aux
 *.lof
