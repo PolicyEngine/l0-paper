@@ -23,6 +23,11 @@ data = [
     "huggingface-hub>=0.20",
     "h5py>=3",
 ]
+viz = [
+    # Figures for the budget sweep. matplotlib exports vector PDF/SVG for LaTeX
+    # natively (no headless-Chrome dependency); see experiments/figures.py.
+    "matplotlib>=3.8",
+]
 
 [dependency-groups]
 dev = [

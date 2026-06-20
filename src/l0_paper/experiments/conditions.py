@@ -184,25 +184,27 @@ def weighted_sample(
     return full
 
 
-def run_dense_then_sample(
+def calibrate_dense(
     frame,
     fit_targets: TargetSet,
     *,
     weight_entity: str = "household",
-    n_sample: int,
     seed: int = 0,
     epochs: int = DEFAULT_EPOCHS,
     learning_rate: float = DEFAULT_LEARNING_RATE,
     mass: str = "conserve",
     max_weight_ratio: float | None = None,
-    l2_lambda: float = 0.0,
     target_loss_weights: np.ndarray | None = None,
     target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
-    sample_seed: int | None = None,
-    replace: bool = False,
-    reweight: str = "equal_mass",
-) -> RunResult:
-    """Condition B: dense calibration (gates off), then weighted random sampling."""
+) -> tuple[Any, float]:
+    """Dense calibration (gates off); returns ``(calibration_result, runtime_s)``.
+
+    The dense fit does not depend on the sample size, so a budget sweep fits it
+    **once per seed** and draws many matched-budget samples from it with
+    :func:`sample_from_dense` -- far cheaper than re-fitting the full frame at
+    every budget. :func:`run_dense_then_sample` composes the two for the
+    single-run path.
+    """
     start = time.perf_counter()
     dense = calibrate(
         frame,
@@ -218,11 +220,35 @@ def run_dense_then_sample(
         target_loss_weights=target_loss_weights,
         target_loss_cap=target_loss_cap,
     )
+    return dense, time.perf_counter() - start
+
+
+def sample_from_dense(
+    dense: Any,
+    *,
+    weight_entity: str = "household",
+    n_sample: int,
+    seed: int = 0,
+    max_weight_ratio: float | None = None,
+    l2_lambda: float = 0.0,
+    target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
+    sample_seed: int | None = None,
+    replace: bool = False,
+    reweight: str = "equal_mass",
+    dense_runtime: float = 0.0,
+) -> RunResult:
+    """Build a ``dense_sample`` :class:`RunResult` from a cached dense fit.
+
+    ``dense_runtime`` is folded into the reported ``runtime_s`` so the survey-weight
+    sampling cost reflects the full fit-then-sample pipeline even when the dense
+    fit is amortized across budgets.
+    """
+    start = time.perf_counter()
     draw_seed = seed if sample_seed is None else sample_seed
     sampled = weighted_sample(
         dense.weights, n_sample, seed=draw_seed, replace=replace, reweight=reweight
     )
-    runtime = time.perf_counter() - start
+    runtime = dense_runtime + (time.perf_counter() - start)
     options = dict(dense.options)
     options.update(
         {
@@ -255,6 +281,52 @@ def run_dense_then_sample(
             "replace": bool(replace),
             "reweight": reweight,
         },
+    )
+
+
+def run_dense_then_sample(
+    frame,
+    fit_targets: TargetSet,
+    *,
+    weight_entity: str = "household",
+    n_sample: int,
+    seed: int = 0,
+    epochs: int = DEFAULT_EPOCHS,
+    learning_rate: float = DEFAULT_LEARNING_RATE,
+    mass: str = "conserve",
+    max_weight_ratio: float | None = None,
+    l2_lambda: float = 0.0,
+    target_loss_weights: np.ndarray | None = None,
+    target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
+    sample_seed: int | None = None,
+    replace: bool = False,
+    reweight: str = "equal_mass",
+) -> RunResult:
+    """Condition B: dense calibration (gates off), then weighted random sampling."""
+    dense, dense_runtime = calibrate_dense(
+        frame,
+        fit_targets,
+        weight_entity=weight_entity,
+        seed=seed,
+        epochs=epochs,
+        learning_rate=learning_rate,
+        mass=mass,
+        max_weight_ratio=max_weight_ratio,
+        target_loss_weights=target_loss_weights,
+        target_loss_cap=target_loss_cap,
+    )
+    return sample_from_dense(
+        dense,
+        weight_entity=weight_entity,
+        n_sample=n_sample,
+        seed=seed,
+        max_weight_ratio=max_weight_ratio,
+        l2_lambda=l2_lambda,
+        target_loss_cap=target_loss_cap,
+        sample_seed=sample_seed,
+        replace=replace,
+        reweight=reweight,
+        dense_runtime=dense_runtime,
     )
 
 

@@ -8,15 +8,20 @@ no network, so CI stays fast and self-contained. The real-data path is driven by
 
 import importlib.util
 import json
+from collections import defaultdict
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
+import pandas as pd
 
-from l0_paper.experiments import artifacts, holdout, metrics, tables
+from l0_paper.experiments import aggregate, artifacts, holdout, metrics, tables
 from l0_paper.experiments.conditions import (
+    calibrate_dense,
     run_dense_then_sample,
     run_l0,
     run_random_then_reweight,
+    sample_from_dense,
     weighted_sample,
 )
 from l0_paper.populace_smoke import make_toy_frame, make_toy_targets
@@ -36,6 +41,22 @@ def test_split_targets_partitions():
     # Deterministic for a fixed seed.
     _, held2 = holdout.split_targets(targets, holdout_frac=0.34, seed=0)
     assert [t.name for t in held] == [t.name for t in held2]
+
+
+def test_split_registry_by_family_rejects_unknown_family():
+    import pytest
+
+    _, targets = _toy()
+    target_list = list(targets)
+    registry = SimpleNamespace(
+        specs=[SimpleNamespace(family="known") for _ in target_list],
+        to_target_set=lambda: TargetSet(target_list),
+    )
+
+    with pytest.raises(ValueError, match="Unknown holdout family"):
+        holdout.split_registry_by_family(
+            registry, holdout_families=["known", "census_stc"]
+        )
 
 
 def test_run_l0_prunes_at_budget():
@@ -378,3 +399,292 @@ def test_validation_only_families_tracks_populace():
 
     classified = set(validation_only_family_ids())
     assert "cbo_income_revenue_projection" in classified
+
+
+# --- Amplified sweep: family-grouped folds ------------------------------------
+
+
+def test_deal_families_into_folds_is_leak_free_and_covers():
+    # One dominant family plus several small ones (the real shape).
+    families = ["soi"] * 10 + ["pep"] * 5 + ["snap"] * 3 + ["jct"] * 2 + ["cbo"] * 1
+    folds = holdout.deal_families_into_folds(families, n_folds=3, seed=0)
+
+    covered = sorted(i for fold in folds for i in fold)
+    assert covered == list(range(len(families)))  # partition, no gaps/overlap
+
+    # Every family's targets land in exactly one fold (no within-family leakage).
+    fold_of = {i: fi for fi, fold in enumerate(folds) for i in fold}
+    folds_per_family: dict[str, set[int]] = defaultdict(set)
+    for i, family in enumerate(families):
+        folds_per_family[family].add(fold_of[i])
+    assert all(len(folds) == 1 for folds in folds_per_family.values())
+
+
+def test_deal_families_into_folds_balances_and_is_deterministic():
+    families = [f for fam in ("a", "b", "c", "d", "e", "f") for f in (fam, fam)]  # 6x2
+    folds = holdout.deal_families_into_folds(families, n_folds=3, seed=0, balance_by="target_count")
+    assert sorted(len(fold) for fold in folds) == [4, 4, 4]  # evenly balanced
+    # Deterministic for a fixed seed.
+    again = holdout.deal_families_into_folds(families, n_folds=3, seed=0, balance_by="target_count")
+    assert folds == again
+
+
+def test_deal_families_into_folds_rejects_too_many_folds():
+    import pytest
+
+    with pytest.raises(ValueError):
+        holdout.deal_families_into_folds(["a", "a", "b"], n_folds=3)  # only 2 families
+
+
+def test_family_grouped_folds_excludes_validation_only_and_rotates():
+    families = ["soi", "soi", "soi", "pep", "pep", "jct", "jct", "cbo", "cbo", "snap"]
+    targets = [
+        Target(name=f"{fam}_{i}", entity="household", aggregation="sum",
+                measure="is_renter", value=1.0)
+        for i, fam in enumerate(families)
+    ]
+    registry = SimpleNamespace(
+        specs=[SimpleNamespace(family=fam) for fam in families],
+        to_target_set=lambda: TargetSet(targets),
+    )
+    name_family = {t.name: fam for t, fam in zip(targets, families, strict=True)}
+
+    folds = holdout.family_grouped_folds(registry, n_folds=2, seed=0)
+    assert len(folds) == 2
+
+    held_in_fold: dict[str, set[int]] = defaultdict(set)
+    for fi, (fit, held) in enumerate(folds):
+        fit_families = [name_family[t.name] for t in fit]
+        assert "cbo" not in fit_families  # validation-only never fit
+        for t in held:
+            held_in_fold[name_family[t.name]].add(fi)
+
+    # cbo (validation-only) is held out of every fold; each rotatable family once.
+    assert held_in_fold["cbo"] == {0, 1}
+    for family in ("soi", "pep", "jct", "snap"):
+        assert len(held_in_fold[family]) == 1
+
+
+# --- Amplified sweep: dense-calibration caching --------------------------------
+
+
+def test_calibrate_dense_then_sample_matches_run_dense_then_sample():
+    """The cached dense fit + sample reproduces the single-shot path exactly."""
+    frame, targets = _toy()
+    direct = run_dense_then_sample(
+        frame, targets, n_sample=40, seed=0, epochs=80, learning_rate=0.15, mass="free",
+    )
+    dense, _runtime = calibrate_dense(
+        frame, targets, seed=0, epochs=80, learning_rate=0.15, mass="free",
+    )
+    cached = sample_from_dense(dense, n_sample=40, seed=0)
+
+    assert np.allclose(direct.weights, cached.weights)
+    assert direct.n_selected == cached.n_selected
+    assert direct.method == cached.method == "dense_sample"
+
+
+# --- Amplified sweep: aggregation + statistics ---------------------------------
+
+
+def _synthetic_long_rows():
+    rows: list[dict] = []
+    # informed_l0 lower in/out error than random_reweight at both budgets.
+    for method, base in (("informed_l0", 0.10), ("random_reweight", 0.12)):
+        for budget in (1000, 2000):
+            for seed in (0, 1, 2):
+                in_stats = {
+                    "mean_are": base, "median_are": base * 0.5, "max_are": base * 3, "n": 100,
+                    "by_family": {"soi": {"mean_are": base, "median_are": base, "max_are": base, "n": 80},
+                                  "snap": {"mean_are": base * 2, "median_are": base, "max_are": base * 4, "n": 20}},
+                    "by_geography": {"national": {"mean_are": base, "median_are": base, "max_are": base, "n": 10}},
+                    "ess": 500.0, "max_weight": 1000.0, "n_selected": budget,
+                    "sum_weight": 1e6, "mean_weight": 2.0,
+                    "p50_weight": 1.0, "p90_weight": 2.0, "p99_weight": 3.0,
+                }
+                # Small per-seed jitter keeps the L0-vs-random difference negative
+                # with low (non-zero) variance, so across 3 seeds the paired CI
+                # excludes zero and the t-test has something to chew on.
+                bump = 0.0005 if method == "informed_l0" else 0.001
+                out_stats = {**in_stats, "mean_are": base + 0.05 + bump * seed}
+                run = SimpleNamespace(runtime_s=10.0 * (1 if method == "informed_l0" else 0.1),
+                                      l0_lambda=1e-3, final_loss=0.5)
+                rows.extend(aggregate.rows_from_run(
+                    method=method, seed=seed, budget_requested=budget, budget_achieved=budget - 5,
+                    holdout_type="fixed_family", fold=-1,
+                    in_sample=in_stats, out_of_sample=out_stats, run=run,
+                ))
+    return rows
+
+
+def _synthetic_rotation_rows():
+    rows: list[dict] = []
+    # Validation-only CBO appears in every fold and should be excluded from the
+    # rotated-family aggregate; rot_a and rot_b should each count once per seed.
+    for seed, offset in ((0, 0.0), (1, 0.10), (2, 0.20)):
+        for fold, family, family_n, family_are in (
+            (0, "rot_a", 10, 0.10 + offset),
+            (1, "rot_b", 30, 0.30 + offset),
+        ):
+            out_stats = {
+                "mean_are": 0.99,  # ignored by rotation_seed_scores
+                "median_are": 0.99,
+                "max_are": 0.99,
+                "n": family_n + 5,
+                "by_family": {
+                    family: {
+                        "mean_are": family_are,
+                        "median_are": family_are,
+                        "max_are": family_are,
+                        "n": family_n,
+                    },
+                    "cbo": {
+                        "mean_are": 0.90,
+                        "median_are": 0.90,
+                        "max_are": 0.90,
+                        "n": 5,
+                    },
+                },
+                "by_geography": {},
+            }
+            in_stats = {
+                "mean_are": 0.05,
+                "median_are": 0.05,
+                "max_are": 0.05,
+                "n": 10,
+                "by_family": {},
+                "by_geography": {},
+                "ess": 100.0,
+                "max_weight": 10.0,
+                "n_selected": 1000,
+                "sum_weight": 1.0,
+                "mean_weight": 1.0,
+                "p50_weight": 1.0,
+                "p90_weight": 1.0,
+                "p99_weight": 1.0,
+            }
+            rows.extend(aggregate.rows_from_run(
+                method="informed_l0",
+                seed=seed,
+                budget_requested=1000,
+                budget_achieved=995 + fold,
+                holdout_type="rotation",
+                fold=fold,
+                in_sample=in_stats,
+                out_of_sample=out_stats,
+                run=SimpleNamespace(runtime_s=1.0, l0_lambda=1e-3, final_loss=0.1),
+            ))
+    return rows
+
+
+def test_rows_from_run_emit_overall_family_geo_and_run_rows():
+    rows = aggregate.rows_from_run(
+        method="informed_l0", seed=0, budget_requested=1000, budget_achieved=995,
+        holdout_type="fixed_family", fold=-1,
+        in_sample={"mean_are": 0.1, "median_are": 0.05, "max_are": 0.3, "n": 10,
+                   "by_family": {"soi": {"mean_are": 0.1, "median_are": 0.1, "max_are": 0.1, "n": 8}},
+                   "by_geography": {"national": {"mean_are": 0.1, "median_are": 0.1, "max_are": 0.1, "n": 2}},
+                   "ess": 50.0, "max_weight": 100.0, "n_selected": 995,
+                   "sum_weight": 1.0, "mean_weight": 1.0, "p50_weight": 1.0, "p90_weight": 1.0, "p99_weight": 1.0},
+        out_of_sample={"mean_are": 0.2, "median_are": 0.1, "max_are": 0.4, "n": 5,
+                       "by_family": {}, "by_geography": {}},
+        run=SimpleNamespace(runtime_s=12.0, l0_lambda=1e-3, final_loss=0.4),
+    )
+    scopes = {(r["scope"], r["split"], r["metric"]) for r in rows}
+    assert ("overall", "out_of_sample", "mean_are") in scopes
+    assert ("family", "in_sample", "mean_are") in scopes
+    assert ("geography", "in_sample", "mean_are") in scopes
+    assert ("run", "na", "ess") in scopes
+    assert ("run", "na", "runtime_s") in scopes
+    assert ("run", "na", "budget_achieved") in scopes
+
+
+def test_frontier_and_paired_aggregation():
+    df = pd.DataFrame(_synthetic_long_rows())
+
+    frontier = aggregate.frontier_table(df, metric="mean_are")
+    oos = frontier[frontier["split"] == "out_of_sample"]
+    assert set(oos["method"]) == {"informed_l0", "random_reweight"}
+    assert (oos["n_seeds"] == 3).all()
+    # informed_l0 sits below random_reweight out-of-sample at every budget.
+    for budget in (1000, 2000):
+        l0 = oos[(oos["method"] == "informed_l0") & (oos["budget_requested"] == budget)]["mean_are_mean"].iloc[0]
+        rw = oos[(oos["method"] == "random_reweight") & (oos["budget_requested"] == budget)]["mean_are_mean"].iloc[0]
+        assert l0 < rw
+        assert oos["budget_achieved"].notna().all()
+
+    paired = aggregate.paired_method_diff(df)
+    assert (paired["diff_mean"] < 0).all()  # challenger (L0) better
+    assert paired["challenger_better"].all()
+    assert paired["significant"].all()  # CI excludes zero
+    assert paired["p_value"].notna().all()  # >=2 seeds with non-zero variance
+
+
+def test_paired_significance_requires_three_seeds():
+    df = pd.DataFrame(_synthetic_long_rows())
+    single_seed = df[df["seed"] == 0]
+
+    paired = aggregate.paired_method_diff(single_seed)
+
+    assert not paired.empty
+    assert not paired["significant"].any()
+    assert paired["p_value"].isna().all()
+
+
+def test_rotation_seed_scores_weight_folds_and_exclude_validation_only():
+    df = pd.DataFrame(_synthetic_rotation_rows())
+
+    seed_scores = aggregate.rotation_seed_scores(df)
+
+    assert seed_scores["n_folds"].eq(2).all()
+    assert seed_scores["n_targets"].eq(40).all()
+    assert seed_scores["excluded_validation_only_targets"].eq(10).all()
+    by_seed = seed_scores.set_index("seed")["mean_are"].to_dict()
+    assert np.isclose(by_seed[0], (0.10 * 10 + 0.30 * 30) / 40)
+    assert np.isclose(by_seed[1], (0.20 * 10 + 0.40 * 30) / 40)
+    assert np.isclose(by_seed[2], (0.30 * 10 + 0.50 * 30) / 40)
+
+    frontier = aggregate.rotation_frontier_table(df)
+    row = frontier.iloc[0]
+    assert row["n_seeds"] == 3
+    assert np.isclose(row["mean_are_mean"], np.mean([0.25, 0.35, 0.45]))
+    assert row["mean_are_lo"] < row["mean_are_mean"] < row["mean_are_hi"]
+
+
+def test_macro_average_upweights_small_families():
+    df = pd.DataFrame(_synthetic_long_rows())
+    macro = aggregate.macro_average(df, split="in_sample")
+    # informed_l0 in-sample: soi=base, snap=2*base -> macro = 1.5*base > micro mean (base).
+    l0 = macro[macro["method"] == "informed_l0"]
+    assert not l0.empty
+    assert (l0["macro_mean_are_mean"] > 0.10).all()
+
+
+def test_mean_ci_and_extreme_counts():
+    mean, lo, hi = aggregate.mean_ci([0.1, 0.2, 0.3])
+    assert lo < mean < hi
+    one = aggregate.mean_ci([0.5])
+    assert one == (0.5, 0.5, 0.5)
+
+    counts = aggregate.extreme_are_counts(
+        [{"absolute_relative_error": 0.5}, {"absolute_relative_error": 2.0},
+         {"absolute_relative_error": None}, {"absolute_relative_error": 10.0}]
+    )
+    assert counts["n_scored"] == 3.0
+    assert counts["n_are_gt_1"] == 2.0
+    assert counts["n_are_gt_5"] == 1.0
+
+
+def test_render_frontier_and_paired_tables():
+    df = pd.DataFrame(_synthetic_long_rows())
+    frontier = aggregate.frontier_table(df, metric="mean_are")
+    paired = aggregate.paired_method_diff(df)
+
+    frontier_tex = tables.render_frontier(frontier, split="out_of_sample")
+    assert "Informed $L_0$" in frontier_tex
+    assert "Retained records" in frontier_tex
+    assert "\\label{tab:frontier_out_of_sample}" in frontier_tex
+
+    paired_tex = tables.render_paired_comparison(paired)
+    assert "Random + reweight" in paired_tex
+    assert "$^\\star$" in paired_tex  # all synthetic budgets are significant

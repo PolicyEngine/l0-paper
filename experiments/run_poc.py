@@ -77,7 +77,16 @@ def _parse_args() -> argparse.Namespace:
     # Optimizer.
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
     parser.add_argument("--learning-rate", type=float, default=0.02)
-    parser.add_argument("--max-weight-ratio", type=float, default=None)
+    parser.add_argument(
+        "--max-weight-ratio",
+        type=float,
+        default=5.0,
+        help=(
+            "Informed-L0 hard weight-concentration cap (max weight / mean weight). "
+            "Default 5.0 matches the production release build. Pass a large value "
+            "(e.g. 1e9) to run L0 effectively uncapped."
+        ),
+    )
     parser.add_argument("--mass", choices=("conserve", "free"), default="conserve")
 
     # Out-of-sample split.
@@ -161,17 +170,18 @@ def main() -> None:
         f"{len(holdout_targets)} held out. Candidate records: {frame.n(args.weight_entity):,}."
     )
 
-    optimizer = dict(
+    baseline_optimizer = dict(
         weight_entity=args.weight_entity,
         seed=args.seed,
         epochs=args.epochs,
         learning_rate=args.learning_rate,
-        max_weight_ratio=args.max_weight_ratio,
+        max_weight_ratio=None,
         mass=args.mass,
     )
+    l0_optimizer = {**baseline_optimizer, "max_weight_ratio": args.max_weight_ratio}
 
     # 3. Condition A: informed L0. Its retained count sets the matched budget.
-    l0 = run_l0(frame, fit_targets, target_records=args.target_records, **optimizer)
+    l0 = run_l0(frame, fit_targets, target_records=args.target_records, **l0_optimizer)
     budget = l0.n_selected
     print(f"Informed L0 retained {budget:,} records (l0_lambda={l0.l0_lambda:.3e}).")
 
@@ -182,12 +192,14 @@ def main() -> None:
         n_sample=budget,
         reweight=args.sample_reweight,
         replace=args.sample_replace,
-        **optimizer,
+        **baseline_optimizer,
     )
     print(f"Dense + sampling retained {dense.n_selected:,} records.")
 
     # 4c. Condition C: uniform random subset + gradient-descent reweight (matched budget).
-    random_rw = run_random_then_reweight(frame, fit_targets, n_sample=budget, **optimizer)
+    random_rw = run_random_then_reweight(
+        frame, fit_targets, n_sample=budget, **baseline_optimizer
+    )
     print(f"Random + reweight retained {random_rw.n_selected:,} records.")
 
     # 5. Score each, in- and out-of-sample.

@@ -136,16 +136,17 @@ error in- and out-of-sample, ESS, retained count, weight distribution incl. the
 largest weight, runtime, broken out **by target family and by geographic level**.
 Because the US target surface is national + state only, the by-family table is
 usually the more informative cut. `l0_lambda` is recorded per run; `l2_lambda` and
-`max_weight_ratio` are recorded too — note Populace bounds weight concentration
-with the hard `max_weight_ratio` cap, not the paper's soft L2 penalty (the solver
-has no L2 term), so `l2_lambda` is reported for parity but is not applied.
+`max_weight_ratio` are recorded too. `max_weight_ratio` (default 5.0, matching the
+production release build) is used as an informed-L0 hard cap; the baseline methods
+are left uncapped and their weight concentration is reported directly. `l2_lambda`
+is reported for parity with the paper notation but is not applied by the current
+Populace solver.
 
 Holdout note: Populace itself uses **rotated k-fold** holdout
 (`populace/build/holdout.py`, every target held out once) plus **family-level
 `validation_only`** targets (excluded from the fit, scored separately) and
-out-of-sample reform validation. The current `holdout.split_targets` is a single
-fixed split; `split_registry_by_family` does family-level holdout. Aligning fully
-with rotated k-fold is a planned follow-up.
+out-of-sample reform validation. The quick POC can still use a single fixed split;
+the amplified sweep adds a family-grouped rotation panel for the robustness check.
 
 **Validation-only families** (Populace's `source_coverage` marks e.g. `cbo`
 income/revenue projections as diagnostics, not contemporaneous calibration
@@ -155,6 +156,94 @@ Populace's live classification (`validation_only_family_ids()`), so it tracks
 Populace rather than a hardcoded list. Pass `--fit-validation-only` to include
 them in the fit. The set is recorded per run in
 `run_manifest.json` → `target_split.validation_only_families`.
+
+## Amplified budget sweep
+
+`run_poc.py` runs one budget at one seed. The paper needs the **frontier**: how
+each method's accuracy moves as the record budget shrinks, with error bars and a
+leak-free out-of-sample test. [`run_sweep.py`](run_sweep.py) provides that.
+
+```bash
+uv run --extra data python experiments/run_sweep.py \
+    --reuse-precalibration experiments/runs/full-20k-cbo-state-tax-holdout/precalibration \
+    --out experiments/runs/sweep-moderate \
+    --budgets 1000 2000 5000 10000 20000 \
+    --seeds 0 1 2 \
+    --epochs 1000 \
+    --holdout-families state_income_tax \
+    --max-weight-ratio 5 \
+    --rotation-folds 5 --rotation-budget 5000
+```
+
+Design points:
+
+- **Frozen input only** (`--reuse-precalibration`): the calibration method is the
+  only thing that varies. Build the artifact once with `run_poc.py`.
+- **Matched budget**: informed L0 sets the budget at each `(seed, budget)` point;
+  `random_reweight` and `dense_sample` (survey-weight sampling) match its retained
+  count.
+- **Weight concentration**: `--max-weight-ratio` (default **5.0**, matching the
+  production release build's cap) is an informed-L0 cap. The baselines are left
+  unconstrained by that cap; their effective sample size and max weight are
+  reported as diagnostics, so any concentration is visible rather than hidden by
+  the experiment harness. Pass a large value (e.g. `1e9`) to run L0 uncapped.
+- **Dense reuse**: the dense fit for survey-weight sampling does not depend on the
+  budget, so [`conditions.calibrate_dense`](../src/l0_paper/experiments/conditions.py)
+  computes it once per seed and [`conditions.sample_from_dense`](../src/l0_paper/experiments/conditions.py)
+  resamples it at every budget.
+- **Leak-free holdout**: the frontier uses one fixed *family-level* split
+  (`split_registry_by_family`) so nested cells (a national total and its state
+  parts) never straddle the fit/holdout boundary. `--rotation-folds k` adds a
+  robustness panel at `--rotation-budget`: [`holdout.family_grouped_folds`](../src/l0_paper/experiments/holdout.py)
+  deals **whole families** into `k` balanced folds so every family is held out
+  exactly once, with no within-family leakage. Validation-only families (`cbo`)
+  are excluded from every fit and scored out-of-sample only.
+- **Fail-fast families**: `--holdout-families` must use Populace registry family
+  names (`spec.family`, e.g. `state_income_tax`, `census_population`, `ssa`). An
+  unknown name stops the run instead of silently leaving those targets in-sample.
+
+Output: one tidy **long CSV** (`metrics_long.csv`) — one row per
+`(method, seed, budget, holdout_type, fold, split, scope, metric)` — plus a
+`sweep_manifest.json`. The long table is the single source of truth.
+
+> Family naming: the holdout split keys on Populace's `spec.family`
+> (`state_income_tax`, `census_population`, `ssa`), while the per-family scoring
+> breakdown labels families by Ledger metadata (`census_stc`, `census_pep`,
+> `ssa_supplement`). Same targets, two naming layers.
+
+### Aggregation, figures, and tables
+
+[`aggregate.py`](../src/l0_paper/experiments/aggregate.py) (pure
+numpy/pandas/scipy) turns the long CSV into cross-seed statistics:
+mean ± t confidence interval (`frontier_table`), the paired same-seed
+`informed_l0` − `random_reweight` difference with a significance flag and paired
+t-test (`paired_method_diff`; stars require at least three paired seeds), the
+family macro-average that de-biases the SOI-dominated micro mean (`macro_average`),
+and per-budget run diagnostics (`run_metric`, e.g. ESS / max weight).
+
+[`figures.py`](figures.py) consumes the long CSV and writes the LaTeX tables
+(`frontier`, `paired_comparison`, rotation) and a Markdown summary — no plotting
+dependency needed — plus matplotlib figures (static PDF/PNG/SVG):
+
+```bash
+uv run --extra viz python experiments/figures.py \
+    --sweep experiments/runs/sweep-moderate --paper-figures
+```
+
+- **F1** frontier — out-of-sample mean & median ARE vs retained records (seed bands).
+- **F2** usability — effective sample size and max weight vs budget.
+- **F3** generalization gap — out-of-sample minus in-sample mean ARE.
+- **F4** by-family ARE at the anchor budget (rotation holdout when present).
+- **F5** cost–accuracy — runtime vs out-of-sample mean ARE.
+
+Matplotlib is imported lazily, so without the `viz` extra the tables and summary
+are still written and the figures are skipped with a note.
+
+Rotation-panel uncertainty is summarized conservatively. The reporting script
+first collapses every seed's folds into one target-weighted rotated-family score,
+then computes the interval across seeds. Validation-only families such as `cbo`
+are excluded from that rotated-family aggregate because they appear in every fold;
+they remain available in the by-family diagnostics.
 
 ## Full candidate universe (generate-big build)
 

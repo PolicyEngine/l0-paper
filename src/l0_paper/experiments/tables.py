@@ -10,7 +10,17 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import pandas as pd
+
+SWEEP_METHOD_LABELS = {
+    "informed_l0": r"Informed $L_0$",
+    "random_reweight": "Random + reweight",
+    "dense_sample": "Survey-weight sampling",
+}
+SWEEP_METHOD_ORDER = ("informed_l0", "random_reweight", "dense_sample")
 
 
 def _pct(stats: dict[str, Any], key: str = "mean_are") -> str:
@@ -193,4 +203,182 @@ def write_tables(
     paths["calibration_accuracy_by_family"].write_text(
         render_calibration_accuracy_by_family(l0_geo_score)
     )
+    return paths
+
+
+# --- Sweep tables (consume the aggregated DataFrames from aggregate.py) ---------
+
+
+def _ci_cell(mean: Any, lo: Any, hi: Any, *, scale: float = 100.0, digits: int = 1) -> str:
+    """Format ``mean [lo, hi]`` (scaled to %), or just the mean for a degenerate CI."""
+    if mean is None or (isinstance(mean, float) and math.isnan(mean)):
+        return "--"
+    m = float(mean) * scale
+    if (
+        lo is None or hi is None
+        or (isinstance(lo, float) and math.isnan(lo))
+        or (isinstance(hi, float) and math.isnan(hi))
+        or abs(float(hi) - float(lo)) < 1e-12
+    ):
+        return f"{m:.{digits}f}"
+    return f"{m:.{digits}f} {{\\scriptsize[{float(lo) * scale:.{digits}f}, {float(hi) * scale:.{digits}f}]}}"
+
+
+def render_frontier(
+    frontier_df: pd.DataFrame,
+    *,
+    metric: str = "mean_are",
+    split: str = "out_of_sample",
+    caption: str | None = None,
+    label: str | None = None,
+    tablenote: str | None = None,
+) -> str:
+    """Table: per-budget ARE (with seed CI) for each method along the frontier.
+
+    ``frontier_df`` is :func:`aggregate.frontier_table` output. One row per budget
+    (labelled by mean retained records); one column per method.
+    """
+    df = frontier_df[frontier_df["split"] == split]
+    methods = [m for m in SWEEP_METHOD_ORDER if m in set(df["method"])]
+    budgets = sorted(df["budget_requested"].unique())
+    mean_col, lo_col, hi_col = f"{metric}_mean", f"{metric}_lo", f"{metric}_hi"
+    lookup = {
+        (row["method"], int(row["budget_requested"])): row
+        for _, row in df.iterrows()
+    }
+    achieved = df.groupby("budget_requested")["budget_achieved"].mean().to_dict()
+
+    body_rows = []
+    for budget in budgets:
+        cells = []
+        for method in methods:
+            row = lookup.get((method, budget))
+            cells.append(
+                "--" if row is None
+                else _ci_cell(row[mean_col], row[lo_col], row[hi_col])
+            )
+        retained = achieved.get(budget, float("nan"))
+        body_rows.append(f"{retained:,.0f} & " + " & ".join(cells) + r" \\")
+    body = "\n".join(body_rows)
+    header = "Retained records & " + " & ".join(SWEEP_METHOD_LABELS[m] for m in methods) + r" \\"
+    col_spec = "r" * (len(methods) + 1)
+    split_label = "out-of-sample" if split == "out_of_sample" else "in-sample"
+    caption = caption or (
+        f"Mean absolute relative error ({split_label}) versus record budget, per "
+        "selection method. Cells are the cross-seed mean with a 95\\% confidence "
+        "interval in brackets. All methods share the candidate universe and the "
+        "fixed family-level holdout."
+    )
+    label = label or f"tab:frontier_{split}"
+    tablenote = tablenote or (
+        "Retained records is the cross-seed mean achieved budget; informed "
+        "$L_0$ sets the budget at each grid point and the baselines match it."
+    )
+    note = f"\\tablenote{{{tablenote}}}" if tablenote else ""
+    return rf"""\begin{{table}}[ht]
+\centering
+{{\tablefont
+\resizebox{{\textwidth}}{{!}}{{%
+\begin{{tabular}}{{{col_spec}}}
+\toprule
+{header}
+\midrule
+{body}
+\bottomrule
+\end{{tabular}}
+}}
+}}
+\caption{{{caption}}}
+\label{{{label}}}
+{note}
+\end{{table}}
+"""
+
+
+def render_paired_comparison(
+    paired_df: pd.DataFrame,
+    *,
+    challenger: str = "informed_l0",
+    baseline: str = "random_reweight",
+) -> str:
+    """Table: paired (same-seed) challenger-vs-baseline difference per budget.
+
+    ``paired_df`` is :func:`aggregate.paired_method_diff` output. A negative
+    difference (challenger lower error) with a CI excluding zero and enough paired
+    seeds is a significant win, flagged with ``$^\\star$``.
+    """
+    ch_label = SWEEP_METHOD_LABELS.get(challenger, challenger)
+    bl_label = SWEEP_METHOD_LABELS.get(baseline, baseline)
+    ch_mean_col, bl_mean_col = f"{challenger}_mean", f"{baseline}_mean"
+    rows = []
+    for _, row in paired_df.iterrows():
+        star = r"$^\star$" if row.get("significant") else ""
+        diff = _ci_cell(row["diff_mean"], row["diff_lo"], row["diff_hi"])
+        p = row.get("p_value")
+        p_str = "--" if p is None or (isinstance(p, float) and math.isnan(p)) else f"{float(p):.3f}"
+        rows.append(
+            f"{row['budget_requested']:,.0f} & {_ci_cell(row[ch_mean_col], None, None)} & "
+            f"{_ci_cell(row[bl_mean_col], None, None)} & {diff}{star} & {p_str} \\\\"
+        )
+    body = "\n".join(rows)
+    return rf"""\begin{{table}}[ht]
+\centering
+{{\tablefont
+\begin{{tabular}}{{rrrrr}}
+\toprule
+Budget & {ch_label} (\%) & {bl_label} (\%) & $\Delta$ (pp) & $p$ \\
+\midrule
+{body}
+\bottomrule
+\end{{tabular}}
+}}
+\caption{{Paired out-of-sample comparison of {ch_label} against {bl_label} at each
+budget. $\Delta$ is the cross-seed mean of the per-seed error difference (negative
+favours {ch_label}) with a 95\% confidence interval; $^\star$ marks a CI excluding
+zero with at least three paired seeds. $p$ is a paired $t$-test.}}
+\label{{tab:paired_comparison}}
+\end{{table}}
+"""
+
+
+def write_sweep_tables(
+    out_dir: str | Path,
+    *,
+    frontier_oos: pd.DataFrame,
+    frontier_in: pd.DataFrame,
+    paired: pd.DataFrame,
+    rotation_oos: pd.DataFrame | None = None,
+) -> dict[str, Path]:
+    """Write the sweep LaTeX tables into ``out_dir``; return paths by name."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = {
+        "frontier_out_of_sample": out_dir / "frontier_out_of_sample.tex",
+        "frontier_in_sample": out_dir / "frontier_in_sample.tex",
+        "paired_comparison": out_dir / "paired_comparison.tex",
+    }
+    paths["frontier_out_of_sample"].write_text(render_frontier(frontier_oos, split="out_of_sample"))
+    paths["frontier_in_sample"].write_text(render_frontier(frontier_in, split="in_sample"))
+    paths["paired_comparison"].write_text(render_paired_comparison(paired))
+    if rotation_oos is not None and not rotation_oos.empty:
+        path = out_dir / "frontier_rotation.tex"
+        path.write_text(
+            render_frontier(
+                rotation_oos,
+                split="out_of_sample",
+                label="tab:frontier_rotation",
+                caption=(
+                    "Family-rotation robustness check at the anchor budget. Cells "
+                    "are the cross-seed mean with a 95\\% confidence interval after "
+                    "first aggregating each seed's fold scores into one "
+                    "target-weighted rotated-family score."
+                ),
+                tablenote=(
+                    "Rotation folds are not treated as independent replicates. "
+                    "Validation-only families, such as CBO, are excluded from this "
+                    "rotated-family aggregate because they appear in every fold."
+                ),
+            )
+        )
+        paths["frontier_rotation"] = path
     return paths

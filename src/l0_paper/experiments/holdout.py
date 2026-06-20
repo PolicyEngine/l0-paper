@@ -1,17 +1,30 @@
 """Split a target set into fit and out-of-sample (held-out) targets.
 
 A sampler can match the targets it is fit to and generalize poorly, so the
-experiment scores on targets that no method was fit to. Two split strategies:
+experiment scores on targets that no method was fit to. Strategies, in order of
+how defensible the out-of-sample claim is:
 
 * :func:`split_targets` -- a deterministic random split of any ``TargetSet``.
-* :func:`split_registry_by_family` -- hold out whole target families (e.g. score
-  on ``jct`` tax-expenditure targets that calibration never fit), which is the
-  more defensible out-of-sample test for the paper.
+  Targets within a source family are nested/correlated (a national total is the
+  sum of its state cells), so a random split *leaks*: a held-out cell is nearly
+  determined by its fit siblings. Fine for a quick toy check, not for the paper.
+* :func:`split_registry_by_family` -- hold out whole families, so a family is
+  entirely in-fit or entirely held out (no within-family leakage). One fixed
+  split; the frontier sweep uses this.
+* :func:`family_grouped_folds` -- rotated family-level holdout: deal whole
+  families into ``n_folds`` balanced folds, so every family is held out exactly
+  once across the rotation. Leak-free (like ``split_registry_by_family``) *and*
+  immune to single-split luck / leaderboard overfitting. Used for the
+  holdout-robustness panel at the anchor budget.
+
+Validation-only families (Populace diagnostics, e.g. ``cbo``; see
+:func:`validation_only_families`) are excluded from the fit by every strategy
+that takes a registry.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 import numpy as np
 
@@ -46,6 +59,13 @@ def split_registry_by_family(
     families = set(holdout_families)
     targets = list(registry.to_target_set())
     specs = registry.specs
+    available = {spec.family for spec in specs}
+    unknown = sorted(families - available)
+    if unknown:
+        raise ValueError(
+            "Unknown holdout family/families: "
+            f"{unknown}. Available registry families: {sorted(available)}."
+        )
 
     fit: list[Target] = []
     holdout: list[Target] = []
@@ -57,6 +77,110 @@ def split_registry_by_family(
         fit = list(fit_set)
         holdout.extend(extra)
     return TargetSet(fit), TargetSet(holdout)
+
+
+def deal_families_into_folds(
+    family_of_target: Sequence[str],
+    *,
+    n_folds: int = 5,
+    seed: int = 0,
+    balance_by: str = "target_count",
+) -> tuple[tuple[int, ...], ...]:
+    """Deal whole families into ``n_folds`` folds; return per-fold target indices.
+
+    ``family_of_target[i]`` is target ``i``'s family. Every family's targets land
+    in exactly one fold, so a family is never split across folds -- this is what
+    makes the holdout leak-free. The folds partition ``range(len(family_of_target))``.
+
+    ``balance_by``:
+
+    * ``"target_count"`` (default) -- greedy largest-family-first assignment to
+      the least-full fold, so folds carry roughly equal *target* counts. With very
+      unequal families (e.g. SOI has thousands of targets, Medicare one) this keeps
+      each held-out fold a comparable fraction of the surface.
+    * ``"family"`` -- round-robin over families, so folds carry roughly equal
+      *family* counts (target counts may be very unequal).
+
+    ``seed`` permutes the families first, so the rotation is reproducible but not
+    tied to family name order; with ``balance_by="target_count"`` it only breaks
+    ties between equal-sized families (the size ordering dominates).
+    """
+    indices_by_family: dict[str, list[int]] = {}
+    for i, family in enumerate(family_of_target):
+        indices_by_family.setdefault(family, []).append(i)
+    families = list(indices_by_family)
+    n_unique = len(families)
+    if not (2 <= n_folds <= n_unique):
+        raise ValueError(
+            f"n_folds must be between 2 and the number of families={n_unique}, "
+            f"got {n_folds!r}."
+        )
+    if balance_by not in ("target_count", "family"):
+        raise ValueError(
+            f"balance_by must be 'target_count' or 'family', got {balance_by!r}."
+        )
+
+    order = np.random.default_rng(seed).permutation(n_unique)
+    families = [families[k] for k in order]
+
+    fold_indices: list[list[int]] = [[] for _ in range(n_folds)]
+    if balance_by == "family":
+        for position, family in enumerate(families):
+            fold_indices[position % n_folds].extend(indices_by_family[family])
+    else:
+        # Stable sort keeps the seeded order among equal-sized families.
+        families.sort(key=lambda f: len(indices_by_family[f]), reverse=True)
+        fold_load = [0] * n_folds
+        for family in families:
+            fold = min(range(n_folds), key=fold_load.__getitem__)
+            fold_indices[fold].extend(indices_by_family[family])
+            fold_load[fold] += len(indices_by_family[family])
+    return tuple(tuple(sorted(idx)) for idx in fold_indices)
+
+
+def family_grouped_folds(
+    registry: TargetRegistry,
+    *,
+    n_folds: int = 5,
+    seed: int = 0,
+    balance_by: str = "target_count",
+    exclude_validation_only: bool = True,
+) -> list[tuple[TargetSet, TargetSet]]:
+    """Rotated family-level holdout over a registry: ``(fit, holdout)`` per fold.
+
+    Deals the registry's families into ``n_folds`` balanced folds with
+    :func:`deal_families_into_folds`, then returns one ``(fit, holdout)`` pair per
+    fold whose holdout is every target of the fold's families. Because whole
+    families move together there is no within-family leakage, and across the
+    ``n_folds`` pairs every (rotatable) family is held out exactly once.
+
+    Validation-only families are added to *every* fold's holdout and never rotated
+    into the fit (they are Populace diagnostics, not contemporaneous targets).
+    """
+    specs = registry.specs
+    targets = list(registry.to_target_set())
+    families = [spec.family for spec in specs]
+
+    validation_only = (
+        validation_only_families(registry) if exclude_validation_only else set()
+    )
+    rotatable_positions = [i for i, fam in enumerate(families) if fam not in validation_only]
+    validation_positions = {i for i, fam in enumerate(families) if fam in validation_only}
+
+    folds = deal_families_into_folds(
+        [families[i] for i in rotatable_positions],
+        n_folds=n_folds,
+        seed=seed,
+        balance_by=balance_by,
+    )
+
+    result: list[tuple[TargetSet, TargetSet]] = []
+    for fold in folds:
+        holdout_positions = {rotatable_positions[j] for j in fold} | validation_positions
+        fit = [t for i, t in enumerate(targets) if i not in holdout_positions]
+        held = [targets[i] for i in sorted(holdout_positions)]
+        result.append((TargetSet(fit), TargetSet(held)))
+    return result
 
 
 # Populace marks sources "validation-only" in ``source_coverage.US_SOURCE_COVERAGE``
