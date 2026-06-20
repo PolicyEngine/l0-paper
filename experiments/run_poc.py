@@ -29,6 +29,7 @@ from pathlib import Path
 
 from l0_paper.experiments import artifacts, holdout, metrics, tables
 from l0_paper.experiments.conditions import (
+    DEFAULT_EPOCHS,
     run_dense_then_sample,
     run_l0,
     run_random_then_reweight,
@@ -74,7 +75,7 @@ def _parse_args() -> argparse.Namespace:
     )
 
     # Optimizer.
-    parser.add_argument("--epochs", type=int, default=256)
+    parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
     parser.add_argument("--learning-rate", type=float, default=0.02)
     parser.add_argument("--max-weight-ratio", type=float, default=None)
     parser.add_argument("--mass", choices=("conserve", "free"), default="conserve")

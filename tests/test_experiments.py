@@ -6,7 +6,9 @@ no network, so CI stays fast and self-contained. The real-data path is driven by
 ``experiments/run_poc.py``.
 """
 
+import importlib.util
 import json
+from pathlib import Path
 
 import numpy as np
 
@@ -209,6 +211,65 @@ def test_manifest_is_strict_json_with_empty_holdout(tmp_path):
     loaded = json.loads(text, parse_constant=fail_constant)
     assert "NaN" not in text
     assert loaded["methods"]["informed_l0"]["out_of_sample"]["mean_are"] is None
+
+
+def test_summarize_run_writes_readable_tables(tmp_path):
+    spec = importlib.util.spec_from_file_location(
+        "summarize_run",
+        Path(__file__).resolve().parents[1] / "experiments" / "summarize_run.py",
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    summarize_run = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(summarize_run)
+
+    manifest = {
+        "run_id": "toy-run",
+        "created_at": "2026-06-20T00:00:00+00:00",
+        "budget": 40,
+        "target_split": {
+            "total": 3,
+            "fit": 2,
+            "holdout": 1,
+            "holdout_families": ["cbo"],
+            "validation_only_families": ["cbo"],
+        },
+        "precalibration": {"n_records": 120},
+        "methods": {
+            "informed_l0": {
+                "retained_records": 39,
+                "epochs": 1000,
+                "l0_lambda": 0.001,
+                "runtime_s": 12.3,
+                "in_sample": {
+                    "mean_are": 0.1,
+                    "median_are": 0.05,
+                    "ess": 25,
+                    "max_weight": 1000,
+                    "by_family": {
+                        "irs_soi": {"n": 2, "mean_are": 0.1, "median_are": 0.05, "max_are": 0.2}
+                    },
+                },
+                "out_of_sample": {
+                    "mean_are": 0.2,
+                    "median_are": 0.15,
+                    "by_family": {
+                        "cbo": {"n": 1, "mean_are": 0.2, "median_are": 0.15, "max_are": 0.2}
+                    },
+                },
+            }
+        },
+    }
+    path = tmp_path / "run_manifest.json"
+    path.write_text(json.dumps(manifest))
+
+    outputs = summarize_run.write_summary(path)
+
+    text = outputs["markdown"].read_text()
+    assert "Run Summary: toy-run" in text
+    assert "Informed L0" in text
+    assert outputs["method_csv"].read_text().startswith("method,retained_records")
+    assert "cbo" in outputs["family_csv"].read_text()
 
 
 def test_method_summary_and_table_rendering():

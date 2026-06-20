@@ -31,7 +31,7 @@ from populace.calibrate.target import TargetSet
 from populace.frame import MassChange, Weights
 
 # Default Hard-Concrete / optimizer hyperparameters (Appendix table in the paper).
-DEFAULT_EPOCHS = 256
+DEFAULT_EPOCHS = 1000
 DEFAULT_LEARNING_RATE = 0.02
 DEFAULT_INIT_MEAN = 0.999
 DEFAULT_TEMPERATURE = 0.25
