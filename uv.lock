@@ -1235,19 +1235,26 @@ dependencies = [
     { name = "populace-calibrate" },
     { name = "populace-fit" },
     { name = "populace-frame" },
+    { name = "scipy" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "h5py", marker = "extra == 'uk'", specifier = ">=3" },
     { name = "h5py", marker = "extra == 'us'", specifier = ">=3" },
+    { name = "microunit", marker = "extra == 'us'", specifier = ">=0.1.0" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", specifier = ">=2" },
+    { name = "policyengine-uk", marker = "extra == 'uk'", specifier = ">=2.88" },
     { name = "policyengine-us", marker = "extra == 'us'", specifier = ">=1.729,<2" },
     { name = "populace-calibrate", editable = "../populace/packages/populace-calibrate" },
     { name = "populace-fit", editable = "../populace/packages/populace-fit" },
     { name = "populace-frame", editable = "../populace/packages/populace-frame" },
+    { name = "scipy", specifier = ">=1.13" },
+    { name = "tables", marker = "extra == 'uk'", specifier = ">=3" },
+    { name = "tables", marker = "extra == 'us'", specifier = ">=3" },
 ]
-provides-extras = ["us"]
+provides-extras = ["us", "uk"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8" }]
