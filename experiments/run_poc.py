@@ -80,11 +80,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-weight-ratio",
         type=float,
-        default=5.0,
+        default=None,
         help=(
-            "Informed-L0 hard weight-concentration cap (max weight / mean weight). "
-            "Default 5.0 matches the production release build. Pass a large value "
-            "(e.g. 1e9) to run L0 effectively uncapped."
+            "Informed-L0 per-record hard cap: no calibrated weight may exceed "
+            "max_weight_ratio * its INITIAL weight (clamped each step). Default "
+            "None (uncapped). With uniform-reset weights a small cap (e.g. 5) "
+            "forbids the ~100x concentration the fiscal targets need and breaks L0."
         ),
     )
     parser.add_argument("--mass", choices=("conserve", "free"), default="conserve")

@@ -136,11 +136,15 @@ error in- and out-of-sample, ESS, retained count, weight distribution incl. the
 largest weight, runtime, broken out **by target family and by geographic level**.
 Because the US target surface is national + state only, the by-family table is
 usually the more informative cut. `l0_lambda` is recorded per run; `l2_lambda` and
-`max_weight_ratio` are recorded too. `max_weight_ratio` (default 5.0, matching the
-production release build) is used as an informed-L0 hard cap; the baseline methods
-are left uncapped and their weight concentration is reported directly. `l2_lambda`
-is reported for parity with the paper notation but is not applied by the current
-Populace solver.
+`max_weight_ratio` are recorded too. `max_weight_ratio` is an informed-L0
+**per-record** hard cap (no calibrated weight may exceed `max_weight_ratio *` its
+*initial* weight, clamped each step), default **None (uncapped)**; the baselines
+are left uncapped and their weight concentration is reported directly. Because the
+cap is relative to each record's initial weight and the experiment resets weights
+to uniform, a small cap (e.g. 5) gives every record the same low ceiling and
+forbids the ~100x concentration the fiscal targets require -- so it must be treated
+as a swept axis, not a fixed default (see issue #4). `l2_lambda` is reported for
+parity with the paper notation but is not applied by the current Populace solver.
 
 Holdout note: Populace itself uses **rotated k-fold** holdout
 (`populace/build/holdout.py`, every target held out once) plus **family-level
@@ -182,11 +186,14 @@ Design points:
 - **Matched budget**: informed L0 sets the budget at each `(seed, budget)` point;
   `random_reweight` and `dense_sample` (survey-weight sampling) match its retained
   count.
-- **Weight concentration**: `--max-weight-ratio` (default **5.0**, matching the
-  production release build's cap) is an informed-L0 cap. The baselines are left
-  unconstrained by that cap; their effective sample size and max weight are
-  reported as diagnostics, so any concentration is visible rather than hidden by
-  the experiment harness. Pass a large value (e.g. `1e9`) to run L0 uncapped.
+- **Weight concentration**: `--max-weight-ratio` is an informed-L0 **per-record**
+  cap (weight <= ratio x *initial* weight), default **None (uncapped)**. Since the
+  experiment resets weights to uniform, the cap is relative to a flat initial
+  weight, so a small value (5) forbids the ~100x concentration fiscal targets need
+  and collapses L0 to a near-uniform, non-fitting solution -- treat the cap as a
+  swept axis (issue #4), not a fixed default. The baselines are left unconstrained;
+  their ESS and max weight are reported so concentration is visible. Use
+  `--methods informed_l0` to run only the (expensive) L0 condition.
 - **Dense reuse**: the dense fit for survey-weight sampling does not depend on the
   budget, so [`conditions.calibrate_dense`](../src/l0_paper/experiments/conditions.py)
   computes it once per seed and [`conditions.sample_from_dense`](../src/l0_paper/experiments/conditions.py)

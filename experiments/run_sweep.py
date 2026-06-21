@@ -29,8 +29,9 @@ Example
         --seeds 0 1 2 \
         --epochs 1000 \
         --holdout-families census_population state_income_tax \
-        --max-weight-ratio 5 \
         --rotation-folds 5 --rotation-budget 5000
+
+Run only the (expensive) L0 condition with --methods informed_l0.
 """
 
 from __future__ import annotations
@@ -66,11 +67,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
     parser.add_argument("--learning-rate", type=float, default=0.02)
     parser.add_argument("--mass", choices=("conserve", "free"), default="conserve")
-    parser.add_argument("--max-weight-ratio", type=float, default=5.0,
-                        help="Informed-L0 hard weight-concentration cap (max weight / "
-                             "mean weight). Default 5.0 matches the production release "
-                             "build. Pass a large value (e.g. 1e9) to run L0 effectively "
-                             "uncapped.")
+    parser.add_argument("--max-weight-ratio", type=float, default=None,
+                        help="Informed-L0 per-record hard cap: no calibrated weight may "
+                             "exceed max_weight_ratio * its INITIAL weight (clamped each "
+                             "step). Default None (uncapped). NB: with uniform-reset "
+                             "weights a small cap (e.g. 5) forbids the ~100x concentration "
+                             "the fiscal targets need and breaks L0 -- treat the cap as a "
+                             "swept axis, not a fixed default.")
 
     # Fixed frontier holdout (family-level, leak-free).
     parser.add_argument("--holdout-families", nargs="*", default=None,
@@ -95,6 +98,14 @@ def _parse_args() -> argparse.Namespace:
                         default="equal_mass")
     parser.add_argument("--sample-replace", action="store_true")
 
+    parser.add_argument(
+        "--methods", nargs="+",
+        choices=["informed_l0", "random_reweight", "dense_sample"],
+        default=["informed_l0", "random_reweight", "dense_sample"],
+        help="Which calibration conditions to run. Default all three. Use e.g. "
+             "--methods informed_l0 to run L0 only (the expensive condition); the "
+             "cheap baselines can be added in a later run at matched budgets.",
+    )
     parser.add_argument("--run-id", default=None)
     return parser.parse_args()
 
@@ -147,34 +158,53 @@ def _sweep_split(
     sample_kwargs: dict,
     holdout_type: str,
     fold: int,
+    methods: list[str],
 ) -> dict[str, float]:
-    """Run all three conditions across budgets x seeds for one (fit, holdout) split.
+    """Run the selected conditions across budgets x seeds for one (fit, holdout) split.
 
-    Dense calibration is computed once per seed and resampled at every budget.
-    Returns per-seed dense runtimes for the manifest.
+    Informed L0 (when selected) sets the matched record budget; otherwise the
+    requested budget is used directly. Dense calibration is computed once per seed
+    and only when ``dense_sample`` is requested. Returns per-seed dense runtimes.
     """
+    want_l0 = "informed_l0" in methods
+    want_survey = "dense_sample" in methods
+    want_random = "random_reweight" in methods
+
     dense_runtimes: dict[str, float] = {}
     for seed in seeds:
-        dense, dense_runtime = calibrate_dense(
-            frame, fit_targets, seed=seed, **baseline_optimizer
-        )
-        dense_runtimes[str(seed)] = dense_runtime
+        dense = None
+        dense_runtime = 0.0
+        if want_survey:
+            dense, dense_runtime = calibrate_dense(
+                frame, fit_targets, seed=seed, **baseline_optimizer
+            )
+            dense_runtimes[str(seed)] = dense_runtime
         for budget in budgets:
-            l0 = run_l0(
-                frame, fit_targets, target_records=budget, seed=seed, **l0_optimizer
-            )
-            matched = l0.n_selected
-            print(f"  [{holdout_type} fold={fold} seed={seed} budget={budget}] "
-                  f"L0 retained {matched:,} (l0_lambda={l0.l0_lambda:.3e})")
-            survey = sample_from_dense(
-                dense, n_sample=matched, seed=seed, dense_runtime=dense_runtime,
-                max_weight_ratio=baseline_optimizer.get("max_weight_ratio"),
-                **sample_kwargs,
-            )
-            random_rw = run_random_then_reweight(
-                frame, fit_targets, n_sample=matched, seed=seed, **baseline_optimizer
-            )
-            for run in (l0, survey, random_rw):
+            runs = []
+            if want_l0:
+                l0 = run_l0(
+                    frame, fit_targets, target_records=budget, seed=seed, **l0_optimizer
+                )
+                matched = l0.n_selected
+                runs.append(l0)
+                print(f"  [{holdout_type} fold={fold} seed={seed} budget={budget}] "
+                      f"L0 retained {matched:,} (l0_lambda={l0.l0_lambda:.3e})")
+            else:
+                # No L0 to set the budget; match the requested budget directly.
+                matched = budget
+                print(f"  [{holdout_type} fold={fold} seed={seed} budget={budget}] "
+                      f"baselines at requested budget {matched:,} (no L0).")
+            if want_survey:
+                runs.append(sample_from_dense(
+                    dense, n_sample=matched, seed=seed, dense_runtime=dense_runtime,
+                    max_weight_ratio=baseline_optimizer.get("max_weight_ratio"),
+                    **sample_kwargs,
+                ))
+            if want_random:
+                runs.append(run_random_then_reweight(
+                    frame, fit_targets, n_sample=matched, seed=seed, **baseline_optimizer
+                ))
+            for run in runs:
                 _score_and_emit(
                     rows, run=run, frame=frame, fit_targets=fit_targets,
                     holdout_targets=holdout_targets, method=run.method, seed=seed,
@@ -226,11 +256,13 @@ def main() -> None:
     print(f"Frontier split: {len(fit_targets)} fit, {len(holdout_targets)} held out "
           f"(families: {holdout_families or 'random'}). "
           f"Candidate records: {frame.n(args.weight_entity):,}.")
+    print(f"Methods: {args.methods}")
     frontier_dense_runtimes = _sweep_split(
         rows, frame=frame, fit_targets=fit_targets, holdout_targets=holdout_targets,
         budgets=args.budgets, seeds=args.seeds, l0_optimizer=l0_optimizer,
         baseline_optimizer=baseline_optimizer,
         sample_kwargs=sample_kwargs, holdout_type="fixed_family", fold=-1,
+        methods=args.methods,
     )
 
     # --- Rotation robustness panel: family-grouped k-fold at one anchor budget. ---
@@ -255,6 +287,7 @@ def main() -> None:
                 budgets=[anchor], seeds=args.seeds, l0_optimizer=l0_optimizer,
                 baseline_optimizer=baseline_optimizer,
                 sample_kwargs=sample_kwargs, holdout_type="rotation", fold=fold_idx,
+                methods=args.methods,
             )
 
     # --- Persist: long CSV (source of truth) + reproducibility manifest. ---
