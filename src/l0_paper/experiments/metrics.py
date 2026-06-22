@@ -163,17 +163,112 @@ def weight_diagnostics(weights: np.ndarray) -> dict[str, float | int]:
     }
 
 
-def score(frame, weights: np.ndarray, targets: Iterable[Target], *, label: str = "") -> dict[str, Any]:
+def identifiability_floors(
+    frame, targets: Iterable[Target], *, weight_entity: str = "household"
+) -> dict[str, float]:
+    """Per-target *identifiability floor*: the largest single-record contribution.
+
+    A target's relative error is only meaningful when no single record can move it
+    by O(1). The floor for target ``j`` is ``max_i |M_ji| w0_i`` -- the biggest
+    contribution any one record makes at its *initial* weight, where ``M`` is the
+    constraint matrix and ``w0`` the initial weights. A target whose ``|value|`` is
+    below its floor is **denominator-degenerate**: one household's presence or
+    absence swings its ARE past 100%, so the ARE reflects integer placement noise
+    rather than calibration quality (see :func:`degenerate_target_names`). This is
+    a structural property of the target surface, computed once, not a percentile
+    or winsorization cutoff.
+
+    Keyed by :pyattr:`Target.row_name` (matching :func:`target_diagnostics`).
+    """
+    from populace.calibrate.matrix import build_constraint_matrix
+    from populace.calibrate.target import TargetSet
+
+    targets = list(targets)
+    if not targets:
+        return {}
+    problem = build_constraint_matrix(frame, TargetSet(targets), weight_entity)
+    w0 = np.asarray(problem.initial_weights.values, dtype=np.float64)
+    coo = problem.matrix.tocoo()
+    contributions = np.abs(coo.data) * w0[coo.col]
+    floors = np.zeros(problem.matrix.shape[0], dtype=np.float64)
+    np.maximum.at(floors, coo.row, contributions)
+    return {target.row_name: float(floors[i]) for i, target in enumerate(problem.targets)}
+
+
+def degenerate_audit(
+    frame, targets: Iterable[Target], *, weight_entity: str = "household"
+) -> list[dict[str, Any]]:
+    """One-time audit of the denominator-degenerate targets (named, with floors).
+
+    Returns one row per degenerate target -- ``name``, ``family``,
+    ``geography_level``, ``target_value``, ``identifiability_floor``, and the
+    ``floor_ratio`` (floor / |value|, how many households-worth one record is) --
+    so the report can *name* exactly what is dropped in the targeted-removal
+    sensitivity, with no statistical cutoff.
+    """
+    targets = list(targets)
+    floors = identifiability_floors(frame, targets, weight_entity=weight_entity)
+    rows: list[dict[str, Any]] = []
+    for target in targets:
+        floor = floors.get(target.row_name)
+        value = float(target.value)
+        if floor is None or value == 0.0 or abs(value) >= floor:
+            continue
+        rows.append(
+            {
+                "name": target.row_name,
+                "family": target_family(target),
+                "geography_level": geography_level(target),
+                "target_value": value,
+                "identifiability_floor": floor,
+                "floor_ratio": floor / abs(value),
+            }
+        )
+    return sorted(rows, key=lambda r: r["floor_ratio"], reverse=True)
+
+
+def degenerate_target_names(
+    frame, targets: Iterable[Target], *, weight_entity: str = "household"
+) -> set[str]:
+    """Names of denominator-degenerate targets (``|value| <`` identifiability floor).
+
+    See :func:`identifiability_floors`. These targets are *named and reported*, and
+    a targeted-removal sensitivity is computed beside the full mean (rather than
+    winsorizing the ARE distribution).
+    """
+    floors = identifiability_floors(frame, targets, weight_entity=weight_entity)
+    degenerate: set[str] = set()
+    for target in targets:
+        floor = floors.get(target.row_name)
+        if floor is not None and abs(float(target.value)) < floor:
+            degenerate.add(target.row_name)
+    return degenerate
+
+
+def score(
+    frame,
+    weights: np.ndarray,
+    targets: Iterable[Target],
+    *,
+    label: str = "",
+    degenerate_names: set[str] | None = None,
+) -> dict[str, Any]:
     """Score ``weights`` on ``frame`` against ``targets``.
 
     Returns overall ARE stats (mean/median/max), the weight distribution + ESS,
-    and breakdowns ``by_family`` and ``by_geography``.
+    and breakdowns ``by_family`` and ``by_geography``. When ``degenerate_names`` is
+    given (see :func:`degenerate_target_names`), also reports
+    ``mean_are_ex_degenerate`` -- the overall mean with exactly those named
+    denominator-degenerate targets removed -- and ``n_degenerate``.
     """
     weights = np.asarray(weights, dtype=np.float64)
     targets = list(targets)
+    degenerate_names = degenerate_names or set()
 
     diagnostics = target_diagnostics(frame, weights, targets)
     overall_errors: list[float] = []
+    nondegenerate_errors: list[float] = []
+    n_degenerate = 0
     zero_value_absolute_errors: list[float] = []
     by_geo: dict[str, list[float]] = {}
     by_family: dict[str, list[float]] = {}
@@ -183,6 +278,10 @@ def score(frame, weights: np.ndarray, targets: Iterable[Target], *, label: str =
             zero_value_absolute_errors.append(row["absolute_error"])
             continue
         overall_errors.append(are)
+        if row["name"] in degenerate_names:
+            n_degenerate += 1
+        else:
+            nondegenerate_errors.append(are)
         by_geo.setdefault(row["geography_level"], []).append(are)
         by_family.setdefault(row["family"], []).append(are)
 
@@ -195,5 +294,10 @@ def score(frame, weights: np.ndarray, targets: Iterable[Target], *, label: str =
         "by_geography": {level: _are_stats(errors) for level, errors in sorted(by_geo.items())},
         "zero_value_absolute_error": _absolute_error_stats(zero_value_absolute_errors),
     }
+    if degenerate_names:
+        result["n_degenerate"] = n_degenerate
+        result["mean_are_ex_degenerate"] = (
+            float(np.mean(nondegenerate_errors)) if nondegenerate_errors else None
+        )
     result.update(weight_diagnostics(weights))
     return result

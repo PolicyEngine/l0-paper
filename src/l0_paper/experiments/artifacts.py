@@ -48,9 +48,8 @@ def method_summary(
         "candidate_records": run.n_records,
         "retained_records": run.n_selected,
         "l0_lambda": run.l0_lambda,
-        # Populace controls weight concentration with the hard max_weight_ratio
-        # cap; l2_lambda is recorded for parity with the paper's loss but not
-        # applied by the solver. See conditions.RunResult.
+        # ``max_weight_ratio`` is the hard cap; ``l2_lambda`` is the soft
+        # concentration penalty used only by the informed-L0/Hard-Concrete path.
         "l2_lambda": run.l2_lambda,
         "max_weight_ratio": run.max_weight_ratio,
         "epochs": int(run.loss_trajectory.size),

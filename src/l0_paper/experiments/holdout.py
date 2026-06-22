@@ -215,7 +215,10 @@ def validation_only_families(registry: TargetRegistry | None = None) -> set[str]
     ``registry`` is given, is intersected with the families actually present so
     phantom families are not passed downstream.
     """
-    from populace.build.us.source_coverage import validation_only_family_ids
+    try:
+        from populace.build.us.source_coverage import validation_only_family_ids
+    except ModuleNotFoundError:
+        from populace.build.us_runtime.source_coverage import validation_only_family_ids
 
     classified = set(validation_only_family_ids())
     families = {
