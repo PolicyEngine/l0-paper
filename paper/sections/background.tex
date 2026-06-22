@@ -83,10 +83,12 @@ to future work; here they serve as the calibration context the sampler is expect
 Reducing a large candidate dataset to a fixed budget is a sampling problem with a long statistical
 history, and several established methods reduce a microdata file by selecting actual records to match
 known totals. They differ mainly in where calibration enters. We review the three with the clearest
-track record in microdata construction, since they form the comparison set in
-Section~\ref{sec:methodology}, alongside the coreset view from machine learning, where a weighted
-subset is chosen so that a model fit on the subset approximates the fit on the full data
-\citep{feldman2020coresets, bachem2017coresets}.
+track record in microdata construction; random sampling and survey-weight sampling form the
+matched-budget comparison set in Section~\ref{sec:methodology}, while combinatorial optimisation is
+reviewed as the discrete, gradient-free sibling of the method we study but is not benchmarked in this
+study. We also note the coreset view from machine learning, where a weighted subset is chosen so that a
+model fit on the subset approximates the fit on the full data \citep{feldman2020coresets,
+bachem2017coresets}.
 
 \subsubsection{Random sampling}
 
@@ -130,8 +132,8 @@ converge \citep{tanton2014co, harland2012}. Two findings carry over to our compa
 reproduces the variables it is constrained on but not necessarily the cross-tabulations it is not
 constrained on, and the stochastic search is computationally heavy and can become intractable for
 large populations. It is the discrete, gradient-free sibling of the method we study, and it makes
-selection target-informed in the same sense, which is why it is the most informative non-trivial
-baseline.
+selection target-informed in the same sense; we therefore treat it as the closest conceptual reference
+point for informed selection, though implementing and benchmarking it is left to future work.
 
 \subsubsection{Informed selection}
 

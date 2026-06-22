@@ -11,14 +11,17 @@ relaxation of \citet{louizos2018}, the method jointly selects which records to r
 each retained record a positive weight. Selection responds to the calibration targets rather than
 being drawn at random, so the retained sample is informed by the quantities the dataset must
 reproduce. The gates make the retained-record count an explicit optimization variable, so one
-framework can produce a compact national dataset or a larger subnational one, while a separate
-penalty bounds how large individual weights can grow. Because the optimization that selects records
-also calibrates them, the reduced dataset continues to match its targets.
+framework can produce a compact national dataset or a larger subnational one, while soft and hard
+concentration controls bound how large individual weights can grow. Because the optimization that
+selects records also calibrates them, the reduced dataset continues to match its targets.
 
 We implement the calibration step within \populace{}, PolicyEngine's pipeline for microsimulation
 dataset construction, and present a proof of concept on its current target surface, comparing
-informed $L_0$ sampling with random sampling followed by gradient-descent reweighting at matched
-record budgets. \tbc[empirical comparison pending benchmark runs]
+informed $L_0$ sampling against random sampling with gradient-descent reweighting and an unbiased
+survey-weight baseline at matched record budgets. \tbc[empirical headline, to be written from the final
+multi-seed results: graceful degradation under aggressive compression, the accuracy crossover at
+deployable budgets, generalization to held-out target families, and the measured size/concentration
+operability frontier.]
 \end{abstract}
 
 \noindent\textbf{Keywords:} microsimulation, survey calibration, subsampling, $L_0$ regularization,

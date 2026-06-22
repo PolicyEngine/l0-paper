@@ -3,18 +3,25 @@
 {\tablefont
 \begin{tabular}{lrrrr}
 \toprule
-Geographic level & Targets & Mean ARE (\%) & Median ARE (\%) & Max ARE (\%) \\
+Geographic level & Targets & Median ARE (\%) & Mean ARE (\%) & Max ARE (\%) \\
 \midrule
 National & \tbc & \tbc & \tbc & \tbc \\
 State & \tbc & \tbc & \tbc & \tbc \\
-Congressional district & \tbc & \tbc & \tbc & \tbc \\
+Congressional district & -- & -- & -- & -- \\
 \midrule
 \textbf{All scored targets} & \tbc & \tbc & \tbc & \tbc \\
 \bottomrule
 \end{tabular}
 }
-\caption{Calibration accuracy by geographic level for the informed $L_0$ run, measured as absolute
-relative error (ARE) across the scored targets.}
+\caption{Calibration accuracy by geographic level for the informed $L_0$ run at the representative
+$\sim$10{,}000-record budget, measured as absolute relative error (ARE) across the in-sample targets.
+The median reports the typical target's error; the mean and maximum are inflated by a handful of
+near-zero-denominator targets whose relative error is large despite small absolute misses
+(Section~\ref{sec:results-degenerate}).
+Numbers are filled from the \texttt{expanded-5seed} run.}
 \label{tab:calibration_accuracy}
-\tablenote{Target counts are read from the run manifest.}
+\tablenote{Target counts are read from the run manifest. No congressional-district targets are in the
+prioritized subset, so that level is not scored. Out-of-sample geographic accuracy is not broken out
+here; the aggregate held-out error appears in Table~\ref{tab:sampling_comparison} and
+Figure~\ref{fig:budget_frontier}.}
 \end{table}

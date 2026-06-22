@@ -3,22 +3,29 @@
 
 \subsection{What the sampling comparison establishes}
 
-The comparison against random sampling is the core test. If informed $L_0$ selection reaches lower
-out-of-sample error than random selection at the same record budget, then the gates are doing useful
-work, because they spend the budget on records the targets constrain. If the two methods are close,
-the added machinery is harder to justify on accuracy grounds, and the case for the method rests on
-its controls instead. Reporting out-of-sample error keeps that distinction honest, since a method can
-always match the targets it was fit to more tightly than a method that was not.
+The comparison against random sampling is the core test, and it turns on the record budget. Where the
+budget is too small for a random draw to span the target system, informed $L_0$ selection should reach
+materially lower out-of-sample error, because the gates spend the budget on the records the targets
+constrain. Where the budget is generous enough that almost any subset can be reweighted to fit, the two
+should converge, and the case for the method then rests on its controls rather than on an accuracy gap.
+The reading is therefore one of graceful degradation under aggressive compression rather than a blanket
+accuracy win, and the budget at which the methods cross is itself a finding. Reporting
+out-of-sample error on held-out families keeps that distinction honest, since a method can always match
+the targets it was fit to more tightly than a method that was not.
 
 \subsection{What the controls establish}
 
 The second contribution is operational: the same framework produces datasets of different sizes by
-changing one penalty, focuses on a geographic level by weighting its targets, and bounds weight
-magnitudes by changing another penalty. A random-sampling baseline can also produce a dataset of a
-chosen size, but it cannot make the choice of records respond to the targets, and it controls weight
-magnitudes only through the reweighting step. The value here is that size, geographic focus, and
-weight stability are set through explicit parameters in one optimization rather than through separate
-heuristics.
+changing the $L_0$ penalty, focuses on a geographic level by weighting its targets, and shapes the
+weight distribution through two concentration controls, a soft $L_2$ penalty and a hard per-record cap.
+We treat the last of these as a measured frontier rather than a fixed setting: sweeping the $L_2$ penalty
+traces what tightening concentration (raising the effective sample size and lowering the largest weights)
+costs in calibration accuracy, so an operator can choose a point on that trade-off rather than accept
+whatever concentration the unconstrained fit produces. A random-sampling baseline
+can also produce a dataset of a chosen size, but it cannot make the choice of records respond to the
+targets, and it controls concentration only through the reweighting step. The value here is that size,
+geographic focus, and weight stability are set through explicit parameters in one optimization rather
+than through separate heuristics.
 
 \subsection{Trade-offs and limitations}
 
@@ -37,6 +44,37 @@ Informed selection should help most when the targets are specific and local, so 
 records matters. When the targets are few and broad, a random draw may already contain the records
 needed to match them, and the advantage of informed selection narrows. The paper reports the regimes
 it tests and does not extrapolate beyond them.
+
+\subsubsection{Weight concentration and effective sample size}
+
+Matching a demanding fiscal target system from a uniform prior can require the optimizer to load a
+large share of the population onto a small number of records, so the effective sample size can fall
+well below the retained-record count even when the calibration fit is good. That concentration is
+acceptable for the aggregates the dataset is calibrated to, but it is a real cost for any downstream
+estimand that is sensitive to the weight distribution. We expose the cost rather than hide it: the
+effective sample size and the largest weights are reported as primary results, and the $L_2$ sweep
+shows how much accuracy must be given up to raise the effective sample size. Whether an interior
+setting of the concentration control is acceptable, or whether the fiscal tail simply requires the
+concentration, is an empirical question we answer for this target system and not in general.
+
+\subsubsection{Generalization across target families}
+
+Holding out whole families is a deliberately hard test of generalization, harder than holding out a
+random subset of targets, and it need not flatter any method. Selecting records against one set of
+families does not guarantee a sample that reproduces a structurally different family it never saw, and
+the family-rotation panel can reverse the ranking on individual folds, including the fold that holds
+out the dominant IRS SOI family. We read the rotation as a limitation to be reported per fold rather
+than as a single headline number, and widening the held-out surface further is left to future work.
+
+\subsubsection{Degenerate targets and the choice of error metric}
+
+A handful of targets have denominators small enough that one record's placement swings their relative
+error past 100 per cent, which inflates the mean absolute relative error without reflecting calibration
+quality. Rather than winsorize or trim the distribution by an arbitrary cutoff, we lead with the median,
+name the affected targets in a one-time audit, and report the mean recomputed with exactly those named
+targets removed. This keeps the metric honest and the dropped targets visible and attributable, but it
+does mean the headline accuracy figure depends on a stated, auditable choice rather than on the raw mean
+alone.
 
 \subsubsection{Relation to convex sparse methods}
 

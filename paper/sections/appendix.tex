@@ -15,16 +15,19 @@ size and are reported with each run.
 \toprule
 Parameter & Value & Role \\
 \midrule
-Gate temperature $\beta$ & 0.35 & Sharpness of the 0/1 gate transition \\
+Gate temperature $\beta$ & 0.25 & Sharpness of the 0/1 gate transition \\
 Left stretch $\gamma$ & $-0.1$ & Enables exact-zero gates after clipping \\
 Right stretch $\zeta$ & 1.1 & Enables exact-one gates after clipping \\
 Initial keep probability & 0.999 & Records start nearly fully active \\
 Weight jitter SD & 0.05 & Log-space noise on weights at initialization \\
 Logit jitter SD & 0.01 & Log-space noise on gate logits at initialization \\
-$\lambda_{L_2}$ & $10^{-12}$ & Weight-magnitude penalty \\
-Learning rate & 0.15 & Adam optimizer step size \\
-$\lambda_{L_0}$ & \tbc & Sparsity penalty, set to reach the target dataset size \\
-Epochs & \tbc & Training iterations \\
+Learning rate & 0.02 & Adam optimizer step size \\
+Epochs & 1{,}500 & Training iterations \\
+Target loss cap $c$ & 10 & Caps a single target's contribution to $\mathcal{L}_{\text{cal}}$ \\
+$\lambda_{L_0}$ & $3\times10^{-6}$ to $10^{-4}$ & Sparsity penalty, set per build by bisection to the target size \\
+$\lambda_{L_2}$ & \tbc & Soft concentration penalty on $(w_i/w_{0,i})^2$ (mean over records); informed $L_0$ only \\
+Budget bisection steps & 8 & Re-runs of the optimization that tune $\lambda_{L_0}$ to the target size \\
+\texttt{max\_weight\_ratio} & None (uncapped) & Hard per-record weight cap: $w_i \leq \text{ratio}\times w_{0,i}$, clamped each step \\
 \bottomrule
 \end{tabular}
 }
@@ -60,7 +63,7 @@ Algorithm~\ref{alg:l0} presents the $L_0$-regularized calibration procedure.
 \label{alg:l0}
 \begin{algorithmic}[1]
 \Require Calibration matrix $\mathbf{M} \in \R^{m \times n}$, targets $\mathbf{t} \in \R^m$, initial weights $\mathbf{w}_0 \in \R^n$
-\Require Hyperparameters: $\lambda_{L_0}$, $\lambda_{L_2}$, $\beta$, $\gamma$, $\zeta$, learning rate $\eta$, epochs $E$
+\Require Hyperparameters: $\lambda_{L_0}$, $\lambda_{L_2}$, weight cap $r$ (\texttt{max\_weight\_ratio}; $\infty$ if uncapped), $\beta$, $\gamma$, $\zeta$, learning rate $\eta$, epochs $E$
 \Ensure Calibrated sparse weight vector $\hat{\mathbf{w}} \in \R^n$
 
 \State Initialize $\log w_i \gets \log w_{0,i} + \mathcal{N}(0, 0.05^2)$ for all $i$
@@ -77,12 +80,13 @@ Algorithm~\ref{alg:l0} presents the $L_0$-regularized calibration procedure.
     \EndFor
     \State $w_i^{\text{eff}} \gets \exp(\log w_i) \cdot z_i$ for all $i$
     \State $\hat{t}_j \gets \sum_i M_{ji} \cdot w_i^{\text{eff}}$ for all $j$
-    \State $\mathcal{L}_{\text{cal}} \gets \frac{1}{m}\sum_{j=1}^{m}\left(\frac{\hat{t}_j - t_j}{|t_j|}\right)^2$
+    \State $\mathcal{L}_{\text{cal}} \gets \frac{1}{m}\sum_{j=1}^{m}\min\!\left(\left|\frac{\hat{t}_j - t_j}{s_j}\right|, c\right)$
     \State $\mathcal{L}_{L_0} \gets \sum_{i=1}^{n} \sigma\!\left(\log \alpha_i - \beta \log \frac{-\gamma}{\zeta}\right)$
-    \State $\mathcal{L}_{L_2} \gets \sum_{i=1}^{n} w_i^2$
+    \State $\mathcal{L}_{L_2} \gets \frac{1}{n}\sum_{i=1}^{n}\left(\frac{\exp(\log w_i)}{w_{0,i}}\right)^2$ \Comment{soft concentration; informed $L_0$ only}
     \State $\mathcal{L} \gets \mathcal{L}_{\text{cal}} + \lambda_{L_0} \mathcal{L}_{L_0} + \lambda_{L_2} \mathcal{L}_{L_2}$
     \State Backpropagate $\nabla_{\log w, \log \alpha} \mathcal{L}$
     \State Adam step
+    \State Clamp $\log w_i \gets \min\!\left(\log w_i,\; \log(r \cdot w_{0,i})\right)$ for all $i$ \Comment{per-record cap; no-op if $r=\infty$}
 \EndFor
 
 \State \textbf{Deterministic inference:}
