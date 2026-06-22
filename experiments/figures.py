@@ -253,14 +253,16 @@ def write_figures(report: dict, out_dir: Path, *, fmts: tuple[str, ...]) -> list
     front_mean = aggregate.frontier_table(df, metric="mean_are")
     front_median = aggregate.frontier_table(df, metric="median_are")
     f1, (ax_mean, ax_med) = plt.subplots(1, 2, figsize=(11, 4.5))
+    # Log y: out-of-sample ARE spans ~7% to several thousand %, so a linear axis
+    # is dominated by the worst point and flattens every other curve.
     _plot_methods(ax_mean, front_mean[front_mean["split"] == "out_of_sample"],
                   x_col="budget_achieved", mean_col="mean_are_mean",
-                  lo_col="mean_are_lo", hi_col="mean_are_hi", scale=100.0)
+                  lo_col="mean_are_lo", hi_col="mean_are_hi", scale=100.0, log_y=True)
     _plot_methods(ax_med, front_median[front_median["split"] == "out_of_sample"],
                   x_col="budget_achieved", mean_col="median_are_mean",
-                  lo_col="median_are_lo", hi_col="median_are_hi", scale=100.0)
-    ax_mean.set(title="Mean ARE", xlabel="Retained records (log)", ylabel="Out-of-sample ARE (%)")
-    ax_med.set(title="Median ARE", xlabel="Retained records (log)", ylabel="Out-of-sample ARE (%)")
+                  lo_col="median_are_lo", hi_col="median_are_hi", scale=100.0, log_y=True)
+    ax_mean.set(title="Mean ARE", xlabel="Retained records (log)", ylabel="Out-of-sample ARE (%, log)")
+    ax_med.set(title="Median ARE", xlabel="Retained records (log)", ylabel="Out-of-sample ARE (%, log)")
     ax_mean.legend(title="Method", fontsize=9)
     f1.suptitle("F1 — Accuracy vs record budget (out-of-sample)")
     f1.tight_layout()

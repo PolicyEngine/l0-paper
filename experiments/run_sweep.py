@@ -74,6 +74,12 @@ def _parse_args() -> argparse.Namespace:
                              "weights a small cap (e.g. 5) forbids the ~100x concentration "
                              "the fiscal targets need and breaks L0 -- treat the cap as a "
                              "swept axis, not a fixed default.")
+    parser.add_argument("--budget-iters", type=int, default=10,
+                        help="L0 budget-bisection iterations. Each is a FULL optimization "
+                             "re-run to hit target_records, so this is the dominant L0 "
+                             "cost multiplier. Lower (e.g. 4-5) is ~2x faster with looser "
+                             "budget matching -- fine since the frontier plots vs achieved "
+                             "budget.")
 
     # Fixed frontier holdout (family-level, leak-free).
     parser.add_argument("--holdout-families", nargs="*", default=None,
@@ -234,7 +240,11 @@ def main() -> None:
         max_weight_ratio=None,
         mass=args.mass,
     )
-    l0_optimizer = {**baseline_optimizer, "max_weight_ratio": args.max_weight_ratio}
+    l0_optimizer = {
+        **baseline_optimizer,
+        "max_weight_ratio": args.max_weight_ratio,
+        "budget_iters": args.budget_iters,
+    }
     sample_kwargs = dict(
         weight_entity=args.weight_entity,
         reweight=args.sample_reweight,
