@@ -5,6 +5,7 @@
 
 # Python local state
 /.venv/
+.DS_Store
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -16,7 +17,11 @@ build/
 # Experiment outputs
 artifacts/
 benchmarks/results/
+experiments/runs/
 results/
+
+# Generated calibration-target bundles (regenerate with experiments/build_targets.py)
+/data/
 
 # LaTeX auxiliary files
 *.aux
