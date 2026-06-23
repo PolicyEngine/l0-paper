@@ -41,7 +41,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from l0_paper.experiments import aggregate, holdout, metrics
+from l0_paper.experiments import aggregate, holdout, metrics, target_loss
 from l0_paper.experiments.artifacts import _jsonable, write_run_manifest
 from l0_paper.experiments.conditions import (
     DEFAULT_EPOCHS,
@@ -84,6 +84,16 @@ def _parse_args() -> argparse.Namespace:
                              "cost multiplier. Lower (e.g. 4-5) is ~2x faster with looser "
                              "budget matching -- fine since the frontier plots vs achieved "
                              "budget.")
+    parser.add_argument("--target-loss-weighting",
+                        choices=target_loss.TARGET_LOSS_WEIGHTINGS,
+                        default=target_loss.UNIFORM,
+                        help="Target-row weights used inside Populace's calibration "
+                             "loss. 'uniform' preserves the historical experiment "
+                             "loss; 'production_us_fiscal' imports Populace's private "
+                             "_fiscal_target_loss_weights helper.")
+    parser.add_argument("--target-loss-cap", type=float, default=None,
+                        help="Per-target cap in the calibration loss. Defaults to 10.0 "
+                             "for both uniform weighting and production_us_fiscal.")
 
     # Fixed frontier holdout (family-level, leak-free).
     parser.add_argument("--holdout-families", nargs="*",
@@ -217,6 +227,7 @@ def _sweep_split(
     fold: int,
     methods: list[str],
     l2_lambda: float,
+    target_loss_weighting: str,
     diag_rows: list[dict] | None = None,
 ) -> dict[str, float]:
     """Run the selected conditions across budgets x seeds for one (fit, holdout) split.
@@ -238,6 +249,18 @@ def _sweep_split(
     degenerate_holdout = metrics.degenerate_target_names(
         frame, holdout_targets, weight_entity=weight_entity
     )
+    target_loss_weights = target_loss.target_loss_weights(
+        fit_targets,
+        weighting=target_loss_weighting,
+    )
+    split_baseline_optimizer = {
+        **baseline_optimizer,
+        "target_loss_weights": target_loss_weights,
+    }
+    split_l0_optimizer = {
+        **l0_optimizer,
+        "target_loss_weights": target_loss_weights,
+    }
 
     dense_runtimes: dict[str, float] = {}
     for seed in seeds:
@@ -245,14 +268,15 @@ def _sweep_split(
         dense_runtime = 0.0
         if want_survey:
             dense, dense_runtime = calibrate_dense(
-                frame, fit_targets, seed=seed, **baseline_optimizer
+                frame, fit_targets, seed=seed, **split_baseline_optimizer
             )
             dense_runtimes[str(seed)] = dense_runtime
         for budget in budgets:
             runs = []
             if want_l0:
                 l0 = run_l0(
-                    frame, fit_targets, target_records=budget, seed=seed, **l0_optimizer
+                    frame, fit_targets, target_records=budget, seed=seed,
+                    **split_l0_optimizer,
                 )
                 matched = l0.n_selected
                 runs.append(l0)
@@ -268,12 +292,14 @@ def _sweep_split(
             if want_survey:
                 runs.append(sample_from_dense(
                     dense, n_sample=matched, seed=seed, dense_runtime=dense_runtime,
-                    max_weight_ratio=baseline_optimizer.get("max_weight_ratio"),
+                    max_weight_ratio=split_baseline_optimizer.get("max_weight_ratio"),
+                    target_loss_cap=split_baseline_optimizer["target_loss_cap"],
                     **sample_kwargs,
                 ))
             if want_random:
                 runs.append(run_random_then_reweight(
-                    frame, fit_targets, n_sample=matched, seed=seed, **baseline_optimizer
+                    frame, fit_targets, n_sample=matched, seed=seed,
+                    **split_baseline_optimizer,
                 ))
             for run in runs:
                 _score_and_emit(
@@ -295,6 +321,10 @@ def main() -> None:
     precal_dir = args.reuse_precalibration.resolve()
     frame, registry = load_precalibration_dataset(precal_dir)
     precal_manifest = json.loads((precal_dir / MANIFEST_JSON).read_text())
+    target_loss_cap = target_loss.resolve_target_loss_cap(
+        args.target_loss_weighting,
+        args.target_loss_cap,
+    )
 
     validation_only = (
         set() if args.fit_validation_only else holdout.validation_only_families(registry)
@@ -307,6 +337,7 @@ def main() -> None:
         learning_rate=args.learning_rate,
         max_weight_ratio=None,
         mass=args.mass,
+        target_loss_cap=target_loss_cap,
     )
     sample_kwargs = dict(
         weight_entity=args.weight_entity,
@@ -331,6 +362,15 @@ def main() -> None:
           f"(families: {holdout_families or 'random'}). "
           f"Candidate records: {frame.n(args.weight_entity):,}.")
     print(f"Methods: {args.methods}")
+    frontier_target_loss_weights = target_loss.target_loss_weights(
+        fit_targets,
+        weighting=args.target_loss_weighting,
+    )
+    print(
+        "Target loss: "
+        f"weighting={args.target_loss_weighting}, cap={target_loss_cap:g}, "
+        f"weights={target_loss.target_loss_weight_summary(frontier_target_loss_weights)}"
+    )
 
     # One-time audit naming the denominator-degenerate targets (identifiability
     # floor), so the targeted-removal sensitivity is transparent, not a cutoff.
@@ -361,7 +401,8 @@ def main() -> None:
             budgets=args.budgets, seeds=args.seeds, l0_optimizer=l0_optimizer,
             baseline_optimizer=baseline_optimizer,
             sample_kwargs=sample_kwargs, holdout_type="fixed_family", fold=-1,
-            methods=args.methods, l2_lambda=l2_lambda, diag_rows=diag_rows,
+            methods=args.methods, l2_lambda=l2_lambda,
+            target_loss_weighting=args.target_loss_weighting, diag_rows=diag_rows,
         )
 
     # --- Rotation robustness panel: family-grouped k-fold at one anchor budget. ---
@@ -379,6 +420,15 @@ def main() -> None:
             "anchor_budget": anchor,
             "balance_by": args.rotation_balance,
             "fold_holdout_sizes": [len(held) for _, held in folds],
+            "fit_target_loss_weight_summaries": [
+                target_loss.target_loss_weight_summary(
+                    target_loss.target_loss_weights(
+                        fold_fit,
+                        weighting=args.target_loss_weighting,
+                    )
+                )
+                for fold_fit, _fold_holdout in folds
+            ],
         }
         for fold_idx, (fold_fit, fold_holdout) in enumerate(folds):
             for l2_lambda in args.l2_lambdas:
@@ -394,6 +444,7 @@ def main() -> None:
                     baseline_optimizer=baseline_optimizer,
                     sample_kwargs=sample_kwargs, holdout_type="rotation", fold=fold_idx,
                     methods=args.methods, l2_lambda=l2_lambda,
+                    target_loss_weighting=args.target_loss_weighting,
                 )
 
     # --- Persist: long CSV (source of truth) + reproducibility manifest. ---
@@ -418,6 +469,18 @@ def main() -> None:
             "seeds": args.seeds,
             "epochs": args.epochs,
             "l2_lambdas": args.l2_lambdas,
+        },
+        "target_loss": {
+            "weighting": args.target_loss_weighting,
+            "cap": target_loss_cap,
+            "frontier_fit_weight_summary": target_loss.target_loss_weight_summary(
+                frontier_target_loss_weights
+            ),
+            "production_source_path": (
+                target_loss.production_source_path()
+                if args.target_loss_weighting == target_loss.PRODUCTION_US_FISCAL
+                else None
+            ),
         },
         "l0_optimizer": _jsonable({
             **baseline_optimizer,

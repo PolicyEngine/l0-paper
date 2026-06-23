@@ -15,7 +15,14 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
-from l0_paper.experiments import aggregate, artifacts, holdout, metrics, tables
+from l0_paper.experiments import (
+    aggregate,
+    artifacts,
+    holdout,
+    metrics,
+    tables,
+    target_loss,
+)
 from l0_paper.experiments.conditions import (
     calibrate_dense,
     run_dense_then_sample,
@@ -495,6 +502,53 @@ def test_validation_only_families_tracks_populace():
 
     classified = set(validation_only_family_ids())
     assert "cbo_income_revenue_projection" in classified
+
+
+def test_production_us_fiscal_target_loss_imports_populace_helper():
+    targets = TargetSet(
+        (
+            Target(
+                name="amount_small",
+                entity="household",
+                measure="income",
+                value=100.0,
+                metadata={"source_measure_id": "payment_amount"},
+            ),
+            Target(
+                name="amount_large",
+                entity="household",
+                measure="income",
+                value=400.0,
+                metadata={"source_measure_id": "payment_amount"},
+            ),
+            Target(
+                name="count_row",
+                entity="household",
+                measure="household_count",
+                value=25.0,
+                metadata={
+                    "source_measure_id": "return_count",
+                    "measure_mode": "indicator_sum",
+                },
+            ),
+        )
+    )
+
+    weights = target_loss.target_loss_weights(
+        targets,
+        weighting=target_loss.PRODUCTION_US_FISCAL,
+    )
+
+    assert weights is not None
+    assert np.isclose(weights.mean(), 1.0)
+    # Reuses Populace's production rule: sqrt(value) within the amount basis.
+    assert np.isclose(weights[1] / weights[0], 2.0)
+    assert target_loss.resolve_target_loss_cap(
+        target_loss.PRODUCTION_US_FISCAL,
+        None,
+    ) == 10.0
+    assert target_loss.resolve_target_loss_cap(target_loss.UNIFORM, None) == 10.0
+    assert target_loss.target_loss_weight_summary(weights)["kind"] == "provided"
 
 
 # --- Amplified sweep: family-grouped folds ------------------------------------
