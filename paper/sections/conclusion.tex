@@ -8,9 +8,9 @@ hold. The reduction to a fixed budget is a sampling choice, and the paper treats
 
 The method uses Hard Concrete gates to select records and fit their weights in one optimization, with
 selection driven by the calibration targets. That makes the retained-record count an explicit control
-and keeps the reduced dataset calibrated to its targets. We compare the method against random
-sampling with reweighting at matched budgets and report how the size, geography, and weight controls
-behave.
+and keeps the reduced dataset calibrated to its targets. We compare the method against two
+matched-budget baselines that share its calibrator, random sampling with reweighting and survey-weight
+(Hansen--Hurwitz) sampling, and report how the size, geography, and weight controls behave.
 
 The contribution is therefore twofold: a target-informed sampling method, and an open pipeline,
 \populace{}, that makes the method a configuration choice other projects can reuse. Future work

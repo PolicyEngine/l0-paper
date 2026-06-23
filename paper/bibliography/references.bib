@@ -108,13 +108,14 @@
 % === Spatial microsimulation ===
 
 @article{williamson1998,
-  title   = {The Creation of Census-Based Small Area Microdata Using Statistical Matching Techniques},
-  author  = {Williamson, Paul and Birkin, Mark and Rees, Phil},
+  title   = {The Estimation of Population Microdata by Using Data from Small Area Statistics and Samples of Anonymised Records},
+  author  = {Williamson, Paul and Birkin, Mark and Rees, Phil H.},
   journal = {Environment and Planning A},
   volume  = {30},
   number  = {5},
   pages   = {785--816},
-  year    = {1998}
+  year    = {1998},
+  doi     = {10.1068/a300785}
 }
 
 @article{huang2001,
@@ -152,26 +153,6 @@
   number  = {1},
   pages   = {1},
   year    = {2012}
-}
-
-@article{anderson2013,
-  title   = {Microsimulation for Local Impact Analysis: The Role of Small Area Estimation},
-  author  = {Anderson, Brent},
-  journal = {International Journal of Microsimulation},
-  volume  = {6},
-  number  = {2},
-  pages   = {30--55},
-  year    = {2013}
-}
-
-@article{imai2014,
-  title   = {Covariate Balancing Propensity Score},
-  author  = {Imai, Kosuke and Ratkovic, Marc},
-  journal = {Journal of the Royal Statistical Society: Series B},
-  volume  = {76},
-  number  = {1},
-  pages   = {243--263},
-  year    = {2014}
 }
 
 @article{tanton2014review,
@@ -214,6 +195,14 @@
   url    = {https://github.com/PolicyEngine/populace}
 }
 
+@misc{ledger2026,
+  title  = {PolicyEngine Ledger: A Source-Backed Fact Store for Social Simulation},
+  author = {{PolicyEngine}},
+  year   = {2026},
+  note   = {Software; \texttt{arch-data}},
+  url    = {https://github.com/PolicyEngine/arch-data}
+}
+
 % === Data sources ===
 
 @techreport{census2024,
@@ -232,30 +221,6 @@
   month       = {February},
   type        = {Technical Documentation},
   url         = {https://www.irs.gov/statistics/soi-tax-stats-individual-public-use-microdata-files}
-}
-
-@techreport{cbo2018,
-  title       = {An Overview of {CBO}'s Microsimulation Tax Model},
-  author      = {{Congressional Budget Office}},
-  institution = {Congressional Budget Office},
-  year        = {2018},
-  url         = {https://www.cbo.gov/publication/54096}
-}
-
-@techreport{jct2023,
-  title       = {Overview of {JCT} Revenue Estimating Methods},
-  author      = {{Joint Committee on Taxation}},
-  institution = {Joint Committee on Taxation},
-  number      = {JCX-48-23},
-  year        = {2023},
-  url         = {https://www.jct.gov/publications/2023/jcx-48-23/}
-}
-
-@misc{tpc2024,
-  title  = {Brief Description of the Tax Model},
-  author = {{Tax Policy Center}},
-  year   = {2024},
-  url    = {https://www.taxpolicycenter.org/resources/brief-description-tax-model}
 }
 
 % === Machine learning / imputation ===
@@ -289,22 +254,25 @@
   year    = {2012}
 }
 
-@article{rothbaum2021,
-  title   = {Has Income Underreporting Changed Over Time? Evidence from Linked Survey and Administrative Data},
-  author  = {Rothbaum, Jonathan and Bee, Adam},
-  journal = {Journal of Business and Economic Statistics},
-  volume  = {39},
-  number  = {2},
-  pages   = {456--475},
-  year    = {2021}
+@article{meyer2015,
+  title   = {Household Surveys in Crisis},
+  author  = {Meyer, Bruce D. and Mok, Wallace K. C. and Sullivan, James X.},
+  journal = {Journal of Economic Perspectives},
+  volume  = {29},
+  number  = {4},
+  pages   = {199--226},
+  year    = {2015},
+  doi     = {10.1257/jep.29.4.199}
 }
 
-@article{meyer2021,
-  title   = {The Accuracy of Tax Imputations: Estimating Tax Liabilities and Credits Using Linked Survey and Administrative Data},
-  author  = {Meyer, Bruce D. and Wu, Derek and Finley, Grace and Langetieg, Patrick and Payne, Carla and Plumley, Alan and Yu, Alexa},
-  journal = {NBER Working Paper},
-  number  = {28229},
-  year    = {2021}
+@techreport{meyer2021,
+  title       = {The Accuracy of Tax Imputations: Estimating Tax Liabilities and Credits Using Linked Survey and Administrative Data},
+  author      = {Meyer, Bruce D. and Wu, Derek and Finley, Grace and Langetieg, Patrick and Medalia, Carla and Payne, Mark and Plumley, Alan},
+  institution = {National Bureau of Economic Research},
+  type        = {NBER Working Paper},
+  number      = {28229},
+  year        = {2020},
+  url         = {https://www.nber.org/papers/w28229}
 }
 
 % === Sampling baselines: combinatorial optimisation, random and weighted sampling ===

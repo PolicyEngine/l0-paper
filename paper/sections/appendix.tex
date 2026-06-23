@@ -8,10 +8,10 @@ roles. The gate parameters follow the Hard Concrete construction of \citet{louiz
 sparsity penalty $\lambda_{L_0}$ and the epoch count are set per build to reach a target dataset
 size and are reported with each run.
 
-\begin{table}[ht]
+\begin{table}[H]
 \centering
 {\tablefont
-\begin{tabular}{lll}
+\begin{tabular}{@{}l l p{0.46\textwidth}@{}}
 \toprule
 Parameter & Value & Role \\
 \midrule
@@ -44,21 +44,60 @@ Source: the \texttt{l0-python} Hard Concrete implementation used by \populace{}.
 \section{Calibration targets}
 \label{app:targets}
 
-This study calibrates to a prioritized subset of the targets the pipeline can construct. The subset
-is reported here in full, so the empirical claims can be read against the exact target system used
-rather than against a pipeline-wide inventory. The subset was chosen for \tbc[selection rationale,
-for example coverage of major tax and transfer aggregates across geographic levels], and it is not
-presented as a complete or maximal target set. Other targets the pipeline can build are out of scope
-for this study.
+This study calibrates to a prioritized subset of the targets the pipeline can construct. Every target
+is a source-backed fact from PolicyEngine Ledger \citep{ledger2026}, the \texttt{arch-data} fact store
+that holds the source publications and preserves the provenance of each published value; Populace
+composes calibration targets from those facts. The subset here is a surface of the most important
+national and state aggregates across the major tax and transfer families
+(Table~\ref{tab:target_sources}), closely following the families Populace calibrates in its production
+US build. We defer congressional-district and finer-geography targets to the full build-then-prune
+configuration that pairs a much larger candidate household count with the finer geographic surface; at
+this proof-of-concept household count (75{,}112), the national and state surface is the appropriate
+scope. The subset is reported here in full, so the empirical claims can be read against the exact
+target system used rather than against a pipeline-wide inventory, and it is not presented as a complete
+or maximal target set.
 
-\tbc[target families, types, geographic levels, and counts for the prioritized subset]
+Table~\ref{tab:target_sources} lists each family with its administrative source. The system holds
+4{,}393 targets across eleven families and two geographic levels (national and state). The
+\texttt{irs\_soi} family supplies 3{,}107 of them (71\%), so the micro-average over all targets is
+dominated by IRS income-tax aggregates; the family macro-average (Section~\ref{sec:metrics}) is the
+counterweight that gives each family equal weight.
+
+\begin{table}[H]
+\centering
+{\tablefont
+\begin{tabular}{@{}p{0.24\textwidth}p{0.40\textwidth}p{0.13\textwidth}r@{}}
+\toprule
+Family & Administrative source & Levels & Targets \\
+\midrule
+\texttt{irs\_soi} & IRS Statistics of Income: Historic Table 2 state totals and congressional-district tables, aggregated to state and national & National, state & 3{,}107 \\
+\texttt{census\_population} & Census Bureau annual state resident population estimates & National, state & 936 \\
+\texttt{cms\_medicaid} & CMS Medicaid and CHIP applications, eligibility, and enrollment reports & National, state & 104 \\
+\texttt{cms\_aca} & CMS open-enrollment-period state-level public use file & State & 102 \\
+\texttt{usda\_snap} & USDA FNS SNAP monthly state participation and benefit summaries & National, state & 52 \\
+\texttt{state\_income\_tax} & Census Bureau State Tax Collections (STC), item T40 individual income taxes & State & 45 \\
+\texttt{hhs\_acf\_tanf} & HHS ACF federal TANF and state MOE financial data & National, state & 30 \\
+\texttt{ssa} & SSA Annual Statistical Supplement, OASDI beneficiaries and benefits & National & 6 \\
+\texttt{cbo} & CBO revenue projections by category (validation-only) & National & 5 \\
+\texttt{jct} & JCT estimates of federal tax expenditures & National & 5 \\
+\texttt{cms\_medicare} & CMS Medicare Trustees Report & National & 1 \\
+\midrule
+\textbf{Total} & & & \textbf{4{,}393} \\
+\bottomrule
+\end{tabular}
+}
+\caption{Calibration target families and their administrative sources. Counts and sources are read from
+the target registry (\populace{} build \texttt{18497a03ccd1}). The \texttt{cbo} family is held out as a
+validation-only diagnostic and is never fit (Section~\ref{sec:oos}).}
+\label{tab:target_sources}
+\end{table}
 
 \section{Algorithm pseudocode}
 \label{app:algorithm}
 
 Algorithm~\ref{alg:l0} presents the $L_0$-regularized calibration procedure.
 
-\begin{algorithm}[ht]
+\begin{algorithm}[H]
 \caption{$L_0$-regularized calibration with Hard Concrete gates}
 \label{alg:l0}
 \begin{algorithmic}[1]
@@ -109,3 +148,20 @@ assignment used to build the calibration matrix, so the assembled dataset matche
 optimizer saw. Take-up draws are regenerated with the same deterministic seeds used during matrix
 construction, so take-up-dependent targets stay consistent between the calibration problem and the
 assembled dataset.
+
+\section{Cost diagnostics}
+\label{app:cost}
+
+Figure~\ref{fig:cost_accuracy} reports the wall-clock runtime of each method against the out-of-sample
+mean ARE it reaches, across the budget sweep, so the accuracy comparison can be read alongside its
+compute cost.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/f5_cost_accuracy}
+    \caption{Cost against accuracy: wall-clock runtime (log scale) against out-of-sample mean ARE (log
+    scale) for the three methods, each point labelled by its retained-record budget. Informed $L_0$
+    runtime includes the eight-step $\lambda_{L_0}$ budget bisection; the baselines run once at the
+    matched budget. Points are the mean over three seeds.}
+    \label{fig:cost_accuracy}
+\end{figure}

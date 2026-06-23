@@ -15,13 +15,16 @@ framework can produce a compact national dataset or a larger subnational one, wh
 concentration controls bound how large individual weights can grow. Because the optimization that
 selects records also calibrates them, the reduced dataset continues to match its targets.
 
-We implement the calibration step within \populace{}, PolicyEngine's pipeline for microsimulation
-dataset construction, and present a proof of concept on its current target surface, comparing
-informed $L_0$ sampling against random sampling with gradient-descent reweighting and an unbiased
-survey-weight baseline at matched record budgets. \tbc[empirical headline, to be written from the final
-multi-seed results: graceful degradation under aggressive compression, the accuracy crossover at
-deployable budgets, generalization to held-out target families, and the measured size/concentration
-operability frontier.]
+We implement the method within \populace{}, PolicyEngine's pipeline for microsimulation dataset
+construction, and present a proof of concept on its current target surface. The comparison holds the
+candidate universe, the target set, and the record budget fixed, and varies only how records are
+chosen, across three samplers: informed $L_0$ selection, random sampling followed by gradient-descent
+reweighting, and survey-weight sampling, which draws records with probability proportional to a prior
+calibration's weights (the unbiased Hansen--Hurwitz scheme). All three fit weights with the same
+calibrator, so the experiment isolates the selection step rather than the calibration. \tbc[empirical
+headline, to be written from the final multi-seed results: graceful degradation under aggressive
+compression, the accuracy crossover at deployable budgets, generalization to held-out target families,
+and the measured size/concentration operability frontier.]
 \end{abstract}
 
 \noindent\textbf{Keywords:} microsimulation, survey calibration, subsampling, $L_0$ regularization,
