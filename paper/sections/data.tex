@@ -25,7 +25,9 @@ budget at the calibration stage.
 
 \begin{figure}[H]
     \centering
-    \fbox{\parbox{0.9\textwidth}{\centering\textit{[Pipeline overview diagram to be inserted]}}}
+    \makebox[\textwidth][c]{%
+        \includegraphics[width=1.18\textwidth]{figures/populace_pipeline}%
+    }
     \caption{\populace{} pipeline for the configuration used in this paper: load and combine the
     source surveys, impute missing variables, assign geography, construct the calibration targets,
     and calibrate. The calibration stage is the focus of this paper.}

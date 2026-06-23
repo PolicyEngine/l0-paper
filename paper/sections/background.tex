@@ -177,8 +177,19 @@ differentiable. The probability that gate $i$ is active is
 and the $L_0$ penalty is the sum of these probabilities over all records,
 $\sum_i \Pr(z_i \neq 0)$, which is the expected number of retained records; minimizing it pushes
 gates toward zero. At test time the noise is removed and the gate is evaluated deterministically,
-$\hat{z}_i = \min\!\big(1, \max(0, \sigma(\log \alpha_i)(\zeta - \gamma) + \gamma)\big)$, which
-returns exact zeros and ones and therefore an exactly sparse weight vector.
+\begin{equation}
+    \hat{z}_i
+    =
+    \min\!\left(
+        1,
+        \max\!\left(
+            0,\,
+            \sigma(\log \alpha_i)(\zeta - \gamma) + \gamma
+        \right)
+    \right),
+    \label{eq:deterministic_gate}
+\end{equation}
+which returns exact zeros and ones and therefore an exactly sparse weight vector.
 
 The two pieces depend on each other, which is the point worth stressing for readers new to this
 construction. The $L_0$ penalty states the objective, that fewer active records are preferred, but
