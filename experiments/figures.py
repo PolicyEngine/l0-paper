@@ -39,13 +39,24 @@ from l0_paper.experiments.tables import SWEEP_METHOD_LABELS, SWEEP_METHOD_ORDER
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PAPER_FIGURES = REPO_ROOT / "paper" / "figures"
+FONTS_DIR = REPO_ROOT / "experiments" / "assets" / "fonts" / "Inter"
 
-# Colour-blind-safe, stable per method across every figure.
+# PolicyEngine palette (theme.css --chart-1/2/5), stable per method across every
+# figure. Each method also gets a distinct marker so the series stay legible in
+# grayscale -- the design system asks for charts that don't rely on colour alone.
 METHOD_COLORS = {
-    "informed_l0": "#1f77b4",
-    "random_reweight": "#ff7f0e",
-    "dense_sample": "#2ca02c",
+    "informed_l0": "#319795",      # --chart-1 teal (the informed method)
+    "random_reweight": "#0EA5E9",  # --chart-2 blue
+    "dense_sample": "#6B7280",     # --chart-5 gray (naive survey-weight baseline)
 }
+METHOD_MARKERS = {
+    "informed_l0": "o",
+    "random_reweight": "s",
+    "dense_sample": "^",
+}
+# The method-comparison figures (F1-F5) fix lambda_L2 at this value; the
+# accuracy <-> ESS trade-off as lambda_L2 varies gets its own figure (F6).
+COMPARISON_L2 = 0.0
 
 
 # --- Tables + Markdown (no plotting dependency) ---------------------------------
@@ -72,10 +83,42 @@ def _validation_only_families(long_csv: Path) -> tuple[str, ...]:
     return ("cbo",)
 
 
+def _default_anchor_budget(df: pd.DataFrame, requested: int | None) -> int | None:
+    """Choose a fixed-family L2 anchor budget for operability plots.
+
+    Prefer an explicit anchor when it exists in the fixed-family frontier. When
+    none is supplied, use the median requested budget among budgets with the
+    richest L2 grid; this avoids accidentally picking the smallest budget merely
+    because it appears first in a groupby result.
+    """
+    l0_runs = df[
+        (df["holdout_type"] == "fixed_family")
+        & (df["method"] == "informed_l0")
+        & (df["scope"] == "run")
+        & (df["metric"] == "ess")
+    ]
+    if l0_runs.empty:
+        return requested
+
+    available = sorted(int(b) for b in l0_runs["budget_requested"].unique())
+    if requested is not None and int(requested) in available:
+        return int(requested)
+
+    l2_counts = l0_runs.groupby("budget_requested")["l2_lambda"].nunique()
+    if l2_counts.empty:
+        return requested
+    max_l2 = int(l2_counts.max())
+    candidates = sorted(int(b) for b, n in l2_counts.items() if int(n) == max_l2)
+    if not candidates:
+        return requested
+    return candidates[len(candidates) // 2]
+
+
 def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -> dict:
     """Aggregate the long CSV and write LaTeX tables + a Markdown summary."""
     df = aggregate.load_long(long_csv)
     out_dir.mkdir(parents=True, exist_ok=True)
+    anchor_budget = _default_anchor_budget(df, anchor_budget)
     validation_only = _validation_only_families(long_csv)
     l2_values = sorted(df["l2_lambda"].dropna().unique().tolist())
     multi_l2 = len(l2_values) > 1
@@ -197,6 +240,67 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
                 cells.append(_fmt_pct(row["macro_mean_are_mean"].iloc[0]) if not row.empty else "")
             lines.append(f"| {budget:,.0f} | " + " | ".join(cells) + " |")
 
+    def _raw_metric_budget_table(
+        *,
+        title: str,
+        note: str,
+        split: str,
+        scope: str,
+        metric: str,
+        formatter,
+    ) -> None:
+        sub = df[
+            (df["holdout_type"] == "fixed_family")
+            & (df["split"] == split)
+            & (df["scope"] == scope)
+            & (df["metric"] == metric)
+        ]
+        if sub.empty:
+            return
+        metric_methods = [m for m in SWEEP_METHOD_ORDER if m in set(sub["method"])]
+        lines.extend(["", title, "", note, ""])
+        lines.append("| Budget / l2 | " + " | ".join(SWEEP_METHOD_LABELS[m].replace("$", "") for m in metric_methods) + " |")
+        lines.append("| --- | " + " | ".join("---" for _ in metric_methods) + " |")
+        for budget in sorted(frontier_oos["budget_requested"].unique()):
+            for l2 in sorted(frontier_oos[frontier_oos["budget_requested"] == budget]["l2_lambda"].unique()):
+                cells = []
+                for method in metric_methods:
+                    row = sub[
+                        (sub["method"] == method)
+                        & (sub["l2_lambda"] == l2)
+                        & (sub["budget_requested"] == budget)
+                    ]
+                    cells.append(formatter(row["value"].mean()) if not row.empty else "")
+                lines.append(f"| {budget:,.0f} / {float(l2):g} | " + " | ".join(cells) + " |")
+
+    _raw_metric_budget_table(
+        title="## In-sample mean ARE (%) on final retained records",
+        note=(
+            "Actual fit-target error after each method's final retained/sampled "
+            "weight vector is scored. This replaces solver `final_loss` for the "
+            "sampling methods: for `dense_sample`, the stored `final_loss` is "
+            "the dense pre-sampling calibration loss, not the post-sampling "
+            "vector's error."
+        ),
+        split="in_sample",
+        scope="overall",
+        metric="mean_are",
+        formatter=_fmt_pct,
+    )
+    _raw_metric_budget_table(
+        title="## Effective sample size by budget",
+        note=(
+            "ESS is computed on each method's final full weight vector, then "
+            "averaged over seeds. For nonzero `l2`, only `Informed L_0` uses "
+            "the L2 penalty; the other methods are rerun at the matched "
+            "achieved budget for that L0 configuration."
+        ),
+        split="na",
+        scope="run",
+        metric="ess",
+        formatter=lambda value: f"{float(value):,.0f}",
+    )
+
     # In-sample targeted-removal sensitivity: the mean before/after dropping the
     # *named* denominator-degenerate targets (no winsorization), led by the median.
     lines += ["", "## In-sample degenerate-target sensitivity (informed L0)", ""]
@@ -248,12 +352,14 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
     if diag_path.exists() and not oos.empty:
         diag = aggregate.load_target_diagnostics(diag_path)
         max_budget = int(sorted(oos["budget_requested"].unique())[-1])
+        skipped_attribution = False
         if multi_l2:
             lines.append(
                 "Skipped in the combined multi-l2 report to avoid mixing penalty "
                 "values; call `aggregate.top_are_contributors(..., l2_lambda=...)` "
                 "for a specific penalty."
             )
+            skipped_attribution = True
             top = None
         else:
             top = aggregate.top_are_contributors(
@@ -276,7 +382,7 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
                     f"| {short} | {r['family']} | {_fmt_pct(r['mean_are'])} | "
                     f"{r['share_of_mean'] * 100:.1f}% | {'yes' if r['is_degenerate'] else ''} |"
                 )
-        else:
+        elif not skipped_attribution:
             lines.append("No per-target diagnostics for this config.")
     else:
         lines.append("No per-target diagnostics CSV found (run the sweep to generate it).")
@@ -288,19 +394,23 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
             f"families excluded from this aggregate: `{list(validation_only)}`."
         )
         lines.append("")
-        lines.append("| Retained | " + " | ".join(SWEEP_METHOD_LABELS[m].replace("$", "") for m in methods) + " |")
-        lines.append("| --- | " + " | ".join("---" for _ in methods) + " |")
         rot_oos = rotation_front[rotation_front["split"] == "out_of_sample"]
+        rot_groups = _display_groups(rotation_front)
+        first_col = "Requested budget" if multi_l2 else "Retained"
+        lines.append("| " + first_col + " | " + " | ".join(label for _, _, label in rot_groups) + " |")
+        lines.append("| --- | " + " | ".join("---" for _ in rot_groups) + " |")
         for budget in sorted(rot_oos["budget_requested"].unique()):
             cells = []
             retained = rot_oos[rot_oos["budget_requested"] == budget]["budget_achieved"].mean()
-            for method in methods:
+            for method, l2, _label in rot_groups:
                 row = rot_oos[
                     (rot_oos["method"] == method)
                     & (rot_oos["budget_requested"] == budget)
+                    & (rot_oos["l2_lambda"] == l2)
                 ]
                 cells.append(_fmt_pct(row["mean_are_mean"].iloc[0]) if not row.empty else "")
-            lines.append(f"| {retained:,.0f} | " + " | ".join(cells) + " |")
+            first = f"{budget:,.0f}" if multi_l2 else f"{retained:,.0f}"
+            lines.append(f"| {first} | " + " | ".join(cells) + " |")
     else:
         lines.append("No rotation panel found.")
 
@@ -317,14 +427,19 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
             "Each cell is mean / median OOS ARE (%) over seeds.",
             "",
             "| Fold | Held-out families | "
-            + " | ".join(SWEEP_METHOD_LABELS[m].replace("$", "") for m in methods) + " |",
-            "| --- | --- | " + " | ".join("---" for _ in methods) + " |",
+            + " | ".join(label for _, _, label in _display_groups(frontier_oos)) + " |",
+            "| --- | --- | " + " | ".join("---" for _ in _display_groups(frontier_oos)) + " |",
         ]
         for fold in sorted(rot["fold"].unique()):
             held = ", ".join(sorted(fams[fams["fold"] == fold]["scope_value"].unique()))
             cells = []
-            for m in methods:
-                ov = rot[(rot["fold"] == fold) & (rot["method"] == m) & (rot["scope"] == "overall")]
+            for m, l2, _label in _display_groups(frontier_oos):
+                ov = rot[
+                    (rot["fold"] == fold)
+                    & (rot["method"] == m)
+                    & (rot["l2_lambda"] == l2)
+                    & (rot["scope"] == "overall")
+                ]
                 mean_v = ov[ov["metric"] == "mean_are"]["value"].mean()
                 med_v = ov[ov["metric"] == "median_are"]["value"].mean()
                 cells.append(f"{_fmt_pct(mean_v)} / {_fmt_pct(med_v)}")
@@ -351,40 +466,95 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
 
 
 def _label(method: str) -> str:
-    return SWEEP_METHOD_LABELS.get(method, method).replace("$", "")
+    return SWEEP_METHOD_LABELS.get(method, method)
 
 
-def _plot_methods(ax, agg, *, x_col, mean_col, lo_col, hi_col, scale=1.0, log_x=True, log_y=False):
-    """Plot one line (+ seed CI band) per method/L2 value from an aggregate frame."""
+def _setup_style() -> None:
+    """Register the vendored Inter font and set PolicyEngine paper-figure rcParams.
+
+    Falls back to a system sans stack (with a one-line install hint) when the
+    vendored TTFs are absent, so figure generation never hard-fails on the font.
+    """
+    import matplotlib.font_manager as fm
+    import matplotlib.pyplot as plt
+
+    ttfs = sorted(FONTS_DIR.glob("*.ttf")) if FONTS_DIR.is_dir() else []
+    for ttf in ttfs:
+        fm.fontManager.addfont(str(ttf))
+    if not ttfs:
+        print(
+            "Inter not vendored under experiments/assets/fonts/Inter -- falling "
+            "back to a system sans. For brand fidelity: brew install --cask font-inter"
+        )
+
+    plt.rcParams.update({
+        "font.family": ["Inter", "Helvetica Neue", "Arial", "DejaVu Sans"],
+        "font.size": 12,
+        "axes.titlesize": 13,
+        "axes.labelsize": 12,
+        "legend.fontsize": 10,
+        "legend.title_fontsize": 10,
+        "xtick.labelsize": 11,
+        "ytick.labelsize": 11,
+        "figure.titlesize": 14,
+        "axes.edgecolor": "#475569",   # gray-600
+        "axes.linewidth": 0.8,
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+        "axes.titlecolor": "#101828",  # gray-900
+        "axes.labelcolor": "#101828",
+        "text.color": "#101828",
+        "xtick.color": "#475569",
+        "ytick.color": "#475569",
+        "grid.color": "#E2E8F0",       # --border / gray-200
+        "grid.linewidth": 0.7,
+        "figure.facecolor": "white",
+        "axes.facecolor": "white",
+        "savefig.facecolor": "white",
+    })
+
+
+def _budget_label(budget: int) -> str:
+    b = int(budget)
+    return f"{b // 1000}k" if b >= 1000 and b % 1000 == 0 else f"{b:,}"
+
+
+def _budget_axis(ax, budgets) -> None:
+    """Log x-axis with fixed ticks at the real budgets, no overlapping minor labels."""
+    from matplotlib.ticker import FixedFormatter, FixedLocator, NullFormatter
+
+    budgets = sorted(int(b) for b in budgets)
+    ax.set_xscale("log")
+    ax.xaxis.set_major_locator(FixedLocator(budgets))
+    ax.xaxis.set_major_formatter(FixedFormatter([_budget_label(b) for b in budgets]))
+    ax.xaxis.set_minor_formatter(NullFormatter())
+    ax.tick_params(axis="x", which="minor", length=0)
+
+
+def _plot_methods(ax, agg, *, x_col, mean_col, lo_col, hi_col, scale=1.0, log_y=False):
+    """One line (+ seed CI band) per method from an aggregate frame.
+
+    Callers pass the ``COMPARISON_L2`` slice, so there is a single line per method;
+    the x-axis is set separately by the caller (usually :func:`_budget_axis`).
+    """
     import numpy as np
 
-    multi_l2 = "l2_lambda" in agg.columns and agg["l2_lambda"].nunique() > 1
     for method in [m for m in SWEEP_METHOD_ORDER if m in set(agg["method"])]:
-        method_rows = agg[agg["method"] == method]
-        l2_values = sorted(method_rows["l2_lambda"].unique()) if "l2_lambda" in method_rows else [0.0]
-        for l2 in l2_values:
-            d = (
-                method_rows[method_rows["l2_lambda"] == l2]
-                if "l2_lambda" in method_rows else method_rows
-            ).sort_values(x_col)
-            if d.empty:
-                continue
-            label = _label(method)
-            if multi_l2:
-                label = f"{label} (l2={float(l2):g})"
-            color = METHOD_COLORS.get(method, "#444")
-            x = d[x_col].to_numpy(dtype=float)
-            y = d[mean_col].to_numpy(dtype=float) * scale
-            ax.plot(x, y, marker="o", color=color, label=label, lw=2, ms=5)
-            lo = d[lo_col].to_numpy(dtype=float) * scale
-            hi = d[hi_col].to_numpy(dtype=float) * scale
-            if np.isfinite(lo).all() and np.isfinite(hi).all() and np.any(hi > lo):
-                ax.fill_between(x, lo, hi, color=color, alpha=0.15, linewidth=0)
-    if log_x:
-        ax.set_xscale("log")
+        d = agg[agg["method"] == method].sort_values(x_col)
+        if d.empty:
+            continue
+        color = METHOD_COLORS.get(method, "#444")
+        marker = METHOD_MARKERS.get(method, "o")
+        x = d[x_col].to_numpy(dtype=float)
+        y = d[mean_col].to_numpy(dtype=float) * scale
+        ax.plot(x, y, marker=marker, color=color, label=_label(method), lw=2, ms=6)
+        lo = d[lo_col].to_numpy(dtype=float) * scale
+        hi = d[hi_col].to_numpy(dtype=float) * scale
+        if np.isfinite(lo).all() and np.isfinite(hi).all() and np.any(hi > lo):
+            ax.fill_between(x, lo, hi, color=color, alpha=0.15, linewidth=0)
     if log_y:
         ax.set_yscale("log")
-    ax.grid(True, which="both", alpha=0.25)
+    ax.grid(True, which="both", alpha=0.4)
 
 
 def _save(fig, fig_dir: Path, name: str, fmts: tuple[str, ...]) -> list[Path]:
@@ -413,166 +583,224 @@ def write_figures(report: dict, out_dir: Path, *, fmts: tuple[str, ...]) -> list
 
     import numpy as np
 
+    _setup_style()
+
     fig_dir = out_dir / "figures"
     fig_dir.mkdir(parents=True, exist_ok=True)
     df = report["df"]
-    multi_l2 = "l2_lambda" in df.columns and df["l2_lambda"].nunique() > 1
     written: list[Path] = []
 
-    # F1: frontier (OOS mean | median), retained records on a log x-axis.
+    l2_values = sorted(float(v) for v in df["l2_lambda"].dropna().unique())
+
+    def at_cmp_l2(frame: pd.DataFrame) -> pd.DataFrame:
+        """Slice to the comparison lambda_L2 (F1-F5 hold the penalty fixed)."""
+        return frame[frame["l2_lambda"] == COMPARISON_L2]
+
+    # F1: frontier (OOS mean | median) at the comparison lambda_L2, requested
+    # budget on a log x-axis.
+    #
+    # Survey-weight sampling draws with replacement, so duplicate draws collapse
+    # to fewer unique nonzero records. Plotting that unique count would shift the
+    # survey series left even though the methods were run at the same requested
+    # matched budget. Use the requested budget for the visual frontier; retained
+    # unique counts remain available in the tables/CSV.
     front_mean = aggregate.frontier_table(df, metric="mean_are")
     front_median = aggregate.frontier_table(df, metric="median_are")
+    fm_oos = at_cmp_l2(front_mean[front_mean["split"] == "out_of_sample"])
+    fmed_oos = at_cmp_l2(front_median[front_median["split"] == "out_of_sample"])
+    budgets = sorted(int(b) for b in fm_oos["budget_requested"].unique())
+
     f1, (ax_mean, ax_med) = plt.subplots(1, 2, figsize=(11, 4.5))
     # Log y: out-of-sample ARE spans ~7% to several thousand %, so a linear axis
     # is dominated by the worst point and flattens every other curve.
-    _plot_methods(ax_mean, front_mean[front_mean["split"] == "out_of_sample"],
-                  x_col="budget_achieved", mean_col="mean_are_mean",
+    _plot_methods(ax_mean, fm_oos, x_col="budget_requested", mean_col="mean_are_mean",
                   lo_col="mean_are_lo", hi_col="mean_are_hi", scale=100.0, log_y=True)
-    _plot_methods(ax_med, front_median[front_median["split"] == "out_of_sample"],
-                  x_col="budget_achieved", mean_col="median_are_mean",
+    _plot_methods(ax_med, fmed_oos, x_col="budget_requested", mean_col="median_are_mean",
                   lo_col="median_are_lo", hi_col="median_are_hi", scale=100.0, log_y=True)
-    ax_mean.set(title="Mean ARE", xlabel="Retained records (log)", ylabel="Out-of-sample ARE (%, log)")
-    ax_med.set(title="Median ARE", xlabel="Retained records (log)", ylabel="Out-of-sample ARE (%, log)")
-    ax_mean.legend(title="Method", fontsize=9)
-    f1.suptitle("F1 — Accuracy vs record budget (out-of-sample)")
-    f1.tight_layout()
+    for ax in (ax_mean, ax_med):
+        _budget_axis(ax, budgets)
+        ax.set_xlabel("Requested budget")
+    ax_mean.set(title="Mean ARE", ylabel="Out-of-sample ARE (%, log)")
+    ax_med.set(title="Median ARE", ylabel="Out-of-sample ARE (%, log)")
+    ax_mean.legend(title="Method")
+    f1.suptitle("Accuracy versus record budget (out-of-sample)")
+    f1.tight_layout(rect=(0, 0, 1, 0.96))
     written += _save(f1, fig_dir, "f1_frontier", fmts)
     plt.close(f1)
 
-    # F2: usability — ESS and max weight vs budget.
-    ess = aggregate.run_metric(df, metric="ess")
-    maxw = aggregate.run_metric(df, metric="max_weight")
+    # F2: usability — effective sample size and max weight vs budget.
+    ess = at_cmp_l2(aggregate.run_metric(df, metric="ess"))
+    maxw = at_cmp_l2(aggregate.run_metric(df, metric="max_weight"))
     f2, (ax_ess, ax_mw) = plt.subplots(1, 2, figsize=(11, 4.5))
     _plot_methods(ax_ess, ess, x_col="budget_requested", mean_col="ess_mean",
                   lo_col="ess_lo", hi_col="ess_hi")
     _plot_methods(ax_mw, maxw, x_col="budget_requested", mean_col="max_weight_mean",
                   lo_col="max_weight_lo", hi_col="max_weight_hi", log_y=True)
-    ax_ess.set(title="Effective sample size", xlabel="Requested budget (log)", ylabel="ESS")
-    ax_mw.set(title="Max weight", xlabel="Requested budget (log)", ylabel="Max weight (log)")
-    ax_ess.legend(title="Method", fontsize=9)
-    f2.suptitle("F2 — Usability: ESS and weight concentration")
-    f2.tight_layout()
+    for ax in (ax_ess, ax_mw):
+        _budget_axis(ax, budgets)
+        ax.set_xlabel("Requested budget")
+    ax_ess.set(title="Effective sample size", ylabel="ESS")
+    ax_mw.set(title="Max weight", ylabel="Max weight (log)")
+    ax_ess.legend(title="Method")
+    f2.suptitle("Usability: effective sample size and weight concentration")
+    f2.tight_layout(rect=(0, 0, 1, 0.96))
     written += _save(f2, fig_dir, "f2_usability", fmts)
     plt.close(f2)
 
-    # F3: generalization gap (OOS - in-sample) mean ARE.
+    # F3: generalization gap (OOS − in-sample) mean ARE at the comparison lambda_L2.
     gap_rows = []
-    fm = front_mean
-    for method in [m for m in SWEEP_METHOD_ORDER if m in set(fm["method"])]:
-        for budget in sorted(fm["budget_requested"].unique()):
-            o = fm[(fm["method"] == method) & (fm["budget_requested"] == budget)
-                   & (fm["split"] == "out_of_sample")]
-            i = fm[(fm["method"] == method) & (fm["budget_requested"] == budget)
-                   & (fm["split"] == "in_sample")]
+    fm_cmp = at_cmp_l2(front_mean)
+    for method in [m for m in SWEEP_METHOD_ORDER if m in set(fm_cmp["method"])]:
+        for budget in budgets:
+            o = fm_cmp[(fm_cmp["method"] == method)
+                       & (fm_cmp["budget_requested"] == budget)
+                       & (fm_cmp["split"] == "out_of_sample")]
+            i = fm_cmp[(fm_cmp["method"] == method)
+                       & (fm_cmp["budget_requested"] == budget)
+                       & (fm_cmp["split"] == "in_sample")]
             if o.empty or i.empty:
                 continue
             gap_rows.append({
-                "method": method, "budget_achieved": float(o["budget_achieved"].iloc[0]),
+                "method": method,
+                "budget_requested": int(budget),
                 "gap_mean": float(o["mean_are_mean"].iloc[0]) - float(i["mean_are_mean"].iloc[0]),
                 "gap_lo": float("nan"), "gap_hi": float("nan"),
             })
     f3, ax3 = plt.subplots(figsize=(7, 4.5))
-    _plot_methods(ax3, pd.DataFrame(gap_rows), x_col="budget_achieved",
+    _plot_methods(ax3, pd.DataFrame(gap_rows), x_col="budget_requested",
                   mean_col="gap_mean", lo_col="gap_lo", hi_col="gap_hi", scale=100.0)
-    ax3.axhline(0.0, color="#888", lw=1, ls="--")
-    ax3.set(title="F3 — Generalization gap (out-of-sample − in-sample mean ARE)",
-            xlabel="Retained records (log)", ylabel="ARE gap (pp)")
-    ax3.legend(title="Method", fontsize=9)
+    _budget_axis(ax3, budgets)
+    ax3.axhline(0.0, color="#94A3B8", lw=1, ls="--")
+    ax3.set(title="Generalization gap (out-of-sample − in-sample mean ARE)",
+            xlabel="Requested budget", ylabel="ARE gap (pp)")
+    ax3.legend(title="Method")
     f3.tight_layout()
     written += _save(f3, fig_dir, "f3_generalization_gap", fmts)
     plt.close(f3)
 
-    # F4: by-family ARE at the anchor budget (rotation holdout when available).
-    holdout_type = "rotation" if report["has_rotation"] else "fixed_family"
+    # F4: out-of-sample ARE by held-out family at an anchor budget. Uses the
+    # fixed-family holdout + out-of-sample split (consistent with F1) at the
+    # comparison lambda_L2. The rotation holdout's family scope only exists at the
+    # single rotation budget, so it cannot share the frontier anchor.
     anchor = report["anchor_budget"]
-    if anchor is None:
-        budgets = sorted(df[df["holdout_type"] == holdout_type]["budget_requested"].unique())
-        anchor = budgets[len(budgets) // 2] if budgets else None
-    if anchor is not None and not multi_l2:
+    if anchor is None and budgets:
+        anchor = budgets[len(budgets) // 2]
+    if anchor is not None:
         fam = aggregate.by_family_at_budget(
-            df, budget_requested=int(anchor), holdout_type=holdout_type
+            df, budget_requested=int(anchor),
+            holdout_type="fixed_family", split="out_of_sample", metric="mean_are",
         )
+        fam = fam[fam["l2_lambda"] == COMPARISON_L2]
         families = sorted(fam["family"].unique())
         methods = [m for m in SWEEP_METHOD_ORDER if m in set(fam["method"])]
-        f4, ax4 = plt.subplots(figsize=(max(7, 0.7 * len(families) + 3), 4.5))
-        x = np.arange(len(families))
-        width = 0.8 / max(len(methods), 1)
-        for k, method in enumerate(methods):
-            d = fam[fam["method"] == method].set_index("family").reindex(families)
-            ax4.bar(x + (k - (len(methods) - 1) / 2) * width, d["mean_are"].to_numpy(dtype=float) * 100,
-                    width, label=_label(method), color=METHOD_COLORS.get(method, "#444"))
-        ax4.set_xticks(x)
-        ax4.set_xticklabels(families, rotation=45, ha="right", fontsize=8)
-        ax4.set(title=f"F4 — Out-of-sample ARE by family at budget {int(anchor):,} ({holdout_type})",
-                ylabel="Mean ARE (%)")
-        ax4.legend(title="Method", fontsize=9)
-        ax4.grid(True, axis="y", alpha=0.25)
-        f4.tight_layout()
-        written += _save(f4, fig_dir, "f4_by_family", fmts)
-        plt.close(f4)
+        if families and methods:
+            f4, ax4 = plt.subplots(figsize=(max(7, 1.1 * len(families) + 2), 4.5))
+            x = np.arange(len(families))
+            width = 0.8 / max(len(methods), 1)
+            for k, method in enumerate(methods):
+                d = fam[fam["method"] == method].set_index("family").reindex(families)
+                ax4.bar(x + (k - (len(methods) - 1) / 2) * width,
+                        d["mean_are"].to_numpy(dtype=float) * 100, width,
+                        label=_label(method), color=METHOD_COLORS.get(method, "#444"))
+            # Log y only when the held-out families span more than ~1.5 decades,
+            # so a single hard family doesn't flatten the rest.
+            vals = fam["mean_are"].to_numpy(dtype=float) * 100
+            vals = vals[np.isfinite(vals) & (vals > 0)]
+            use_log = bool(vals.size) and (vals.max() / vals.min() > 30)
+            if use_log:
+                ax4.set_yscale("log")
+            ax4.set_xticks(x)
+            ax4.set_xticklabels(families, rotation=45, ha="right")
+            ax4.set(title=f"Out-of-sample ARE by held-out family (budget {int(anchor):,})",
+                    ylabel="Mean ARE (%, log)" if use_log else "Mean ARE (%)")
+            ax4.legend(title="Method")
+            ax4.grid(True, axis="y", which="both", alpha=0.4)
+            f4.tight_layout()
+            written += _save(f4, fig_dir, "f4_by_family", fmts)
+            plt.close(f4)
 
-    # F5: cost-accuracy — runtime vs OOS mean ARE. This assumes one L2 value per
-    # method/budget; the multi-L2 exploration uses F6 instead.
-    if not multi_l2:
-        runtime = aggregate.run_metric(df, metric="runtime_s")
-        fm_oos = front_mean[front_mean["split"] == "out_of_sample"]
-        f5, ax5 = plt.subplots(figsize=(7, 4.5))
-        for method in [m for m in SWEEP_METHOD_ORDER if m in set(fm_oos["method"])]:
-            rt = runtime[runtime["method"] == method].set_index("budget_requested")
-            acc = fm_oos[fm_oos["method"] == method].set_index("budget_requested")
-            budgets = sorted(set(rt.index) & set(acc.index))
-            if not budgets:
-                continue
-            xs = [rt.loc[b, "runtime_s_mean"] for b in budgets]
-            ys = [acc.loc[b, "mean_are_mean"] * 100 for b in budgets]
-            ax5.scatter(xs, ys, s=60, color=METHOD_COLORS.get(method, "#444"), label=_label(method))
-            for b, xv, yv in zip(budgets, xs, ys, strict=True):
-                ax5.annotate(f"{b:,}", (xv, yv), textcoords="offset points", xytext=(4, 4), fontsize=7)
-        ax5.set_xscale("log")
-        ax5.set(title="F5 — Cost vs accuracy", xlabel="Runtime (s, log)",
-                ylabel="Out-of-sample mean ARE (%)")
-        ax5.legend(title="Method", fontsize=9)
-        ax5.grid(True, which="both", alpha=0.25)
-        f5.tight_layout()
-        written += _save(f5, fig_dir, "f5_cost_accuracy", fmts)
-        plt.close(f5)
+    # F5: cost-accuracy — runtime vs OOS mean ARE at the comparison lambda_L2.
+    runtime = at_cmp_l2(aggregate.run_metric(df, metric="runtime_s"))
+    f5, ax5 = plt.subplots(figsize=(7, 4.5))
+    for method in [m for m in SWEEP_METHOD_ORDER if m in set(fm_oos["method"])]:
+        rt = runtime[runtime["method"] == method].set_index("budget_requested")
+        acc = fm_oos[fm_oos["method"] == method].set_index("budget_requested")
+        bs = sorted(set(rt.index) & set(acc.index))
+        if not bs:
+            continue
+        xs = [rt.loc[b, "runtime_s_mean"] for b in bs]
+        ys = [acc.loc[b, "mean_are_mean"] * 100 for b in bs]
+        ax5.plot(xs, ys, marker=METHOD_MARKERS.get(method, "o"), ms=8, lw=1.2,
+                 color=METHOD_COLORS.get(method, "#444"), label=_label(method))
+        # Label only the budget endpoints per method: survey-weight runtime is
+        # ~constant (dense calibration dominates), so all-point labels collide.
+        ends = {0: (4, 6), len(bs) - 1: (4, -10)}
+        for idx, (b, xv, yv) in enumerate(zip(bs, xs, ys, strict=True)):
+            if idx in ends:
+                ax5.annotate(_budget_label(b), (xv, yv), textcoords="offset points",
+                             xytext=ends[idx], fontsize=8,
+                             color=METHOD_COLORS.get(method, "#444"))
+    ax5.set_xscale("log")
+    ax5.set_yscale("log")
+    ax5.set(title="Cost versus accuracy", xlabel="Runtime (s, log)",
+            ylabel="Out-of-sample mean ARE (%, log)")
+    ax5.legend(title="Method")
+    ax5.grid(True, which="both", alpha=0.4)
+    f5.tight_layout()
+    written += _save(f5, fig_dir, "f5_cost_accuracy", fmts)
+    plt.close(f5)
 
-    # F6: operability frontier — accuracy traded for ESS/concentration as l2_lambda
-    # sweeps, at a fixed budget. Fills fig:operability. Only drawn when the sweep
-    # actually varied l2_lambda (>= 2 values) for informed_l0.
-    l0_runs = df[(df["holdout_type"] == "fixed_family") & (df["method"] == "informed_l0")
-                 & (df["scope"] == "run") & (df["metric"] == "ess")]
-    l2_per_budget = l0_runs.groupby("budget_requested")["l2_lambda"].nunique()
-    if not l2_per_budget.empty and int(l2_per_budget.max()) >= 2:
-        op_budget = int(l2_per_budget.idxmax())
-        op = aggregate.operability_table(df, budget_requested=op_budget)
-        f6, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(11, 4.5))
-        # Panel A: the frontier — OOS accuracy against the ESS it buys, labelled by l2.
-        ax_a.plot(op["ess"], op["oos_mean_are"] * 100, "-o",
-                  color=METHOD_COLORS.get("informed_l0", "#1f77b4"), label="OOS mean ARE")
-        ax_a.plot(op["ess"], op["oos_median_are"] * 100, "--s", color="#888",
-                  label="OOS median ARE")
-        for _, r in op.iterrows():
-            ax_a.annotate(f"l2={r['l2_lambda']:g}", (r["ess"], r["oos_mean_are"] * 100),
-                          textcoords="offset points", xytext=(5, 5), fontsize=7)
-        ax_a.set_yscale("log")
-        ax_a.set(title=f"Accuracy vs ESS (budget {op_budget:,})",
-                 xlabel="Effective sample size", ylabel="Out-of-sample ARE (%, log)")
-        ax_a.legend(fontsize=9)
-        ax_a.grid(True, which="both", alpha=0.25)
-        # Panel B: the two concentration controls against l2 — ESS up, max weight down.
-        ax_b.plot(op["l2_lambda"], op["ess"], "-o", color="#2ca02c", label="ESS")
-        ax_b.set_xscale("symlog", linthresh=1e-6)
-        ax_b.set(title="Concentration controls vs l2_lambda", xlabel="l2_lambda", ylabel="ESS")
-        ax_bw = ax_b.twinx()
-        ax_bw.plot(op["l2_lambda"], op["max_weight"], "--^", color="#d62728", label="Max weight")
-        ax_bw.set_ylabel("Max weight (log)")
-        ax_bw.set_yscale("log")
-        handles_a, labels_a = ax_b.get_legend_handles_labels()
-        handles_b, labels_b = ax_bw.get_legend_handles_labels()
-        ax_b.legend(handles_a + handles_b, labels_a + labels_b, fontsize=9)
-        f6.suptitle("F6 — Operability: trading weight concentration (ESS) for accuracy via l2_lambda")
-        f6.tight_layout()
+    # F6: operability — the lambda_L2 penalty lifts effective sample size (spreads
+    # the weights) at an accuracy cost, traced across the budget axis for the
+    # informed L0 method. Drawn only when the sweep varied lambda_L2 (>= 2 values).
+    if len(l2_values) >= 2:
+        lo_l2, hi_l2 = float(l2_values[0]), float(l2_values[-1])
+        ess_l0 = aggregate.run_metric(df, metric="ess")
+        ess_l0 = ess_l0[ess_l0["method"] == "informed_l0"]
+        are_l0 = front_mean[(front_mean["method"] == "informed_l0")
+                            & (front_mean["split"] == "out_of_sample")]
+        op_budgets = sorted(int(b) for b in ess_l0["budget_requested"].unique())
+        teal = METHOD_COLORS["informed_l0"]
+        # Same hue (it is one method); solid+filled for the smaller penalty,
+        # dashed+open for the larger, so the pair reads in grayscale too.
+        styles = {
+            lo_l2: dict(ls="-", marker="o", mfc=teal,
+                        label=rf"$\lambda_{{L_2}}$ = {lo_l2:g}"),
+            hi_l2: dict(ls="--", marker="s", mfc="white",
+                        label=rf"$\lambda_{{L_2}}$ = {hi_l2:g}"),
+        }
+
+        def _op_line(ax, frame, ycol, scale=1.0):
+            for l2 in (lo_l2, hi_l2):
+                st = styles[l2]
+                d = frame[frame["l2_lambda"] == l2].sort_values("budget_requested")
+                if d.empty:
+                    continue
+                xv = d["budget_requested"].to_numpy(dtype=float)
+                ax.plot(xv, d[f"{ycol}_mean"].to_numpy(dtype=float) * scale,
+                        color=teal, lw=2, ms=7, ls=st["ls"], marker=st["marker"],
+                        mfc=st["mfc"], mec=teal, label=st["label"])
+                lo = d[f"{ycol}_lo"].to_numpy(dtype=float) * scale
+                hi = d[f"{ycol}_hi"].to_numpy(dtype=float) * scale
+                if np.isfinite(lo).all() and np.isfinite(hi).all() and np.any(hi > lo):
+                    ax.fill_between(xv, lo, hi, color=teal, alpha=0.12, linewidth=0)
+
+        f6, (ax_ess, ax_are) = plt.subplots(1, 2, figsize=(11, 4.5))
+        _op_line(ax_ess, ess_l0, "ess")
+        # are_l0 carries mean_are_{mean,lo,hi}; reuse the same helper.
+        _op_line(ax_are, are_l0.rename(columns={
+            "mean_are_mean": "are_mean", "mean_are_lo": "are_lo", "mean_are_hi": "are_hi",
+        }), "are", scale=100.0)
+        for ax in (ax_ess, ax_are):
+            _budget_axis(ax, op_budgets)
+            ax.set_xlabel("Requested budget")
+            ax.grid(True, which="both", alpha=0.4)
+        ax_ess.set(title="Effective sample size", ylabel="ESS")
+        ax_are.set(title="Out-of-sample mean ARE", ylabel="Out-of-sample ARE (%, log)")
+        ax_are.set_yscale("log")
+        ax_ess.legend()
+        f6.suptitle(r"Operability: the $\lambda_{L_2}$ penalty trades weight concentration for accuracy")
+        f6.tight_layout(rect=(0, 0, 1, 0.96))
         written += _save(f6, fig_dir, "f6_operability", fmts)
         plt.close(f6)
 
