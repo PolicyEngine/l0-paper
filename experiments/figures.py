@@ -6,7 +6,7 @@ Reads the sweep's tidy long CSV, aggregates it with
 
 * **LaTeX tables** (frontier, paired comparison, rotation) and a Markdown summary
   -- these need no plotting dependency.
-* **matplotlib figures** (vector PDF + PNG, paper-ready) -- the frontier and its
+* **matplotlib figures** (PNG, paper-ready) -- the frontier and its
   supporting cuts. matplotlib is imported lazily, so if the ``viz`` extra is not
   installed the tables/summary are still written and the figures are skipped with
   a note.
@@ -557,16 +557,13 @@ def _plot_methods(ax, agg, *, x_col, mean_col, lo_col, hi_col, scale=1.0, log_y=
     ax.grid(True, which="both", alpha=0.4)
 
 
-def _save(fig, fig_dir: Path, name: str, fmts: tuple[str, ...]) -> list[Path]:
-    written = []
-    for fmt in fmts:
-        path = fig_dir / f"{name}.{fmt}"
-        fig.savefig(path, dpi=200, bbox_inches="tight")
-        written.append(path)
-    return written
+def _save(fig, fig_dir: Path, name: str) -> list[Path]:
+    path = fig_dir / f"{name}.png"
+    fig.savefig(path, dpi=200, bbox_inches="tight")
+    return [path]
 
 
-def write_figures(report: dict, out_dir: Path, *, fmts: tuple[str, ...]) -> list[Path]:
+def write_figures(report: dict, out_dir: Path) -> list[Path]:
     """Render the matplotlib figures; returns the files written.
 
     No-op (with a note) if matplotlib is missing -- tables/summary are still
@@ -625,7 +622,7 @@ def write_figures(report: dict, out_dir: Path, *, fmts: tuple[str, ...]) -> list
     ax_mean.legend(title="Method")
     f1.suptitle("Accuracy versus record budget (out-of-sample)")
     f1.tight_layout(rect=(0, 0, 1, 0.96))
-    written += _save(f1, fig_dir, "f1_frontier", fmts)
+    written += _save(f1, fig_dir, "f1_frontier")
     plt.close(f1)
 
     # F2: usability — effective sample size and max weight vs budget.
@@ -644,7 +641,7 @@ def write_figures(report: dict, out_dir: Path, *, fmts: tuple[str, ...]) -> list
     ax_ess.legend(title="Method")
     f2.suptitle("Usability: effective sample size and weight concentration")
     f2.tight_layout(rect=(0, 0, 1, 0.96))
-    written += _save(f2, fig_dir, "f2_usability", fmts)
+    written += _save(f2, fig_dir, "f2_usability")
     plt.close(f2)
 
     # F3: generalization gap (OOS − in-sample) mean ARE at the comparison lambda_L2.
@@ -675,7 +672,7 @@ def write_figures(report: dict, out_dir: Path, *, fmts: tuple[str, ...]) -> list
             xlabel="Requested budget", ylabel="ARE gap (pp)")
     ax3.legend(title="Method")
     f3.tight_layout()
-    written += _save(f3, fig_dir, "f3_generalization_gap", fmts)
+    written += _save(f3, fig_dir, "f3_generalization_gap")
     plt.close(f3)
 
     # F4: out-of-sample ARE by held-out family at an anchor budget. Uses the
@@ -716,7 +713,7 @@ def write_figures(report: dict, out_dir: Path, *, fmts: tuple[str, ...]) -> list
             ax4.legend(title="Method")
             ax4.grid(True, axis="y", which="both", alpha=0.4)
             f4.tight_layout()
-            written += _save(f4, fig_dir, "f4_by_family", fmts)
+            written += _save(f4, fig_dir, "f4_by_family")
             plt.close(f4)
 
     # F5: cost-accuracy — runtime vs OOS mean ARE at the comparison lambda_L2.
@@ -747,7 +744,7 @@ def write_figures(report: dict, out_dir: Path, *, fmts: tuple[str, ...]) -> list
     ax5.legend(title="Method")
     ax5.grid(True, which="both", alpha=0.4)
     f5.tight_layout()
-    written += _save(f5, fig_dir, "f5_cost_accuracy", fmts)
+    written += _save(f5, fig_dir, "f5_cost_accuracy")
     plt.close(f5)
 
     # F6: operability — the lambda_L2 penalty lifts effective sample size (spreads
@@ -801,7 +798,7 @@ def write_figures(report: dict, out_dir: Path, *, fmts: tuple[str, ...]) -> list
         ax_ess.legend()
         f6.suptitle(r"Operability: the $\lambda_{L_2}$ penalty trades weight concentration for accuracy")
         f6.tight_layout(rect=(0, 0, 1, 0.96))
-        written += _save(f6, fig_dir, "f6_operability", fmts)
+        written += _save(f6, fig_dir, "f6_operability")
         plt.close(f6)
 
     return written
@@ -814,7 +811,6 @@ def _parse_args() -> argparse.Namespace:
     g.add_argument("--long", type=Path, help="Path to a metrics_long.csv directly.")
     parser.add_argument("--out", type=Path, default=None, help="Output dir (default: <sweep>/report).")
     parser.add_argument("--anchor-budget", type=int, default=None)
-    parser.add_argument("--format", default="pdf,png", help="Output formats, comma-separated (pdf,png,svg).")
     parser.add_argument("--paper-figures", action="store_true", help="Copy figures into paper/figures.")
     return parser.parse_args()
 
@@ -825,13 +821,12 @@ def main() -> None:
     if not long_csv.is_file():
         raise FileNotFoundError(f"metrics_long.csv not found: {long_csv}")
     out_dir = args.out or (long_csv.parent / "report")
-    fmts = tuple(f.strip() for f in args.format.split(",") if f.strip())
 
     report = write_reports(long_csv, out_dir, anchor_budget=args.anchor_budget)
     print(f"Wrote tables: {json.dumps({k: str(v) for k, v in report['table_paths'].items()}, indent=2)}")
     print(f"Wrote summary: {report['summary']}")
 
-    written = write_figures(report, out_dir, fmts=fmts)
+    written = write_figures(report, out_dir)
     for path in written:
         print(f"  figure: {path}")
 
@@ -840,7 +835,7 @@ def main() -> None:
         import shutil
 
         for path in written:
-            if path.suffix in (".pdf", ".png", ".svg"):
+            if path.suffix == ".png":
                 shutil.copy(path, PAPER_FIGURES / path.name)
         print(f"Copied static figures into {PAPER_FIGURES}")
 
