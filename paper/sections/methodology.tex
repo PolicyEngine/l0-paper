@@ -28,14 +28,27 @@ MAPE) of the estimates against the targets,
 \end{equation}
 where $s_j = \max(|t_j|, 1)$ scales each target by its own magnitude, with a floor of one unit so a
 zero-valued target stays well defined; $c$ caps the contribution of any single hard-to-fit target, so
-one badly conditioned target cannot dominate the gradient; and $\omega_j$ are optional per-target
-weights, left uniform here, so the objective is the mean scaled error over targets. The error is
+one badly conditioned target cannot dominate the gradient, and is set to $c = 10$ in the runs reported
+here; and $\omega_j$ are per-target weights, normalised by their sum so only their relative magnitudes
+matter. The error is
 relative, so a one per cent miss on a small target and on a large one count the same. The weights are
 parameterized in log space, $w_i = \exp(\theta_i)$, so the fitted weights stay positive; an Adam
 optimizer \citep{kingma2015} implemented in PyTorch \citep{pytorch2019} minimizes the loss, and the
 total weight is held to the input population. On a fixed set of
 records this calibrator answers a calibration question: it finds weights that match the targets. The
 two baselines use it unchanged; informed $L_0$ extends it.
+
+The per-target weights $\omega_j$ in the runs reported here follow \populace{}'s production US-fiscal
+weighting, computed through the same code path the production US build uses rather than a separate
+reimplementation. The weighting is built in four steps. Each target is first assigned to one of two
+value bases from its measure metadata: a \emph{count} basis (indicator, enrollment, recipient, and
+return-count measures) or an \emph{amount} basis (dollar measures). Within a basis, a target's raw
+weight is proportional to $\max(|t_j|, 1)^{1/2}$, the square root of its own magnitude, so a larger
+aggregate carries more weight but sublinearly (a target a hundred times larger receives about ten times
+the weight), and these raw weights are normalised to mean one inside each basis. The two bases are then
+rescaled to contribute equal total weight, so the far more numerous dollar cells do not swamp the count
+targets. A final step sets the mean weight to one. Because the loss divides by $\sum_j \omega_j$, only
+the relative weights enter the objective and their absolute scale does not.
 
 \subsection{Selection and weighting as one optimization}
 
@@ -70,9 +83,11 @@ fixed multiple of that record's initial weight, clamped after every optimizer st
 shapes the whole weight distribution during optimization; the cap bounds the single largest weight.
 Size and concentration are therefore set by separate controls: $\lambda_{L_0}$ fixes how many records
 remain, and the $L_2$ penalty and \texttt{max\_weight\_ratio} fix how concentrated their weights may
-become. The headline runs leave the cap off and fix $\lambda_{L_2}$ at \tbc[the value chosen from the
-operability sweep of Section~\ref{sec:results}]; tightening either control bounds how much population a
-single record can carry, at some cost to calibration fit. Appendix~\ref{app:hyperparameters} lists the
+become. The headline runs leave the cap off and set $\lambda_{L_2}=0$, so the reported accuracy frontier
+is the pure-calibration result; Section~\ref{sec:results-controls} reports $\lambda_{L_2}=10^{-4}$ beside
+it as an operability contrast, tracing what the penalty buys in effective sample size against what it
+costs in fit. Tightening either control bounds how much population a single record can carry, at some
+cost to calibration fit. Appendix~\ref{app:hyperparameters} lists the
 full configuration, and Algorithm~\ref{alg:l0} gives the optimization loop.
 
 The gates and the weights are learned together: the gate decides whether a record is in the sample,

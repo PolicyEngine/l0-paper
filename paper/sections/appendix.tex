@@ -25,7 +25,7 @@ Learning rate & 0.02 & Adam optimizer step size \\
 Epochs & 1{,}500 & Training iterations \\
 Target loss cap $c$ & 10 & Caps a single target's contribution to $\mathcal{L}_{\text{cal}}$ \\
 $\lambda_{L_0}$ & $3\times10^{-6}$ to $10^{-4}$ & Sparsity penalty, set per build by bisection to the target size \\
-$\lambda_{L_2}$ & \tbc & Soft concentration penalty on $(w_i/w_{0,i})^2$ (mean over records); informed $L_0$ only \\
+$\lambda_{L_2}$ & $0$ (headline), $10^{-4}$ (operability) & Soft concentration penalty on $(w_i/w_{0,i})^2$ (mean over records); informed $L_0$ only \\
 Budget bisection steps & 8 & Re-runs of the optimization that tune $\lambda_{L_0}$ to the target size \\
 \texttt{max\_weight\_ratio} & None (uncapped) & Hard per-record weight cap: $w_i \leq \text{ratio}\times w_{0,i}$, clamped each step \\
 \bottomrule
@@ -101,7 +101,7 @@ Algorithm~\ref{alg:l0} presents the $L_0$-regularized calibration procedure.
 \caption{$L_0$-regularized calibration with Hard Concrete gates}
 \label{alg:l0}
 \begin{algorithmic}[1]
-\Require Calibration matrix $\mathbf{M} \in \R^{m \times n}$, targets $\mathbf{t} \in \R^m$, initial weights $\mathbf{w}_0 \in \R^n$
+\Require Calibration matrix $\mathbf{M} \in \R^{m \times n}$, targets $\mathbf{t} \in \R^m$, initial weights $\mathbf{w}_0 \in \R^n$, per-target loss weights $\boldsymbol{\omega} \in \R^m$
 \Require Hyperparameters: $\lambda_{L_0}$, $\lambda_{L_2}$, weight cap $r$ (\texttt{max\_weight\_ratio}; $\infty$ if uncapped), $\beta$, $\gamma$, $\zeta$, learning rate $\eta$, epochs $E$
 \Ensure Calibrated sparse weight vector $\hat{\mathbf{w}} \in \R^n$
 
@@ -119,7 +119,7 @@ Algorithm~\ref{alg:l0} presents the $L_0$-regularized calibration procedure.
     \EndFor
     \State $w_i^{\text{eff}} \gets \exp(\log w_i) \cdot z_i$ for all $i$
     \State $\hat{t}_j \gets \sum_i M_{ji} \cdot w_i^{\text{eff}}$ for all $j$
-    \State $\mathcal{L}_{\text{cal}} \gets \frac{1}{m}\sum_{j=1}^{m}\min\!\left(\left|\frac{\hat{t}_j - t_j}{s_j}\right|, c\right)$
+    \State $\mathcal{L}_{\text{cal}} \gets \dfrac{\sum_{j=1}^{m}\omega_j\,\min\!\left(\left|\frac{\hat{t}_j - t_j}{s_j}\right|, c\right)}{\sum_{j=1}^{m}\omega_j}$
     \State $\mathcal{L}_{L_0} \gets \sum_{i=1}^{n} \sigma\!\left(\log \alpha_i - \beta \log \frac{-\gamma}{\zeta}\right)$
     \State $\mathcal{L}_{L_2} \gets \frac{1}{n}\sum_{i=1}^{n}\left(\frac{\exp(\log w_i)}{w_{0,i}}\right)^2$ \Comment{soft concentration; informed $L_0$ only}
     \State $\mathcal{L} \gets \mathcal{L}_{\text{cal}} + \lambda_{L_0} \mathcal{L}_{L_0} + \lambda_{L_2} \mathcal{L}_{L_2}$
