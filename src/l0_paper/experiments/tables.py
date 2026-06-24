@@ -239,11 +239,20 @@ def render_frontier(
     (labelled by mean retained records); one column per method.
     """
     df = frontier_df[frontier_df["split"] == split]
+    multi_l2 = "l2_lambda" in df.columns and df["l2_lambda"].nunique() > 1
     methods = [m for m in SWEEP_METHOD_ORDER if m in set(df["method"])]
+    columns = []
+    for method in methods:
+        l2_values = sorted(df[df["method"] == method]["l2_lambda"].unique()) if "l2_lambda" in df else [0.0]
+        for l2 in l2_values:
+            column_label = SWEEP_METHOD_LABELS[method]
+            if multi_l2:
+                column_label = f"{column_label} ($\\lambda_2={float(l2):g}$)"
+            columns.append((method, float(l2), column_label))
     budgets = sorted(df["budget_requested"].unique())
     mean_col, lo_col, hi_col = f"{metric}_mean", f"{metric}_lo", f"{metric}_hi"
     lookup = {
-        (row["method"], int(row["budget_requested"])): row
+        (row["method"], float(row.get("l2_lambda", 0.0)), int(row["budget_requested"])): row
         for _, row in df.iterrows()
     }
     achieved = df.groupby("budget_requested")["budget_achieved"].mean().to_dict()
@@ -251,17 +260,18 @@ def render_frontier(
     body_rows = []
     for budget in budgets:
         cells = []
-        for method in methods:
-            row = lookup.get((method, budget))
+        for method, l2, _label in columns:
+            row = lookup.get((method, l2, budget))
             cells.append(
                 "--" if row is None
                 else _ci_cell(row[mean_col], row[lo_col], row[hi_col])
             )
-        retained = achieved.get(budget, float("nan"))
-        body_rows.append(f"{retained:,.0f} & " + " & ".join(cells) + r" \\")
+        first = budget if multi_l2 else achieved.get(budget, float("nan"))
+        body_rows.append(f"{first:,.0f} & " + " & ".join(cells) + r" \\")
     body = "\n".join(body_rows)
-    header = "Retained records & " + " & ".join(SWEEP_METHOD_LABELS[m] for m in methods) + r" \\"
-    col_spec = "r" * (len(methods) + 1)
+    first_header = "Requested budget" if multi_l2 else "Average retained records"
+    header = first_header + " & " + " & ".join(label for _, _, label in columns) + r" \\"
+    col_spec = "r" * (len(columns) + 1)
     split_label = "out-of-sample" if split == "out_of_sample" else "in-sample"
     caption = caption or (
         f"Mean absolute relative error ({split_label}) versus record budget, per "
@@ -271,8 +281,11 @@ def render_frontier(
     )
     label = label or f"tab:frontier_{split}"
     tablenote = tablenote or (
-        "Retained records is the cross-seed mean achieved budget; informed "
+        "Average retained records is the cross-seed mean achieved budget; informed "
         "$L_0$ sets the budget at each grid point and the baselines match it."
+        if not multi_l2 else
+        "Rows are requested budgets; columns keep $\\lambda_2$ values separate "
+        "to avoid averaging different concentration penalties."
     )
     note = f"\\tablenote{{{tablenote}}}" if tablenote else ""
     return rf"""\begin{{table}}[ht]
@@ -316,8 +329,11 @@ def render_paired_comparison(
         diff = _ci_cell(row["diff_mean"], row["diff_lo"], row["diff_hi"])
         p = row.get("p_value")
         p_str = "--" if p is None or (isinstance(p, float) and math.isnan(p)) else f"{float(p):.3f}"
+        budget = f"{row['budget_requested']:,.0f}"
+        if "l2_lambda" in row.index:
+            budget = f"{budget} ($\\lambda_2={float(row['l2_lambda']):g}$)"
         rows.append(
-            f"{row['budget_requested']:,.0f} & {_ci_cell(row[ch_mean_col], None, None)} & "
+            f"{budget} & {_ci_cell(row[ch_mean_col], None, None)} & "
             f"{_ci_cell(row[bl_mean_col], None, None)} & {diff}{star} & {p_str} \\\\"
         )
     body = "\n".join(rows)

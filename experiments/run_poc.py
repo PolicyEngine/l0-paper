@@ -27,7 +27,7 @@ import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
-from l0_paper.experiments import artifacts, holdout, metrics, tables
+from l0_paper.experiments import artifacts, holdout, metrics, tables, target_loss
 from l0_paper.experiments.conditions import (
     DEFAULT_EPOCHS,
     run_dense_then_sample,
@@ -89,6 +89,15 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--mass", choices=("conserve", "free"), default="conserve")
+    parser.add_argument("--l2-lambda", type=float, default=0.0,
+                        help="Soft weight-concentration penalty for informed L0.")
+    parser.add_argument("--target-loss-weighting",
+                        choices=target_loss.TARGET_LOSS_WEIGHTINGS,
+                        default=target_loss.PRODUCTION_US_FISCAL,
+                        help="Target-row weights used inside Populace's calibration "
+                             "loss. Default matches the production US fiscal weighting.")
+    parser.add_argument("--target-loss-cap", type=float, default=None,
+                        help="Per-target cap in the calibration loss. Defaults to 10.0.")
 
     # Out-of-sample split.
     parser.add_argument("--holdout-frac", type=float, default=0.2)
@@ -105,7 +114,10 @@ def _parse_args() -> argparse.Namespace:
 
     # Sampling.
     parser.add_argument("--sample-reweight", choices=("equal_mass", "renorm_kept"), default="equal_mass")
-    parser.add_argument("--sample-replace", action="store_true")
+    parser.add_argument("--sample-replace", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="PPS sampling with replacement (default). Pass "
+                             "--no-sample-replace for distinct-record draws.")
 
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--write-paper-tables", action="store_true", help="Also overwrite paper/tables.")
@@ -119,6 +131,10 @@ def main() -> None:
     args = _parse_args()
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
+    target_loss_cap = target_loss.resolve_target_loss_cap(
+        args.target_loss_weighting,
+        args.target_loss_cap,
+    )
 
     # 1. Pre-calibration dataset (the shared experiment input).
     if args.reuse_precalibration is not None:
@@ -170,6 +186,15 @@ def main() -> None:
         f"Targets: {len(all_targets)} total -> {len(fit_targets)} fit, "
         f"{len(holdout_targets)} held out. Candidate records: {frame.n(args.weight_entity):,}."
     )
+    target_loss_weights = target_loss.target_loss_weights(
+        fit_targets,
+        weighting=args.target_loss_weighting,
+    )
+    print(
+        "Target loss: "
+        f"weighting={args.target_loss_weighting}, cap={target_loss_cap:g}, "
+        f"weights={target_loss.target_loss_weight_summary(target_loss_weights)}"
+    )
 
     baseline_optimizer = dict(
         weight_entity=args.weight_entity,
@@ -178,8 +203,14 @@ def main() -> None:
         learning_rate=args.learning_rate,
         max_weight_ratio=None,
         mass=args.mass,
+        target_loss_weights=target_loss_weights,
+        target_loss_cap=target_loss_cap,
     )
-    l0_optimizer = {**baseline_optimizer, "max_weight_ratio": args.max_weight_ratio}
+    l0_optimizer = {
+        **baseline_optimizer,
+        "max_weight_ratio": args.max_weight_ratio,
+        "l2_lambda": args.l2_lambda,
+    }
 
     # 3. Condition A: informed L0. Its retained count sets the matched budget.
     l0 = run_l0(frame, fit_targets, target_records=args.target_records, **l0_optimizer)
@@ -249,6 +280,18 @@ def main() -> None:
             "holdout_families": args.holdout_families,
             "validation_only_families": sorted(validation_only),
             "holdout_frac": args.holdout_frac,
+        },
+        "target_loss": {
+            "weighting": args.target_loss_weighting,
+            "cap": target_loss_cap,
+            "fit_weight_summary": target_loss.target_loss_weight_summary(
+                target_loss_weights
+            ),
+            "production_source_path": (
+                target_loss.production_source_path()
+                if args.target_loss_weighting == target_loss.PRODUCTION_US_FISCAL
+                else None
+            ),
         },
         "budget": budget,
         "methods": summaries,

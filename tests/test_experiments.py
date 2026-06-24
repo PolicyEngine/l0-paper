@@ -15,7 +15,14 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
-from l0_paper.experiments import aggregate, artifacts, holdout, metrics, tables
+from l0_paper.experiments import (
+    aggregate,
+    artifacts,
+    holdout,
+    metrics,
+    tables,
+    target_loss,
+)
 from l0_paper.experiments.conditions import (
     calibrate_dense,
     run_dense_then_sample,
@@ -69,7 +76,7 @@ def test_run_l0_prunes_at_budget():
     assert result.n_selected < result.n_records
     assert result.l0_lambda > 0
     assert result.final_loss < result.initial_loss
-    # l2_lambda is recorded for reporting even though Populace applies no L2 term.
+    # l2_lambda is zero unless the informed-L0/Hard-Concrete condition opts in.
     assert result.l2_lambda == 0.0
     assert hasattr(result, "max_weight_ratio")
 
@@ -82,8 +89,10 @@ def test_dense_then_sample_matched_budget():
     )
     assert result.method == "dense_sample"
     assert result.l0_lambda == 0.0
-    assert result.n_selected == 40  # distinct draws without replacement
+    assert result.n_selected == 40  # with-replacement draw count
     assert result.sampling["n_sample"] == 40
+    assert 0 < result.sampling["n_unique_selected"] <= 40
+    assert result.sampling["replace"] is True
 
 
 def test_run_random_then_reweight_matched_budget():
@@ -120,6 +129,13 @@ def test_random_reweight_fills_table_row():
 def test_weighted_sample_conserves_mass():
     weights = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
     full = weighted_sample(weights, 3, seed=0)
+    assert 0 < np.count_nonzero(full) <= 3
+    assert np.isclose(full.sum(), weights.sum())
+
+
+def test_weighted_sample_can_draw_without_replacement():
+    weights = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    full = weighted_sample(weights, 3, seed=0, replace=False)
     assert np.count_nonzero(full) == 3
     assert np.isclose(full.sum(), weights.sum())
 
@@ -145,7 +161,6 @@ def test_zero_value_targets_report_absolute_error_not_are():
     zero_target = Target(
         name="zero_renters",
         entity="household",
-        aggregation="sum",
         measure="is_renter",
         value=0.0,
     )
@@ -160,6 +175,100 @@ def test_zero_value_targets_report_absolute_error_not_are():
     assert scored["zero_value_absolute_error"]["max_absolute_error"] > 0
     assert rows[0]["relative_error"] is None
     assert rows[0]["absolute_relative_error"] is None
+
+
+def test_identifiability_floor_flags_degenerate_targets():
+    """A target below a single household's contribution is denominator-degenerate."""
+    frame, truths = make_toy_frame(seed=0, n=120)
+    tiny = Target(name="tiny_income", entity="household",
+                  measure="income", value=1.0)
+    total = Target(name="total_income", entity="household",
+                   measure="income", value=truths["income"])
+    targets = TargetSet((tiny, total))
+
+    floors = metrics.identifiability_floors(frame, targets)
+    # One household contributes far more than the tiny target, but far less than the total.
+    assert floors[tiny.row_name] > 1.0
+    assert floors[total.row_name] < truths["income"]
+
+    names = metrics.degenerate_target_names(frame, targets)
+    assert tiny.row_name in names
+    assert total.row_name not in names
+
+    audit = metrics.degenerate_audit(frame, targets)
+    assert [r["name"] for r in audit] == [tiny.row_name]
+    assert audit[0]["floor_ratio"] > 1.0
+
+
+def test_score_reports_degenerate_removal_sensitivity():
+    """``score`` emits the targeted-removal mean alongside the tail-sensitive mean."""
+    frame, truths = make_toy_frame(seed=0, n=120)
+    weights = frame.weights_for("household").values
+    tiny = Target(name="tiny_income", entity="household",
+                  measure="income", value=1.0)
+    total = Target(name="total_income", entity="household",
+                   measure="income", value=truths["income"])
+    targets = TargetSet((tiny, total))
+    degenerate = metrics.degenerate_target_names(frame, targets)
+
+    scored = metrics.score(frame, weights, targets, degenerate_names=degenerate)
+    assert scored["n_degenerate"] == 1
+    # At base weights the realistic total is hit exactly (ARE 0) while the tiny
+    # target's ARE explodes; dropping the named degenerate target collapses the mean.
+    assert scored["mean_are_ex_degenerate"] < scored["mean_are"]
+    assert scored["mean_are_ex_degenerate"] < 0.01
+
+    # Without degenerate_names the extra fields are absent (back-compatible).
+    plain = metrics.score(frame, weights, targets)
+    assert "mean_are_ex_degenerate" not in plain
+
+
+def test_target_diagnostics_persistence_and_attribution(tmp_path):
+    """Per-target rows round-trip and the attribution names the worst offender."""
+    frame, truths = make_toy_frame(seed=0, n=120)
+    weights = frame.weights_for("household").values
+    tiny = Target(name="tiny_income", entity="household",
+                  measure="income", value=1.0)
+    total = Target(name="total_income", entity="household",
+                   measure="income", value=truths["income"])
+    targets = list(TargetSet((tiny, total)))
+    degenerate = metrics.degenerate_target_names(frame, targets)
+
+    diagnostics = metrics.target_diagnostics(frame, weights, targets)
+    rows = aggregate.target_diagnostic_rows(
+        method="informed_l0", seed=0, budget_requested=40, split="out_of_sample",
+        diagnostics=diagnostics, degenerate_names=degenerate,
+    )
+    path = aggregate.write_target_diagnostics_csv(tmp_path / "diag.csv", rows)
+    loaded = aggregate.load_target_diagnostics(path)
+    assert set(loaded["target_name"]) == {tiny.row_name, total.row_name}
+
+    top = aggregate.top_are_contributors(
+        loaded, method="informed_l0", budget_requested=40, split="out_of_sample",
+    )
+    assert top.iloc[0]["target_name"] == tiny.row_name
+    assert bool(top.iloc[0]["is_degenerate"])
+    assert top.iloc[0]["share_of_mean"] > 0.99
+
+
+def test_rows_from_run_emits_degenerate_metrics():
+    rows = aggregate.rows_from_run(
+        method="informed_l0", seed=0, budget_requested=1000, budget_achieved=995,
+        holdout_type="fixed_family", fold=-1,
+        in_sample={"mean_are": 0.5, "median_are": 0.1, "max_are": 9.0, "n": 10,
+                   "mean_are_ex_degenerate": 0.08, "n_degenerate": 3,
+                   "by_family": {}, "by_geography": {},
+                   "ess": 50.0, "max_weight": 100.0, "n_selected": 995,
+                   "sum_weight": 1.0, "mean_weight": 1.0, "p50_weight": 1.0,
+                   "p90_weight": 1.0, "p99_weight": 1.0},
+        out_of_sample={"mean_are": 0.2, "median_are": 0.1, "max_are": 0.4, "n": 5,
+                       "by_family": {}, "by_geography": {}},
+        run=SimpleNamespace(runtime_s=12.0, l0_lambda=1e-3, l2_lambda=1e-4, final_loss=0.4),
+    )
+    overall_in = {(r["metric"], r["value"]) for r in rows
+                  if r["scope"] == "overall" and r["split"] == "in_sample"}
+    assert ("mean_are_ex_degenerate", 0.08) in overall_in
+    assert ("n_degenerate", 3.0) in overall_in
 
 
 def test_dense_sample_npz_uses_sampled_weight_diagnostics(tmp_path):
@@ -395,10 +504,60 @@ def test_validation_only_families_tracks_populace():
     assert fams.isdisjoint({"irs_soi", "census_population", "jct", "cms_aca", "ssa"})
     # The set is gated by Populace: every returned family is currently classified
     # validation-only there (translated from the coverage family ids).
-    from populace.build.us.source_coverage import validation_only_family_ids
+    try:
+        from populace.build.us.source_coverage import validation_only_family_ids
+    except ModuleNotFoundError:
+        from populace.build.us_runtime.source_coverage import validation_only_family_ids
 
     classified = set(validation_only_family_ids())
     assert "cbo_income_revenue_projection" in classified
+
+
+def test_production_us_fiscal_target_loss_imports_populace_helper():
+    targets = TargetSet(
+        (
+            Target(
+                name="amount_small",
+                entity="household",
+                measure="income",
+                value=100.0,
+                metadata={"source_measure_id": "payment_amount"},
+            ),
+            Target(
+                name="amount_large",
+                entity="household",
+                measure="income",
+                value=400.0,
+                metadata={"source_measure_id": "payment_amount"},
+            ),
+            Target(
+                name="count_row",
+                entity="household",
+                measure="household_count",
+                value=25.0,
+                metadata={
+                    "source_measure_id": "return_count",
+                    "measure_mode": "indicator_sum",
+                },
+            ),
+        )
+    )
+
+    weights = target_loss.target_loss_weights(
+        targets,
+        weighting=target_loss.PRODUCTION_US_FISCAL,
+    )
+
+    assert weights is not None
+    assert np.isclose(weights.mean(), 1.0)
+    # Reuses Populace's production rule: sqrt(value) within the amount basis.
+    assert np.isclose(weights[1] / weights[0], 2.0)
+    assert target_loss.resolve_target_loss_cap(
+        target_loss.PRODUCTION_US_FISCAL,
+        None,
+    ) == 10.0
+    assert target_loss.resolve_target_loss_cap(target_loss.UNIFORM, None) == 10.0
+    assert target_loss.target_loss_weight_summary(weights)["kind"] == "provided"
 
 
 # --- Amplified sweep: family-grouped folds ------------------------------------
@@ -439,7 +598,7 @@ def test_deal_families_into_folds_rejects_too_many_folds():
 def test_family_grouped_folds_excludes_validation_only_and_rotates():
     families = ["soi", "soi", "soi", "pep", "pep", "jct", "jct", "cbo", "cbo", "snap"]
     targets = [
-        Target(name=f"{fam}_{i}", entity="household", aggregation="sum",
+        Target(name=f"{fam}_{i}", entity="household",
                 measure="is_renter", value=1.0)
         for i, fam in enumerate(families)
     ]
@@ -660,6 +819,43 @@ def test_macro_average_upweights_small_families():
     assert (l0["macro_mean_are_mean"] > 0.10).all()
 
 
+def _l0_only_rows(l2_values):
+    rows = []
+    for l2, ess, oos in l2_values:
+        in_stats = {"mean_are": 0.1, "median_are": 0.05, "max_are": 1.0, "n": 50,
+                    "by_family": {}, "by_geography": {}, "ess": ess, "max_weight": 1e6 / (1 + l2 * 1e6),
+                    "n_selected": 10000, "sum_weight": 1.0, "mean_weight": 1.0,
+                    "p50_weight": 1.0, "p90_weight": 1.0, "p99_weight": 1.0}
+        out_stats = {"mean_are": oos, "median_are": oos * 0.5, "max_are": oos * 2, "n": 30,
+                     "by_family": {}, "by_geography": {}}
+        rows += aggregate.rows_from_run(
+            method="informed_l0", seed=0, budget_requested=10000, budget_achieved=9900,
+            l2_lambda=l2, holdout_type="fixed_family", fold=-1,
+            in_sample=in_stats, out_of_sample=out_stats,
+            run=SimpleNamespace(runtime_s=1.0, l0_lambda=1e-3, l2_lambda=l2, final_loss=0.1),
+        )
+    return rows
+
+
+def test_operability_table_traces_l2_frontier():
+    df = pd.DataFrame(_l0_only_rows([(0.0, 1000.0, 0.2), (1e-3, 3000.0, 5.0)]))
+    op = aggregate.operability_table(df, budget_requested=10000)
+    assert list(op["l2_lambda"]) == [0.0, 1e-3]
+    assert op.loc[op["l2_lambda"] == 0.0, "ess"].iloc[0] == 1000.0
+    assert op.loc[op["l2_lambda"] == 1e-3, "ess"].iloc[0] == 3000.0
+    # Accuracy degrades and max weight falls as l2 (and ESS) rise -- the trade-off.
+    assert (op.loc[op["l2_lambda"] == 1e-3, "oos_mean_are"].iloc[0]
+            > op.loc[op["l2_lambda"] == 0.0, "oos_mean_are"].iloc[0])
+    assert (op.loc[op["l2_lambda"] == 1e-3, "max_weight"].iloc[0]
+            < op.loc[op["l2_lambda"] == 0.0, "max_weight"].iloc[0])
+
+
+def test_paired_method_diff_handles_l0_only_sweep():
+    df = pd.DataFrame(_l0_only_rows([(0.0, 1000.0, 0.2)]))
+    paired = aggregate.paired_method_diff(df)  # no random_reweight rows -> no pairs
+    assert paired.empty  # returns cleanly rather than raising on the absent column
+
+
 def test_mean_ci_and_extreme_counts():
     mean, lo, hi = aggregate.mean_ci([0.1, 0.2, 0.3])
     assert lo < mean < hi
@@ -682,7 +878,7 @@ def test_render_frontier_and_paired_tables():
 
     frontier_tex = tables.render_frontier(frontier, split="out_of_sample")
     assert "Informed $L_0$" in frontier_tex
-    assert "Retained records" in frontier_tex
+    assert "Average retained records" in frontier_tex
     assert "\\label{tab:frontier_out_of_sample}" in frontier_tex
 
     paired_tex = tables.render_paired_comparison(paired)

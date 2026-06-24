@@ -11,10 +11,12 @@ Condition A -- informed L0 / Hard-Concrete: ``calibrate(..., target_records=N)``
 jointly fits log-weights and gates to retain ~N records.
 
 Condition B -- dense then sample: ``calibrate(..., target_records=None,
-l0_lambda=0.0)`` fits all weights, then a weighted random sample of ``n`` records
-(probability proportional to the calibrated weight) is drawn and reweighted to a
-deployable dataset. With ``n`` set to condition A's retained count, the two are
-compared at a matched record budget.
+l0_lambda=0.0)`` fits all weights, then a probability-proportional-to-size sample
+of ``n`` draws is taken from the calibrated weights. The sweep default is
+sampling with replacement plus ``equal_mass`` reweighting: each draw receives
+``sum(weights) / n``, so a record drawn ``k`` times carries ``k`` shares. This is
+the Hansen-Hurwitz integerisation of the dense weights. With ``n`` set to
+condition A's retained count, the two are compared at a matched record budget.
 """
 
 from __future__ import annotations
@@ -49,10 +51,9 @@ class RunResult:
     n_records: int
     n_selected: int
     l0_lambda: float
-    # Weight-concentration controls. Populace bounds per-record weight magnitude
-    # with a HARD cap (``max_weight_ratio``), not the paper's soft L2 penalty, so
-    # ``calibrate`` has no L2 term. ``l2_lambda`` is recorded for reporting parity
-    # with the paper's loss (Eq. 1) but is not currently applied by the solver.
+    # Weight-concentration controls. ``max_weight_ratio`` is a hard per-record
+    # cap; ``l2_lambda`` is Populace's soft concentration penalty and is only
+    # applied for the L0/Hard-Concrete gated condition.
     l2_lambda: float
     max_weight_ratio: float | None
     loss_trajectory: np.ndarray
@@ -86,8 +87,7 @@ def run_l0(
 ) -> RunResult:
     """Condition A: informed L0 sampling with Hard-Concrete gates at a budget.
 
-    ``l2_lambda`` is recorded only; Populace controls weight concentration via the
-    hard ``max_weight_ratio`` cap, so it is not passed to ``calibrate``.
+    ``l2_lambda`` is passed through to Populace's soft concentration penalty.
     """
     start = time.perf_counter()
     result = calibrate(
@@ -100,6 +100,7 @@ def run_l0(
         max_weight_ratio=max_weight_ratio,
         target_records=target_records,
         l0_lambda=l0_lambda,
+        l2_lambda=l2_lambda,
         init_mean=init_mean,
         temperature=temperature,
         budget_iters=budget_iters,
@@ -146,19 +147,25 @@ def weighted_sample(
     n_sample: int,
     *,
     seed: int = 0,
-    replace: bool = False,
+    replace: bool = True,
     reweight: str = "equal_mass",
 ) -> np.ndarray:
-    """Draw ``n_sample`` records with probability proportional to ``weights``.
+    """Draw records with probability proportional to ``weights``.
 
-    Returns a full-length weight vector (zeros for unselected records). The
-    selected records are reweighted so the sample carries the same total
-    population mass as the input weights:
+    Returns a full-length weight vector (zeros for unselected records). Under
+    ``replace=True`` and ``reweight="equal_mass"``, this is the unbiased
+    Hansen-Hurwitz integerisation of the dense weights: every draw receives
+    ``sum(weights) / n_sample`` and repeated draws accumulate on the same record,
+    so ``E[sampled_weight_i] == weights_i``.
 
-    * ``"equal_mass"`` -- every selected record gets ``sum(weights) / n_sample``
-      (integerisation: probability-proportional-to-size with equal post-weights).
+    * ``"equal_mass"`` -- every draw gets ``sum(weights) / n_sample``.
+      With replacement this is unbiased for the input weights. Without replacement
+      it forces equal post-weights on distinct records and under-weights large
+      probability records at large budgets.
     * ``"renorm_kept"`` -- selected records keep their fitted weight, then the
-      vector is rescaled so its total equals ``sum(weights)``.
+      vector is rescaled so its total equals ``sum(weights)``. This is a biased
+      contrast for PPS draws because high-weight records are both more likely to
+      be sampled and keep larger post-sample weights.
     """
     weights = np.asarray(weights, dtype=np.float64)
     n = weights.size
@@ -230,10 +237,9 @@ def sample_from_dense(
     n_sample: int,
     seed: int = 0,
     max_weight_ratio: float | None = None,
-    l2_lambda: float = 0.0,
     target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
     sample_seed: int | None = None,
-    replace: bool = False,
+    replace: bool = True,
     reweight: str = "equal_mass",
     dense_runtime: float = 0.0,
 ) -> RunResult:
@@ -241,7 +247,8 @@ def sample_from_dense(
 
     ``dense_runtime`` is folded into the reported ``runtime_s`` so the survey-weight
     sampling cost reflects the full fit-then-sample pipeline even when the dense
-    fit is amortized across budgets.
+    fit is amortized across budgets. The default is ``replace=True`` with
+    ``reweight="equal_mass"``, the unbiased PPS/Hansen-Hurwitz integerisation.
     """
     start = time.perf_counter()
     draw_seed = seed if sample_seed is None else sample_seed
@@ -252,7 +259,7 @@ def sample_from_dense(
     options = dict(dense.options)
     options.update(
         {
-            "l2_lambda": l2_lambda,
+            "l2_lambda": 0.0,
             "target_loss_cap": target_loss_cap,
             "gates": "off",
         }
@@ -264,9 +271,9 @@ def sample_from_dense(
         weights=sampled,
         initial_weights=np.asarray(dense.initial_weights, dtype=np.float64),
         n_records=sampled.size,
-        n_selected=int(np.count_nonzero(sampled)),
+        n_selected=int(n_sample),
         l0_lambda=0.0,
-        l2_lambda=float(l2_lambda),
+        l2_lambda=0.0,
         max_weight_ratio=max_weight_ratio,
         loss_trajectory=np.asarray(dense.loss_trajectory, dtype=np.float64),
         initial_loss=float(dense.initial_loss),
@@ -277,6 +284,7 @@ def sample_from_dense(
         calibration_result=dense,
         sampling={
             "n_sample": int(n_sample),
+            "n_unique_selected": int(np.count_nonzero(sampled)),
             "sample_seed": int(draw_seed),
             "replace": bool(replace),
             "reweight": reweight,
@@ -295,11 +303,10 @@ def run_dense_then_sample(
     learning_rate: float = DEFAULT_LEARNING_RATE,
     mass: str = "conserve",
     max_weight_ratio: float | None = None,
-    l2_lambda: float = 0.0,
     target_loss_weights: np.ndarray | None = None,
     target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
     sample_seed: int | None = None,
-    replace: bool = False,
+    replace: bool = True,
     reweight: str = "equal_mass",
 ) -> RunResult:
     """Condition B: dense calibration (gates off), then weighted random sampling."""
@@ -321,7 +328,6 @@ def run_dense_then_sample(
         n_sample=n_sample,
         seed=seed,
         max_weight_ratio=max_weight_ratio,
-        l2_lambda=l2_lambda,
         target_loss_cap=target_loss_cap,
         sample_seed=sample_seed,
         replace=replace,
@@ -341,7 +347,6 @@ def run_random_then_reweight(
     learning_rate: float = DEFAULT_LEARNING_RATE,
     mass: str = "free",
     max_weight_ratio: float | None = None,
-    l2_lambda: float = 0.0,
     target_loss_weights: np.ndarray | None = None,
     target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
     sample_seed: int | None = None,
@@ -418,7 +423,7 @@ def run_random_then_reweight(
     options = dict(result.options)
     options.update(
         {
-            "l2_lambda": l2_lambda,
+            "l2_lambda": 0.0,
             "target_loss_cap": target_loss_cap,
             "gates": "off",
             "selection": "uniform_random",
@@ -433,7 +438,7 @@ def run_random_then_reweight(
         n_records=n_full,
         n_selected=int(np.count_nonzero(weights)),
         l0_lambda=0.0,
-        l2_lambda=float(l2_lambda),
+        l2_lambda=0.0,
         max_weight_ratio=max_weight_ratio,
         loss_trajectory=np.asarray(result.loss_trajectory, dtype=np.float64),
         initial_loss=float(result.initial_loss),

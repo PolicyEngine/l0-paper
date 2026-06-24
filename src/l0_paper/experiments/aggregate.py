@@ -4,8 +4,8 @@
 The sweep (``experiments/run_sweep.py``) writes one **long** CSV -- the single
 source of truth -- with one row per atomic measurement:
 
-    method, seed, budget_requested, budget_achieved, holdout_type, fold,
-    split, scope, scope_value, metric, value
+    method, seed, budget_requested, budget_achieved, l2_lambda, holdout_type,
+    fold, split, scope, scope_value, metric, value
 
 * ``scope == "overall"`` -- a scored-target aggregate (``mean_are`` /
   ``median_are`` / ``max_are`` / ``n``) over the whole split.
@@ -39,6 +39,7 @@ LONG_COLUMNS = (
     "seed",
     "budget_requested",
     "budget_achieved",
+    "l2_lambda",
     "holdout_type",
     "fold",
     "split",
@@ -50,9 +51,13 @@ LONG_COLUMNS = (
 
 # Scored-target aggregates carried for overall + per-family + per-geography scopes.
 _ARE_METRICS = ("mean_are", "median_are", "max_are", "n")
+# Overall-only extras: the targeted-removal sensitivity (mean with the named
+# denominator-degenerate targets dropped) and how many were dropped.
+_OVERALL_EXTRA_METRICS = ("mean_are_ex_degenerate", "n_degenerate")
 # Weight/run diagnostics that depend only on the weight vector (one per run).
 _RUN_METRICS = (
     "n_selected",
+    "n_unique_selected",
     "ess",
     "sum_weight",
     "mean_weight",
@@ -62,6 +67,7 @@ _RUN_METRICS = (
     "p99_weight",
     "runtime_s",
     "l0_lambda",
+    "l2_lambda",
     "final_loss",
     "budget_achieved",
 )
@@ -84,6 +90,13 @@ def _scored_rows(
             )
 
     emit("overall", "", scored)
+    for metric in _OVERALL_EXTRA_METRICS:
+        value = scored.get(metric)
+        if value is not None:
+            rows.append(
+                {**base, "split": split, "scope": "overall", "scope_value": "",
+                 "metric": metric, "value": float(value)}
+            )
     for family, stats in scored.get("by_family", {}).items():
         emit("family", family, stats)
     for level, stats in scored.get("by_geography", {}).items():
@@ -97,6 +110,7 @@ def rows_from_run(
     seed: int,
     budget_requested: int,
     budget_achieved: int,
+    l2_lambda: float = 0.0,
     holdout_type: str,
     fold: int,
     in_sample: dict[str, Any],
@@ -118,6 +132,7 @@ def rows_from_run(
         "seed": int(seed),
         "budget_requested": int(budget_requested),
         "budget_achieved": int(budget_achieved),
+        "l2_lambda": float(l2_lambda),
         "holdout_type": holdout_type,
         "fold": int(fold),
     }
@@ -125,14 +140,22 @@ def rows_from_run(
     rows += _scored_rows(base, "out_of_sample", out_of_sample)
 
     run_metrics: dict[str, float] = {"budget_achieved": float(budget_achieved)}
-    for key in ("n_selected", "ess", "sum_weight", "mean_weight", "max_weight",
+    if "n_selected" in in_sample and in_sample["n_selected"] is not None:
+        run_metrics["n_unique_selected"] = float(in_sample["n_selected"])
+    for key in ("ess", "sum_weight", "mean_weight", "max_weight",
                 "p50_weight", "p90_weight", "p99_weight"):
         if key in in_sample and in_sample[key] is not None:
             run_metrics[key] = float(in_sample[key])
     if run is not None:
+        run_metrics["n_selected"] = float(
+            getattr(run, "n_selected", in_sample.get("n_selected", budget_achieved))
+        )
         run_metrics["runtime_s"] = float(run.runtime_s)
         run_metrics["l0_lambda"] = float(run.l0_lambda)
+        run_metrics["l2_lambda"] = float(getattr(run, "l2_lambda", l2_lambda))
         run_metrics["final_loss"] = float(run.final_loss)
+    elif "n_selected" in in_sample and in_sample["n_selected"] is not None:
+        run_metrics["n_selected"] = float(in_sample["n_selected"])
     if extra_run_metrics:
         run_metrics.update({k: float(v) for k, v in extra_run_metrics.items()})
 
@@ -182,8 +205,136 @@ def load_long(path: str | Path) -> pd.DataFrame:
     """Load a long-format results CSV with sensible dtypes."""
     df = pd.read_csv(path)
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    if "l2_lambda" not in df.columns:
+        df["l2_lambda"] = 0.0
+    df["l2_lambda"] = pd.to_numeric(df["l2_lambda"], errors="coerce").fillna(0.0)
     df["scope_value"] = df["scope_value"].fillna("")
     return df
+
+
+# Per-target diagnostics: one row per (run config, scored target). Persisted for
+# the headline (fixed-family) split only, so the near-zero-denominator drivers can
+# be *named* (which targets inflate the mean) rather than trimmed away.
+TARGET_DIAG_COLUMNS = (
+    "method",
+    "l2_lambda",
+    "seed",
+    "budget_requested",
+    "split",
+    "target_name",
+    "family",
+    "geography_level",
+    "target_value",
+    "achieved_value",
+    "absolute_relative_error",
+    "is_degenerate",
+)
+
+
+def target_diagnostic_rows(
+    *,
+    method: str,
+    l2_lambda: float = 0.0,
+    seed: int,
+    budget_requested: int,
+    split: str,
+    diagnostics: Iterable[dict[str, Any]],
+    degenerate_names: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Flatten :func:`metrics.target_diagnostics` rows into persistable per-target rows."""
+    degenerate = degenerate_names or set()
+    return [
+        {
+            "method": method,
+            "l2_lambda": float(l2_lambda),
+            "seed": int(seed),
+            "budget_requested": int(budget_requested),
+            "split": split,
+            "target_name": row["name"],
+            "family": row["family"],
+            "geography_level": row["geography_level"],
+            "target_value": row["target_value"],
+            "achieved_value": row["achieved_value"],
+            "absolute_relative_error": row["absolute_relative_error"],
+            "is_degenerate": bool(row["name"] in degenerate),
+        }
+        for row in diagnostics
+    ]
+
+
+def write_target_diagnostics_csv(path: str | Path, rows: list[dict[str, Any]]) -> Path:
+    """Write per-target diagnostic rows to CSV with the canonical column order."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(TARGET_DIAG_COLUMNS))
+        writer.writeheader()
+        writer.writerows(rows)
+    return path
+
+
+def load_target_diagnostics(path: str | Path) -> pd.DataFrame:
+    """Load a per-target diagnostics CSV with sensible dtypes."""
+    df = pd.read_csv(path)
+    if "l2_lambda" not in df.columns:
+        df["l2_lambda"] = 0.0
+    df["l2_lambda"] = pd.to_numeric(df["l2_lambda"], errors="coerce").fillna(0.0)
+    for col in ("target_value", "achieved_value", "absolute_relative_error"):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["is_degenerate"] = df["is_degenerate"].astype(bool)
+    return df
+
+
+def top_are_contributors(
+    diag: pd.DataFrame,
+    *,
+    method: str,
+    budget_requested: int,
+    l2_lambda: float | None = None,
+    split: str = "out_of_sample",
+    top_k: int = 15,
+) -> pd.DataFrame:
+    """The targets that drive a run's mean ARE, averaged across seeds, with shares.
+
+    Answers "*which named targets* push the mean up" -- the attribution that
+    replaces winsorization. ``share_of_mean`` is a target's mean ARE as a fraction
+    of the summed ARE (its contribution to the micro-average), and
+    ``is_degenerate`` flags the denominator-degenerate ones
+    (:func:`metrics.degenerate_target_names`).
+    """
+    sub = diag[
+        (diag["method"] == method)
+        & (diag["budget_requested"] == budget_requested)
+        & (diag["split"] == split)
+    ]
+    if "l2_lambda" in sub.columns:
+        values = sorted(pd.to_numeric(sub["l2_lambda"], errors="coerce").fillna(0.0).unique())
+        if l2_lambda is None and len(values) > 1:
+            raise ValueError(
+                "top_are_contributors requires l2_lambda when diagnostics contain "
+                f"multiple penalty values: {values}."
+            )
+        if l2_lambda is not None:
+            sub = sub[pd.to_numeric(sub["l2_lambda"], errors="coerce").fillna(0.0) == float(l2_lambda)]
+    sub = sub.dropna(subset=["absolute_relative_error"])
+    if sub.empty:
+        return pd.DataFrame(
+            columns=["target_name", "family", "is_degenerate", "mean_are", "share_of_mean"]
+        )
+    per_target = (
+        sub.groupby(["target_name", "family", "is_degenerate"], as_index=False)[
+            "absolute_relative_error"
+        ]
+        .mean()
+        .rename(columns={"absolute_relative_error": "mean_are"})
+    )
+    total = float(per_target["mean_are"].sum())
+    per_target["share_of_mean"] = per_target["mean_are"] / total if total > 0 else 0.0
+    return (
+        per_target.sort_values("mean_are", ascending=False)
+        .head(top_k)
+        .reset_index(drop=True)
+    )
 
 
 def mean_ci(values: Iterable[float], *, confidence: float = 0.95) -> tuple[float, float, float]:
@@ -214,6 +365,39 @@ def _overall(df: pd.DataFrame, *, holdout_type: str, split: str, metric: str) ->
     ]
 
 
+def _budget_achieved_by_method(df: pd.DataFrame, *, holdout_type: str) -> pd.Series:
+    """Mean retained-draw budget by method/l2/requested budget.
+
+    Older sweep CSVs recorded ``dense_sample``'s ``budget_achieved`` as the
+    number of unique nonzero records after with-replacement duplicate draws were
+    collapsed. The experiment budget, however, is the number of PPS draws matched
+    to informed L0. Recover that draw-count budget for reporting while leaving
+    the unique count available as ``n_unique_selected`` in newly generated rows.
+    """
+    sub = df[
+        (df["holdout_type"] == holdout_type)
+        & (df["scope"] == "run")
+        & (df["metric"] == "budget_achieved")
+    ]
+    achieved = sub.groupby(["method", "l2_lambda", "budget_requested"])["value"].mean()
+    if achieved.empty:
+        return achieved
+
+    fixed = achieved.to_dict()
+    keys = {(float(l2), int(budget)) for _method, l2, budget in achieved.index}
+    for l2_lambda, budget in keys:
+        dense_key = ("dense_sample", l2_lambda, budget)
+        if dense_key not in fixed:
+            continue
+        reference = fixed.get(("informed_l0", l2_lambda, budget))
+        if reference is None:
+            reference = fixed.get(("random_reweight", l2_lambda, budget))
+        if reference is None:
+            reference = float(budget)
+        fixed[dense_key] = float(reference)
+    return pd.Series(fixed)
+
+
 def frontier_table(
     df: pd.DataFrame,
     *,
@@ -227,19 +411,21 @@ def frontier_table(
     grid budget; ``budget_achieved`` is the cross-seed mean retained count.
     """
     records: list[dict[str, Any]] = []
-    achieved = (
-        df[(df["holdout_type"] == holdout_type) & (df["metric"] == "budget_achieved")]
-        .groupby(["method", "budget_requested"])["value"].mean()
-    )
+    achieved = _budget_achieved_by_method(df, holdout_type=holdout_type)
     for split in ("in_sample", "out_of_sample"):
         sub = _overall(df, holdout_type=holdout_type, split=split, metric=metric)
-        for (method, budget), group in sub.groupby(["method", "budget_requested"]):
+        for (method, l2_lambda, budget), group in sub.groupby(
+            ["method", "l2_lambda", "budget_requested"]
+        ):
             mean, lo, hi = mean_ci(group["value"], confidence=confidence)
             records.append(
                 {
                     "method": method,
+                    "l2_lambda": float(l2_lambda),
                     "budget_requested": int(budget),
-                    "budget_achieved": float(achieved.get((method, budget), float("nan"))),
+                    "budget_achieved": float(
+                        achieved.get((method, l2_lambda, budget), float("nan"))
+                    ),
                     "split": split,
                     "n_seeds": int(group["seed"].nunique()),
                     f"{metric}_mean": mean,
@@ -247,7 +433,9 @@ def frontier_table(
                     f"{metric}_hi": hi,
                 }
             )
-    return pd.DataFrame(records).sort_values(["split", "method", "budget_requested"]).reset_index(drop=True)
+    return pd.DataFrame(records).sort_values(
+        ["split", "method", "l2_lambda", "budget_requested"]
+    ).reset_index(drop=True)
 
 
 def rotation_seed_scores(
@@ -297,7 +485,7 @@ def rotation_seed_scores(
 
     family = (
         sub.pivot_table(
-            index=["method", "seed", "budget_requested", "fold", "scope_value"],
+            index=["method", "l2_lambda", "seed", "budget_requested", "fold", "scope_value"],
             columns="metric",
             values="value",
             aggfunc="first",
@@ -316,26 +504,27 @@ def rotation_seed_scores(
             & (df["scope"] == "run")
             & (df["metric"] == "budget_achieved")
         ]
-        .groupby(["method", "seed", "budget_requested"])["value"]
+        .groupby(["method", "l2_lambda", "seed", "budget_requested"])["value"]
         .mean()
     )
     excluded_targets = (
-        excluded.groupby(["method", "seed", "budget_requested"])["n"].sum()
+        excluded.groupby(["method", "l2_lambda", "seed", "budget_requested"])["n"].sum()
         if not excluded.empty else {}
     )
 
     records: list[dict[str, Any]] = []
-    for (method, seed, budget), group in included.groupby(
-        ["method", "seed", "budget_requested"]
+    for (method, l2_lambda, seed, budget), group in included.groupby(
+        ["method", "l2_lambda", "seed", "budget_requested"]
     ):
         n_targets = float(group["n"].sum())
         if n_targets <= 0:
             continue
         value = float((group[metric] * group["n"]).sum() / n_targets)
-        key = (method, seed, budget)
+        key = (method, l2_lambda, seed, budget)
         records.append(
             {
                 "method": method,
+                "l2_lambda": float(l2_lambda),
                 "seed": int(seed),
                 "budget_requested": int(budget),
                 "budget_achieved": float(achieved.get(key, float("nan"))),
@@ -365,7 +554,7 @@ def rotation_seed_scores(
         )
     return (
         pd.DataFrame(records)
-        .sort_values(["method", "budget_requested", "seed"])
+        .sort_values(["method", "l2_lambda", "budget_requested", "seed"])
         .reset_index(drop=True)
     )
 
@@ -385,11 +574,14 @@ def rotation_frontier_table(
     )
     mean_col = metric
     records: list[dict[str, Any]] = []
-    for (method, budget), group in seed_scores.groupby(["method", "budget_requested"]):
+    for (method, l2_lambda, budget), group in seed_scores.groupby(
+        ["method", "l2_lambda", "budget_requested"]
+    ):
         mean, lo, hi = mean_ci(group[mean_col], confidence=confidence)
         records.append(
             {
                 "method": method,
+                "l2_lambda": float(l2_lambda),
                 "budget_requested": int(budget),
                 "budget_achieved": float(group["budget_achieved"].mean()),
                 "split": "out_of_sample",
@@ -416,7 +608,7 @@ def rotation_frontier_table(
         )
     return (
         pd.DataFrame(records)
-        .sort_values(["split", "method", "budget_requested"])
+        .sort_values(["split", "method", "l2_lambda", "budget_requested"])
         .reset_index(drop=True)
     )
 
@@ -442,7 +634,7 @@ def paired_method_diff(
     """
     sub = _overall(df, holdout_type=holdout_type, split=split, metric=metric)
     records: list[dict[str, Any]] = []
-    for budget, group in sub.groupby("budget_requested"):
+    for (l2_lambda, budget), group in sub.groupby(["l2_lambda", "budget_requested"]):
         wide = group.pivot_table(index="seed", columns="method", values="value")
         if challenger not in wide.columns or baseline not in wide.columns:
             continue
@@ -461,6 +653,7 @@ def paired_method_diff(
         records.append(
             {
                 "budget_requested": int(budget),
+                "l2_lambda": float(l2_lambda),
                 "n_seeds": int(paired.shape[0]),
                 f"{challenger}_mean": float(paired[challenger].mean()),
                 f"{baseline}_mean": float(paired[baseline].mean()),
@@ -472,7 +665,12 @@ def paired_method_diff(
                 "significant": bool(enough_seeds and ci_excludes_zero),
             }
         )
-    return pd.DataFrame(records).sort_values("budget_requested").reset_index(drop=True)
+    out = pd.DataFrame(records)
+    if out.empty:
+        # No paired (challenger, baseline) seeds -- e.g. an L0-only sweep. Callers
+        # guard on ``.empty``; return it without sorting on an absent column.
+        return out
+    return out.sort_values(["l2_lambda", "budget_requested"]).reset_index(drop=True)
 
 
 def macro_average(
@@ -497,14 +695,17 @@ def macro_average(
         & (df["metric"] == metric)
     ]
     per_seed = (
-        sub.groupby(["method", "budget_requested", "seed"])["value"].mean().reset_index()
+        sub.groupby(["method", "l2_lambda", "budget_requested", "seed"])["value"].mean().reset_index()
     )
     records: list[dict[str, Any]] = []
-    for (method, budget), group in per_seed.groupby(["method", "budget_requested"]):
+    for (method, l2_lambda, budget), group in per_seed.groupby(
+        ["method", "l2_lambda", "budget_requested"]
+    ):
         mean, lo, hi = mean_ci(group["value"], confidence=confidence)
         records.append(
             {
                 "method": method,
+                "l2_lambda": float(l2_lambda),
                 "budget_requested": int(budget),
                 "n_seeds": int(group["seed"].nunique()),
                 f"macro_{metric}_mean": mean,
@@ -512,7 +713,9 @@ def macro_average(
                 f"macro_{metric}_hi": hi,
             }
         )
-    return pd.DataFrame(records).sort_values(["method", "budget_requested"]).reset_index(drop=True)
+    return pd.DataFrame(records).sort_values(
+        ["method", "l2_lambda", "budget_requested"]
+    ).reset_index(drop=True)
 
 
 def by_family_at_budget(
@@ -536,9 +739,9 @@ def by_family_at_budget(
         & (df["budget_requested"] == budget_requested)
     ]
     return (
-        sub.groupby(["method", "scope_value"])["value"].mean().reset_index()
+        sub.groupby(["method", "l2_lambda", "scope_value"])["value"].mean().reset_index()
         .rename(columns={"scope_value": "family", "value": metric})
-        .sort_values(["family", "method"]).reset_index(drop=True)
+        .sort_values(["family", "method", "l2_lambda"]).reset_index(drop=True)
     )
 
 
@@ -551,16 +754,60 @@ def run_metric(
         & (df["scope"] == "run")
         & (df["metric"] == metric)
     ]
+    achieved = _budget_achieved_by_method(df, holdout_type=holdout_type)
     records: list[dict[str, Any]] = []
-    for (method, budget), group in sub.groupby(["method", "budget_requested"]):
+    for (method, l2_lambda, budget), group in sub.groupby(
+        ["method", "l2_lambda", "budget_requested"]
+    ):
         mean, lo, hi = mean_ci(group["value"], confidence=confidence)
         records.append(
             {
                 "method": method,
+                "l2_lambda": float(l2_lambda),
                 "budget_requested": int(budget),
+                "budget_achieved": float(
+                    achieved.get((method, l2_lambda, budget), group["budget_achieved"].mean())
+                ),
                 f"{metric}_mean": mean,
                 f"{metric}_lo": lo,
                 f"{metric}_hi": hi,
             }
         )
-    return pd.DataFrame(records).sort_values(["method", "budget_requested"]).reset_index(drop=True)
+    return pd.DataFrame(records).sort_values(
+        ["method", "l2_lambda", "budget_requested"]
+    ).reset_index(drop=True)
+
+
+def operability_table(
+    df: pd.DataFrame,
+    *,
+    method: str = "informed_l0",
+    budget_requested: int | None = None,
+    holdout_type: str = "fixed_family",
+) -> pd.DataFrame:
+    """The accuracy <-> ESS/concentration frontier as ``l2_lambda`` sweeps.
+
+    For one method at a fixed budget, returns one row per ``l2_lambda`` with the
+    cross-seed mean ESS, max weight, in-sample mean ARE, and out-of-sample mean and
+    median ARE. Raising ``l2_lambda`` spreads the weights (ESS up, max weight down)
+    but the concentration-hungry fiscal targets degrade -- this traces that
+    trade-off, filling the operability figure. Feeds ``fig:operability``.
+    """
+    sub = df[(df["holdout_type"] == holdout_type) & (df["method"] == method)]
+    if budget_requested is not None:
+        sub = sub[sub["budget_requested"] == budget_requested]
+
+    def by_l2(scope: str, split: str, metric: str) -> pd.Series:
+        s = sub[(sub["scope"] == scope) & (sub["split"] == split) & (sub["metric"] == metric)]
+        return s.groupby("l2_lambda")["value"].mean()
+
+    table = pd.DataFrame(
+        {
+            "ess": by_l2("run", "na", "ess"),
+            "max_weight": by_l2("run", "na", "max_weight"),
+            "in_mean_are": by_l2("overall", "in_sample", "mean_are"),
+            "oos_mean_are": by_l2("overall", "out_of_sample", "mean_are"),
+            "oos_median_are": by_l2("overall", "out_of_sample", "median_are"),
+        }
+    )
+    return table.reset_index().sort_values("l2_lambda").reset_index(drop=True)

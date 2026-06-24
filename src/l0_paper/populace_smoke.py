@@ -39,6 +39,9 @@ def make_toy_frame(seed: int = 0, n: int = 120) -> tuple[Frame, dict[str, float]
     household = pd.DataFrame(
         {
             "household_id": household_id,
+            # All-ones indicator: count-like facts are now sums of indicator columns
+            # (Populace's Target dropped the `aggregation` field).
+            "household_count": np.ones(n, dtype=np.float64),
             "income": income,
             "is_renter": is_renter,
         }
@@ -70,20 +73,18 @@ def make_toy_targets(truths: dict[str, float]) -> TargetSet:
             Target(
                 name="households",
                 entity="household",
-                aggregation="count",
+                measure="household_count",
                 value=truths["households"] * scale,
             ),
             Target(
                 name="income",
                 entity="household",
-                aggregation="sum",
                 measure="income",
                 value=truths["income"] * scale,
             ),
             Target(
                 name="renters",
                 entity="household",
-                aggregation="sum",
                 measure="is_renter",
                 value=truths["renters"] * scale,
             ),

@@ -31,6 +31,7 @@ from typing import Any, Literal
 import numpy as np
 
 from populace.calibrate import TargetRegistry
+from populace.calibrate.registry import TargetSpec
 from populace.frame import Frame, Weights
 
 from ._populace_driver import _populace_repo_root, load_driver
@@ -304,5 +305,17 @@ def load_precalibration_dataset(directory: str | Path) -> tuple[Frame, TargetReg
     directory = Path(directory).expanduser().resolve()
     with (directory / FRAME_PICKLE).open("rb") as handle:
         frame: Frame = pickle.load(handle)
-    registry = TargetRegistry.from_json(directory / REGISTRY_JSON)
+    registry_path = directory / REGISTRY_JSON
+    try:
+        registry = TargetRegistry.from_json(registry_path)
+    except ValueError as exc:
+        payload = json.loads(registry_path.read_text(encoding="utf-8"))
+        if payload.get("populace_target_registry") != 1:
+            raise exc
+        specs = []
+        for raw in payload["specs"]:
+            spec_raw = dict(raw)
+            spec_raw.pop("aggregation", None)
+            specs.append(TargetSpec(**spec_raw))
+        registry = TargetRegistry(specs, country=payload["country"])
     return frame, registry
