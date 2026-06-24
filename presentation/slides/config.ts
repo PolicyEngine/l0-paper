@@ -1,0 +1,52 @@
+import { SlideshowConfig } from "@/lib/types";
+import {
+  BaselinesSlide,
+  CalibrationObjectiveSlide,
+  CaveatsSlide,
+  CandidateUniverseSlide,
+  ExperimentDesignSlide,
+  GeneralizationSlide,
+  GateIntuitionSlide,
+  MainFrontierSlide,
+  PipelineSlide,
+  SamplingQuestionSlide,
+  SubnationalProblemSlide,
+  TakeawaySlide,
+  TitleSlide,
+  UsabilitySlide,
+  OperabilitySlide,
+  QuestionsSlide,
+} from "@/slides/l0-ima-2026";
+
+export const l0Ima2026Config: SlideshowConfig = {
+  id: "l0-ima-2026",
+  title: "L0 regularization for subnational microsimulation calibration",
+  description: "Draft PolicyEngine presentation for IMA 2026.",
+  date: "2026-07-01",
+  location: "IMA 2026, Brussels",
+  footerText: "PolicyEngine - IMA 2026 - L0 calibration",
+  speakers: [
+    {
+      name: "Maria Juaristi",
+      title: "PolicyEngine",
+    },
+  ],
+  slides: [
+    TitleSlide,
+    SubnationalProblemSlide,
+    CandidateUniverseSlide,
+    PipelineSlide,
+    SamplingQuestionSlide,
+    BaselinesSlide,
+    GateIntuitionSlide,
+    CalibrationObjectiveSlide,
+    ExperimentDesignSlide,
+    MainFrontierSlide,
+    GeneralizationSlide,
+    UsabilitySlide,
+    OperabilitySlide,
+    CaveatsSlide,
+    TakeawaySlide,
+    QuestionsSlide,
+  ],
+};
