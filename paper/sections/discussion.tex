@@ -110,8 +110,10 @@ Appendix~\ref{app:hyperparameters} and is part of the method specification rathe
 \subsubsection{Computational cost}
 
 Building the calibration matrix and running gradient-based optimization cost more than a small
-classical calibration. That cost is justified only when the problem requires it, which is why the
-comparison against a simpler random-sampling baseline matters.
+classical calibration, and informed $L_0$ adds the eight-step budget bisection on top of a single fit;
+Appendix~\ref{app:cost} reports the runtime each method reaches against the accuracy it buys. That cost
+is justified only when the problem requires it, which is why the comparison against a simpler
+random-sampling baseline matters.
 
 \subsection{Generalizability}
 

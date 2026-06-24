@@ -65,8 +65,9 @@ gated estimate becomes $\hat{t}_j = \sum_i M_{ji} w_i z_i$, and the optimizer mi
 The first term is the capped weighted MAPE of Equation~\ref{eq:loss_cal}, now evaluated on the gated
 weights $w_i z_i$. The second term is the $L_0$ penalty and sets the sample size: $\bar{z}_i$ is the
 expected activation of gate $i$, so $\sum_i \bar{z}_i$ is the expected number of open gates, the
-expected retained-record count, and $\lambda_{L_0}$ sets how aggressively the optimizer prunes. The
-third term is a soft concentration penalty: $\lambda_{L_2}$ multiplies the mean squared ratio of each
+expected retained-record count, and $\lambda_{L_0}$ sets how aggressively the optimizer prunes. Rather
+than set $\lambda_{L_0}$ by hand, each build tunes it by an outer bisection to a requested record count
+(Appendix~\ref{app:presets}). The third term is a soft concentration penalty: $\lambda_{L_2}$ multiplies the mean squared ratio of each
 fitted weight to its initial weight $w_{0,i}$, which discourages the optimizer from carrying the fit on
 a few heavily inflated records. It applies to informed $L_0$ and is zero for the two baselines, which
 run the shared calibrator without the gate and concentration terms.
@@ -88,7 +89,8 @@ is the pure-calibration result; Section~\ref{sec:results-controls} reports $\lam
 it as an operability contrast, tracing what the penalty buys in effective sample size against what it
 costs in fit. Tightening either control bounds how much population a single record can carry, at some
 cost to calibration fit. Appendix~\ref{app:hyperparameters} lists the
-full configuration, and Algorithm~\ref{alg:l0} gives the optimization loop.
+full configuration, and Appendix~\ref{app:algorithm} gives the optimization loop as
+Algorithm~\ref{alg:l0}.
 
 The gates and the weights are learned together: the gate decides whether a record is in the sample,
 and the weight decides how much it counts. Because both are fit against the same calibration loss,
@@ -214,10 +216,10 @@ can match national totals while missing local ones, or match one source while mi
 
 A small number of targets have denominators so small that a single record can swing their relative error
 past 100 per cent. We identify these structurally rather than by an arbitrary cutoff: target $j$ is
-denominator-degenerate when its value is smaller than its \emph{identifiability floor}
+denominator-degenerate when its value is smaller than its identifiability floor
 $\max_i |M_{ji}|\, w_{0,i}$, the largest contribution any single record makes at its initial weight. For
 such a target the absolute relative error reflects integer placement noise rather than calibration
-quality. Rather than winsorize or trim the error distribution, we \emph{name} these targets in a one-time
+quality. Rather than winsorize or trim the error distribution, we name these targets in a one-time
 audit and report a targeted-removal sensitivity (the mean recomputed with exactly those named targets
 dropped) beside the full mean, so the effect of the degenerate targets is visible and attributable.
 Target counts are read from each run's manifest.

@@ -1,18 +1,23 @@
 \begin{table}[H]
 \centering
 {\tablefont
-\begin{tabular}{llrl}
+\begin{tabular}{rrr}
 \toprule
-Preset & $\lambda_{L_0}$ & Retained records & Use case \\
+Requested records & $\lambda_{L_0}$ (converged) & Achieved records \\
 \midrule
-Compact & larger & $\sim$2{,}000--5{,}000 & National, interactive simulation \\
-Detailed & smaller & $\sim$20{,}000--40{,}000 & Subnational policy analysis \\
+2{,}000  & $4.9\times10^{-5}$ & 1{,}962 \\
+5{,}000  & $2.3\times10^{-5}$ & 4{,}935 \\
+10{,}000 & $1.2\times10^{-5}$ & 9{,}770 \\
+20{,}000 & $5.0\times10^{-6}$ & 20{,}406 \\
+40{,}000 & $2.1\times10^{-6}$ & 39{,}586 \\
 \bottomrule
 \end{tabular}
 }
-\caption{Sample-size presets. A larger $\lambda_{L_0}$ prunes more records and yields a smaller
-dataset; a smaller $\lambda_{L_0}$ retains more. The presets differ only in $\lambda_{L_0}$ and the
-epoch count; all other hyperparameters are shared (Appendix~\ref{app:hyperparameters}).}
+\caption{The sparsity penalty $\lambda_{L_0}$ that each requested record count converged to under the
+eight-step budget bisection (\texttt{weighted-loss-3seed}, informed $L_0$, $\lambda_{L_2}=0$), with the
+achieved retained-record count. Values are means over three seeds. A larger $\lambda_{L_0}$ prunes more
+records; the bisection sets it per build rather than by hand.}
 \label{tab:presets}
-\tablenote{Retained-record counts are build-specific and reported with each run.}
+\tablenote{$\lambda_{L_0}$ and the achieved count are read from each run's metrics; the achieved count is
+within three per cent of the requested count at every budget.}
 \end{table}

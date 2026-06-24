@@ -82,11 +82,10 @@ to future work; here they serve as the calibration context the sampler is expect
 
 Reducing a large candidate dataset to a fixed budget is a sampling problem with a long statistical
 history, and several established methods reduce a microdata file by selecting actual records to match
-known totals. They differ mainly in where calibration enters. We review the three with the clearest
+known totals. They differ mainly in where calibration enters. We review the two with the clearest
 track record in microdata construction; random sampling and survey-weight sampling form the
-matched-budget comparison set in Section~\ref{sec:methodology}, while combinatorial optimisation is
-reviewed as the discrete, gradient-free sibling of the method we study but is not benchmarked in this
-study. We also note the coreset view from machine learning, where a weighted subset is chosen so that a
+matched-budget comparison set in Section~\ref{sec:methodology}. We also note the coreset view from 
+machine learning, where a weighted subset is chosen so that a
 model fit on the subset approximates the fit on the full data \citep{feldman2020coresets,
 bachem2017coresets}.
 
@@ -117,33 +116,18 @@ probabilities are the calibration weights, survey-weight sampling presupposes a 
 in our comparison it is the calibrate-then-reduce baseline, with gradient descent supplying the
 weights.
 
-\subsubsection{Combinatorial optimisation}
-
-A third approach makes selection itself the calibration. Combinatorial optimisation chooses a
-combination of records, generally with integer multiplicities, that reproduces the benchmark totals
-as closely as possible, with fit measured by an aggregate error such as the total absolute error
-\citep{williamson1998}. The search space is the set of possible subsets, so the problem is solved
-with metaheuristics; simulated annealing, which accepts a worsening swap with a probability that
-falls as a temperature parameter cools \citep{kirkpatrick1983}, is the search the literature finds
-most reliable \citep{voas2000}. Combinatorial optimisation has been the workhorse of small-area
-microsimulation, and where it has been compared with regression reweighting it has been found
-slightly more accurate and able to return a solution for areas where the regression failed to
-converge \citep{tanton2014co, harland2012}. Two findings carry over to our comparison: the method
-reproduces the variables it is constrained on but not necessarily the cross-tabulations it is not
-constrained on, and the stochastic search is computationally heavy and can become intractable for
-large populations. It is the discrete, gradient-free sibling of the method we study, and it makes
-selection target-informed in the same sense; we therefore treat it as the closest conceptual reference
-point for informed selection, though implementing and benchmarking it is left to future work.
-
 \subsubsection{Informed selection}
 
 These methods share the idea that a carefully chosen weighted subset can stand in for a larger
 dataset, but they reach it differently: random sampling ignores the targets and repairs the gap
-afterwards, survey-weight sampling inherits the targets from a prior calibration, and combinatorial
-optimisation pursues the targets at the moment of selection through a discrete search. The method
-studied here pursues the targets at selection, as combinatorial optimisation does, but it does so
-with a continuous, gradient-based relaxation that fits the selection and the weights jointly. The
-next subsection sets out that relaxation.
+afterwards, while survey-weight sampling inherits the targets from a prior calibration. A third
+tradition makes selection itself the calibration: combinatorial optimisation chooses a combination of
+records, with integer multiplicities, to match the benchmark totals directly, searched with
+metaheuristics such as simulated annealing \citep{williamson1998, voas2000}. It is the closest
+precedent for target-informed selection, but it is discrete and gradient-free; we note it as related
+work rather than include it in the matched-budget comparison. The method studied here also pursues the
+targets at selection, but with a continuous, gradient-based relaxation that fits the selection and the
+weights jointly. The next subsection sets out that relaxation.
 
 \subsection{\texorpdfstring{$L_0$}{L0} regularization and the Hard Concrete distribution}
 
@@ -189,7 +173,9 @@ gates toward zero. At test time the noise is removed and the gate is evaluated d
     \right),
     \label{eq:deterministic_gate}
 \end{equation}
-which returns exact zeros and ones and therefore an exactly sparse weight vector.
+which returns an exact zero for any record driven far enough off and an exact one for any record driven
+far enough on, with intermediate values in between. The exact zeros make the weight vector exactly
+sparse; a record left with an intermediate gate is retained with its fitted weight scaled by the gate.
 
 The two pieces depend on each other, which is the point worth stressing for readers new to this
 construction. The $L_0$ penalty states the objective, that fewer active records are preferred, but
