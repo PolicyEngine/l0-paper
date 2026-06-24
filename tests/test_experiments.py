@@ -89,8 +89,10 @@ def test_dense_then_sample_matched_budget():
     )
     assert result.method == "dense_sample"
     assert result.l0_lambda == 0.0
-    assert result.n_selected == 40  # wrapper default is distinct draws
+    assert result.n_selected == 40  # with-replacement draw count
     assert result.sampling["n_sample"] == 40
+    assert 0 < result.sampling["n_unique_selected"] <= 40
+    assert result.sampling["replace"] is True
 
 
 def test_run_random_then_reweight_matched_budget():
@@ -127,6 +129,13 @@ def test_random_reweight_fills_table_row():
 def test_weighted_sample_conserves_mass():
     weights = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
     full = weighted_sample(weights, 3, seed=0)
+    assert 0 < np.count_nonzero(full) <= 3
+    assert np.isclose(full.sum(), weights.sum())
+
+
+def test_weighted_sample_can_draw_without_replacement():
+    weights = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    full = weighted_sample(weights, 3, seed=0, replace=False)
     assert np.count_nonzero(full) == 3
     assert np.isclose(full.sum(), weights.sum())
 
@@ -869,7 +878,7 @@ def test_render_frontier_and_paired_tables():
 
     frontier_tex = tables.render_frontier(frontier, split="out_of_sample")
     assert "Informed $L_0$" in frontier_tex
-    assert "Retained records" in frontier_tex
+    assert "Average retained records" in frontier_tex
     assert "\\label{tab:frontier_out_of_sample}" in frontier_tex
 
     paired_tex = tables.render_paired_comparison(paired)

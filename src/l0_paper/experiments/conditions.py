@@ -147,7 +147,7 @@ def weighted_sample(
     n_sample: int,
     *,
     seed: int = 0,
-    replace: bool = False,
+    replace: bool = True,
     reweight: str = "equal_mass",
 ) -> np.ndarray:
     """Draw records with probability proportional to ``weights``.
@@ -239,7 +239,7 @@ def sample_from_dense(
     max_weight_ratio: float | None = None,
     target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
     sample_seed: int | None = None,
-    replace: bool = False,
+    replace: bool = True,
     reweight: str = "equal_mass",
     dense_runtime: float = 0.0,
 ) -> RunResult:
@@ -247,7 +247,7 @@ def sample_from_dense(
 
     ``dense_runtime`` is folded into the reported ``runtime_s`` so the survey-weight
     sampling cost reflects the full fit-then-sample pipeline even when the dense
-    fit is amortized across budgets. The sweep default is ``replace=True`` with
+    fit is amortized across budgets. The default is ``replace=True`` with
     ``reweight="equal_mass"``, the unbiased PPS/Hansen-Hurwitz integerisation.
     """
     start = time.perf_counter()
@@ -271,7 +271,7 @@ def sample_from_dense(
         weights=sampled,
         initial_weights=np.asarray(dense.initial_weights, dtype=np.float64),
         n_records=sampled.size,
-        n_selected=int(np.count_nonzero(sampled)),
+        n_selected=int(n_sample),
         l0_lambda=0.0,
         l2_lambda=0.0,
         max_weight_ratio=max_weight_ratio,
@@ -284,6 +284,7 @@ def sample_from_dense(
         calibration_result=dense,
         sampling={
             "n_sample": int(n_sample),
+            "n_unique_selected": int(np.count_nonzero(sampled)),
             "sample_seed": int(draw_seed),
             "replace": bool(replace),
             "reweight": reweight,
@@ -305,7 +306,7 @@ def run_dense_then_sample(
     target_loss_weights: np.ndarray | None = None,
     target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
     sample_seed: int | None = None,
-    replace: bool = False,
+    replace: bool = True,
     reweight: str = "equal_mass",
 ) -> RunResult:
     """Condition B: dense calibration (gates off), then weighted random sampling."""

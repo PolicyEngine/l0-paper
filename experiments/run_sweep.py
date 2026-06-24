@@ -86,11 +86,11 @@ def _parse_args() -> argparse.Namespace:
                              "budget.")
     parser.add_argument("--target-loss-weighting",
                         choices=target_loss.TARGET_LOSS_WEIGHTINGS,
-                        default=target_loss.UNIFORM,
+                        default=target_loss.PRODUCTION_US_FISCAL,
                         help="Target-row weights used inside Populace's calibration "
-                             "loss. 'uniform' preserves the historical experiment "
-                             "loss; 'production_us_fiscal' imports Populace's private "
-                             "_fiscal_target_loss_weights helper.")
+                             "loss. Default 'production_us_fiscal' imports Populace's "
+                             "production _fiscal_target_loss_weights helper; 'uniform' "
+                             "preserves the historical unweighted experiment loss.")
     parser.add_argument("--target-loss-cap", type=float, default=None,
                         help="Per-target cap in the calibration loss. Defaults to 10.0 "
                              "for both uniform weighting and production_us_fiscal.")

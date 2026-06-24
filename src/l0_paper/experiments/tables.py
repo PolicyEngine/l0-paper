@@ -269,7 +269,7 @@ def render_frontier(
         first = budget if multi_l2 else achieved.get(budget, float("nan"))
         body_rows.append(f"{first:,.0f} & " + " & ".join(cells) + r" \\")
     body = "\n".join(body_rows)
-    first_header = "Requested budget" if multi_l2 else "Retained records"
+    first_header = "Requested budget" if multi_l2 else "Average retained records"
     header = first_header + " & " + " & ".join(label for _, _, label in columns) + r" \\"
     col_spec = "r" * (len(columns) + 1)
     split_label = "out-of-sample" if split == "out_of_sample" else "in-sample"
@@ -281,7 +281,7 @@ def render_frontier(
     )
     label = label or f"tab:frontier_{split}"
     tablenote = tablenote or (
-        "Retained records is the cross-seed mean achieved budget; informed "
+        "Average retained records is the cross-seed mean achieved budget; informed "
         "$L_0$ sets the budget at each grid point and the baselines match it."
         if not multi_l2 else
         "Rows are requested budgets; columns keep $\\lambda_2$ values separate "

@@ -1,7 +1,8 @@
 """Target-loss weighting options for the experiment harness.
 
-The paper experiments default to the historical uniform target-row loss, but can
-opt into Populace's current US fiscal production weighting. Until Populace
+The paper experiments default to Populace's current US fiscal production
+weighting, while retaining the historical uniform target-row loss as an explicit
+contrast. Until Populace
 exposes that helper from a public package module, this file imports the private
 release-builder implementation so the experiment uses the same code path as
 production rather than a local reimplementation.

@@ -57,6 +57,7 @@ _OVERALL_EXTRA_METRICS = ("mean_are_ex_degenerate", "n_degenerate")
 # Weight/run diagnostics that depend only on the weight vector (one per run).
 _RUN_METRICS = (
     "n_selected",
+    "n_unique_selected",
     "ess",
     "sum_weight",
     "mean_weight",
@@ -139,15 +140,22 @@ def rows_from_run(
     rows += _scored_rows(base, "out_of_sample", out_of_sample)
 
     run_metrics: dict[str, float] = {"budget_achieved": float(budget_achieved)}
-    for key in ("n_selected", "ess", "sum_weight", "mean_weight", "max_weight",
+    if "n_selected" in in_sample and in_sample["n_selected"] is not None:
+        run_metrics["n_unique_selected"] = float(in_sample["n_selected"])
+    for key in ("ess", "sum_weight", "mean_weight", "max_weight",
                 "p50_weight", "p90_weight", "p99_weight"):
         if key in in_sample and in_sample[key] is not None:
             run_metrics[key] = float(in_sample[key])
     if run is not None:
+        run_metrics["n_selected"] = float(
+            getattr(run, "n_selected", in_sample.get("n_selected", budget_achieved))
+        )
         run_metrics["runtime_s"] = float(run.runtime_s)
         run_metrics["l0_lambda"] = float(run.l0_lambda)
         run_metrics["l2_lambda"] = float(getattr(run, "l2_lambda", l2_lambda))
         run_metrics["final_loss"] = float(run.final_loss)
+    elif "n_selected" in in_sample and in_sample["n_selected"] is not None:
+        run_metrics["n_selected"] = float(in_sample["n_selected"])
     if extra_run_metrics:
         run_metrics.update({k: float(v) for k, v in extra_run_metrics.items()})
 
@@ -357,6 +365,39 @@ def _overall(df: pd.DataFrame, *, holdout_type: str, split: str, metric: str) ->
     ]
 
 
+def _budget_achieved_by_method(df: pd.DataFrame, *, holdout_type: str) -> pd.Series:
+    """Mean retained-draw budget by method/l2/requested budget.
+
+    Older sweep CSVs recorded ``dense_sample``'s ``budget_achieved`` as the
+    number of unique nonzero records after with-replacement duplicate draws were
+    collapsed. The experiment budget, however, is the number of PPS draws matched
+    to informed L0. Recover that draw-count budget for reporting while leaving
+    the unique count available as ``n_unique_selected`` in newly generated rows.
+    """
+    sub = df[
+        (df["holdout_type"] == holdout_type)
+        & (df["scope"] == "run")
+        & (df["metric"] == "budget_achieved")
+    ]
+    achieved = sub.groupby(["method", "l2_lambda", "budget_requested"])["value"].mean()
+    if achieved.empty:
+        return achieved
+
+    fixed = achieved.to_dict()
+    keys = {(float(l2), int(budget)) for _method, l2, budget in achieved.index}
+    for l2_lambda, budget in keys:
+        dense_key = ("dense_sample", l2_lambda, budget)
+        if dense_key not in fixed:
+            continue
+        reference = fixed.get(("informed_l0", l2_lambda, budget))
+        if reference is None:
+            reference = fixed.get(("random_reweight", l2_lambda, budget))
+        if reference is None:
+            reference = float(budget)
+        fixed[dense_key] = float(reference)
+    return pd.Series(fixed)
+
+
 def frontier_table(
     df: pd.DataFrame,
     *,
@@ -370,10 +411,7 @@ def frontier_table(
     grid budget; ``budget_achieved`` is the cross-seed mean retained count.
     """
     records: list[dict[str, Any]] = []
-    achieved = (
-        df[(df["holdout_type"] == holdout_type) & (df["metric"] == "budget_achieved")]
-        .groupby(["method", "l2_lambda", "budget_requested"])["value"].mean()
-    )
+    achieved = _budget_achieved_by_method(df, holdout_type=holdout_type)
     for split in ("in_sample", "out_of_sample"):
         sub = _overall(df, holdout_type=holdout_type, split=split, metric=metric)
         for (method, l2_lambda, budget), group in sub.groupby(
@@ -716,6 +754,7 @@ def run_metric(
         & (df["scope"] == "run")
         & (df["metric"] == metric)
     ]
+    achieved = _budget_achieved_by_method(df, holdout_type=holdout_type)
     records: list[dict[str, Any]] = []
     for (method, l2_lambda, budget), group in sub.groupby(
         ["method", "l2_lambda", "budget_requested"]
@@ -726,6 +765,9 @@ def run_metric(
                 "method": method,
                 "l2_lambda": float(l2_lambda),
                 "budget_requested": int(budget),
+                "budget_achieved": float(
+                    achieved.get((method, l2_lambda, budget), group["budget_achieved"].mean())
+                ),
                 f"{metric}_mean": mean,
                 f"{metric}_lo": lo,
                 f"{metric}_hi": hi,
