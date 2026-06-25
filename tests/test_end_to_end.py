@@ -21,6 +21,7 @@ from l0_paper.experiments import aggregate, crunch, holdout, metrics, target_los
 from l0_paper.experiments.conditions import (
     run_dense_then_sample,
     run_l0,
+    run_l1,
     run_random_then_reweight,
 )
 from l0_paper.populace_smoke import make_toy_frame, make_toy_targets
@@ -52,13 +53,17 @@ def _run_sweep(out_dir: Path) -> tuple[Path, Path]:
     for budget in (40, 80):
         for seed in (0, 1):
             l0 = run_l0(frame, fit, target_records=budget, seed=seed, epochs=60, learning_rate=0.15)
+            l1 = run_l1(
+                frame, fit, target_records=l0.n_selected, seed=seed,
+                epochs=60, learning_rate=0.15, budget_iters=5,
+            )
             dense = run_dense_then_sample(
                 frame, fit, n_sample=l0.n_selected, seed=seed, epochs=60, learning_rate=0.15
             )
             rnd = run_random_then_reweight(
                 frame, fit, n_sample=l0.n_selected, seed=seed, epochs=60, learning_rate=0.15
             )
-            for run in (l0, dense, rnd):
+            for run in (l0, l1, dense, rnd):
                 in_sample = metrics.score(frame, run.weights, fit, label="in_sample")
                 out_of_sample = metrics.score(frame, run.weights, held, label="out_of_sample")
                 rows.extend(
@@ -91,10 +96,10 @@ def test_sweep_arms_and_crunch_end_to_end(tmp_path):
     long_csv, diag_csv = _run_sweep(tmp_path)
 
     long_df = aggregate.load_long(long_csv)
-    assert set(long_df["method"]) == {"informed_l0", "dense_sample", "random_reweight"}
+    assert set(long_df["method"]) == {"informed_l0", "informed_l1", "dense_sample", "random_reweight"}
     # runtime is tracked per arm (the cost-vs-accuracy axis), one tidy row per run.
     runtime = long_df[long_df["metric"] == "runtime_s"]
-    assert set(runtime["method"]) == {"informed_l0", "dense_sample", "random_reweight"}
+    assert set(runtime["method"]) == {"informed_l0", "informed_l1", "dense_sample", "random_reweight"}
     assert (runtime["value"] >= 0).all()
 
     diag = aggregate.load_target_diagnostics(diag_csv)

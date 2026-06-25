@@ -49,6 +49,7 @@ from l0_paper.experiments.conditions import (
     DEFAULT_EPOCHS,
     calibrate_dense,
     run_l0,
+    run_l1,
     run_random_then_reweight,
     sample_from_dense,
 )
@@ -143,8 +144,8 @@ def _parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--methods", nargs="+",
-        choices=["informed_l0", "random_reweight", "dense_sample"],
-        default=["informed_l0", "random_reweight", "dense_sample"],
+        choices=["informed_l0", "informed_l1", "random_reweight", "dense_sample"],
+        default=["informed_l0", "informed_l1", "random_reweight", "dense_sample"],
         help="Which calibration conditions to run. Default all three. Use e.g. "
              "--methods informed_l0 to run L0 only (the expensive condition); the "
              "cheap baselines can be added in a later run at matched budgets.",
@@ -256,6 +257,7 @@ def _sweep_split(
     and only when ``dense_sample`` is requested. Returns per-seed dense runtimes.
     """
     want_l0 = "informed_l0" in methods
+    want_l1 = "informed_l1" in methods
     want_survey = "dense_sample" in methods
     want_random = "random_reweight" in methods
 
@@ -322,6 +324,13 @@ def _sweep_split(
                     max_weight_ratio=split_baseline_optimizer.get("max_weight_ratio"),
                     target_loss_cap=split_baseline_optimizer["target_loss_cap"],
                     **sample_kwargs,
+                ))
+            if want_l1:
+                # Convex-sparse selector: proximal L1 at the matched budget, its own
+                # bisection on l1_lambda hitting the same retained count as L0.
+                runs.append(run_l1(
+                    frame, fit_targets, target_records=matched, seed=seed,
+                    **split_baseline_optimizer,
                 ))
             if want_random:
                 runs.append(run_random_then_reweight(
