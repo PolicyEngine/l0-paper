@@ -53,7 +53,7 @@ SNAP, Medicaid, SSI, and TANF.
 The CPS is not a complete tax-benefit dataset on its own. Some tax variables are missing, others are
 measured with error, and top incomes are imperfectly captured relative to tax records
 \citep{burkhauser2012}. Benefit receipt is also underreported relative to administrative sources
-\citep{meyer2015, meyer2021}. The pipeline therefore augments the CPS before calibration.
+\citep{meyer2015}. The pipeline therefore augments the CPS before calibration.
 
 \subsubsection{Imputation from administrative and survey sources}
 
@@ -61,7 +61,8 @@ The pipeline enriches the CPS base by imputing variables from administrative and
 imputes tax-return detail from the IRS Public Use File \citep[PUF;][]{bryant2023a} onto CPS records
 following \citet{woodruff2024}: the PUF carries detailed tax-return information but lacks household
 structure and demographic coverage, so quantile regression forests \citep{meinshausen2006quantile}
-predict the PUF variables on the CPS. The imputation is sequential and regime-gated, drawing from a
+predict the PUF variables on the CPS; \citet{meyer2021} assess the accuracy of such
+survey--administrative tax imputations. The imputation is sequential and regime-gated, drawing from a
 weighted bootstrap, so later variables condition on earlier imputed values. The same machinery draws
 further variables from the donors in Table~\ref{tab:donors} where the CPS is thin. Each step adds
 variables to the existing households rather than new records, so the candidate universe stays at one

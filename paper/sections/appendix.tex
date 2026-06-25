@@ -122,9 +122,9 @@ Algorithm~\ref{alg:l0} presents the $L_0$-regularized calibration procedure.
     \State \textbf{Sample Hard Concrete gates (training):}
     \For{$i = 1$ to $n$}
         \State $u_i \sim \text{Uniform}(\epsilon, 1-\epsilon)$
-        \State $\bar{s}_i \gets \sigma\!\left(\frac{\log u_i - \log(1-u_i) + \log \alpha_i}{\beta}\right)$
-        \State $s_i \gets \bar{s}_i(\zeta - \gamma) + \gamma$
-        \State $z_i \gets \min(1, \max(0, s_i))$
+        \State $s_i \gets \sigma\!\left(\frac{\log u_i - \log(1-u_i) + \log \alpha_i}{\beta}\right)$
+        \State $\bar{s}_i \gets s_i(\zeta - \gamma) + \gamma$
+        \State $z_i \gets \min(1, \max(0, \bar{s}_i))$
     \EndFor
     \State $w_i^{\text{eff}} \gets \exp(\log w_i) \cdot z_i$ for all $i$
     \State $\hat{t}_j \gets \sum_i M_{ji} \cdot w_i^{\text{eff}}$ for all $j$
