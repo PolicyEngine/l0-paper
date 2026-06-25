@@ -41,6 +41,8 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
+
 from l0_paper.experiments import aggregate, holdout, metrics, target_loss
 from l0_paper.experiments.artifacts import _jsonable, write_run_manifest
 from l0_paper.experiments.conditions import (
@@ -166,6 +168,8 @@ def _score_and_emit(
     fold: int,
     degenerate_fit: set[str] | None = None,
     degenerate_holdout: set[str] | None = None,
+    fit_loss_weights: np.ndarray | None = None,
+    holdout_loss_weights: np.ndarray | None = None,
     diag_rows: list[dict] | None = None,
 ) -> None:
     """Score one run in/out-of-sample and append its long-format rows.
@@ -173,8 +177,10 @@ def _score_and_emit(
     ``degenerate_fit`` / ``degenerate_holdout`` are the denominator-degenerate
     target names (:func:`metrics.degenerate_target_names`) for each split, used to
     emit the targeted-removal sensitivity. When ``diag_rows`` is given, per-target
-    out-of-sample diagnostics for the headline (``fixed_family``) split are
-    appended for the attribution report.
+    diagnostics for the headline (``fixed_family``) split are appended for both
+    splits, carrying the raw values plus the production loss weight
+    (``fit_loss_weights`` / ``holdout_loss_weights``) so the capped, weighted
+    objective can be recomputed downstream (:mod:`l0_paper.experiments.crunch`).
     """
     in_sample = metrics.score(
         frame, run.weights, fit_targets, label="in_sample",
@@ -184,7 +190,9 @@ def _score_and_emit(
         frame, run.weights, holdout_targets, label="out_of_sample",
         degenerate_names=degenerate_holdout,
     )
-    holdout_diag = metrics.target_diagnostics(frame, run.weights, holdout_targets)
+    holdout_diag = metrics.target_diagnostics(
+        frame, run.weights, holdout_targets, loss_weights=holdout_loss_weights
+    )
     extreme = aggregate.extreme_are_counts(holdout_diag)
     rows.extend(
         aggregate.rows_from_run(
@@ -202,6 +210,17 @@ def _score_and_emit(
         )
     )
     if diag_rows is not None and holdout_type == "fixed_family":
+        fit_diag = metrics.target_diagnostics(
+            frame, run.weights, fit_targets, loss_weights=fit_loss_weights
+        )
+        diag_rows.extend(
+            aggregate.target_diagnostic_rows(
+                method=method, l2_lambda=l2_lambda, seed=seed,
+                budget_requested=budget_requested,
+                split="in_sample", diagnostics=fit_diag,
+                degenerate_names=degenerate_fit,
+            )
+        )
         diag_rows.extend(
             aggregate.target_diagnostic_rows(
                 method=method, l2_lambda=l2_lambda, seed=seed,
@@ -251,6 +270,14 @@ def _sweep_split(
     )
     target_loss_weights = target_loss.target_loss_weights(
         fit_targets,
+        weighting=target_loss_weighting,
+    )
+    # Per-target omega for the held-out targets too, so the stored diagnostics carry
+    # the production weight on both splits and the weighted objective can be crunched
+    # out-of-sample (the optimizer never weighted the holdout; this applies the same
+    # production scheme to it for reporting).
+    holdout_loss_weights = target_loss.target_loss_weights(
+        holdout_targets,
         weighting=target_loss_weighting,
     )
     split_baseline_optimizer = {
@@ -308,6 +335,8 @@ def _sweep_split(
                     budget_requested=budget, l2_lambda=l2_lambda,
                     holdout_type=holdout_type, fold=fold,
                     degenerate_fit=degenerate_fit, degenerate_holdout=degenerate_holdout,
+                    fit_loss_weights=target_loss_weights,
+                    holdout_loss_weights=holdout_loss_weights,
                     diag_rows=diag_rows,
                 )
     return dense_runtimes

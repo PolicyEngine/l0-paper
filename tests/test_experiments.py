@@ -18,6 +18,7 @@ import pandas as pd
 from l0_paper.experiments import (
     aggregate,
     artifacts,
+    crunch,
     holdout,
     metrics,
     tables,
@@ -249,6 +250,57 @@ def test_target_diagnostics_persistence_and_attribution(tmp_path):
     assert top.iloc[0]["target_name"] == tiny.row_name
     assert bool(top.iloc[0]["is_degenerate"])
     assert top.iloc[0]["share_of_mean"] > 0.99
+
+
+def test_target_diagnostics_store_scale_and_loss_weight():
+    """The per-target store carries scale and the production omega for crunching."""
+    frame, truths = make_toy_frame(seed=0, n=120)
+    weights = frame.weights_for("household").values
+    targets = list(
+        TargetSet(
+            (
+                Target(name="total_income", entity="household", measure="income",
+                       value=truths["income"]),
+                Target(name="tiny_income", entity="household", measure="income",
+                       value=1.0),
+            )
+        )
+    )
+    omega = np.array([3.0, 1.0])
+    rows = metrics.target_diagnostics(frame, weights, targets, loss_weights=omega)
+    assert [r["scale"] for r in rows] == [max(abs(r["target_value"]), 1.0) for r in rows]
+    assert [r["loss_weight"] for r in rows] == [3.0, 1.0]
+
+
+def test_crunch_objective_caps_weights_and_drops_degenerate():
+    """The objective crunches from raw per-target values at any cap (Equation 8)."""
+    df = pd.DataFrame(
+        {
+            "method": ["informed_l0", "informed_l0"],
+            "split": ["out_of_sample", "out_of_sample"],
+            "l2_lambda": [0.0, 0.0],
+            "budget_requested": [10000, 10000],
+            "target_value": [1000.0, 1.0],
+            "achieved_value": [1100.0, 51.0],
+            "scale": [1000.0, 1.0],
+            "loss_weight": [10.0, 1.0],
+            "is_degenerate": [False, True],
+        }
+    )
+    # capped @ c=1: big = min(0.1, 1) = 0.1; tiny = min(50, 1) = 1
+    # weighted mean = (0.1*10 + 1*1) / 11 = 2/11
+    assert abs(crunch.objective(df, cap=1.0) - (2.0 / 11.0)) < 1e-9
+    # uncapped: (0.1*10 + 50*1) / 11 = 51/11
+    assert abs(crunch.objective(df, cap=None) - (51.0 / 11.0)) < 1e-9
+    summary = crunch.summarize(df, cap=1.0)
+    assert int(summary["n"].iloc[0]) == 2
+    # raw |a-t|/|t|: big 0.1, tiny 50 -> mean = median = 25.05; half within 10%
+    assert abs(float(summary["mean_are"].iloc[0]) - 25.05) < 1e-9
+    assert abs(float(summary["frac_within"].iloc[0]) - 0.5) < 1e-9
+    # dropping the degenerate target leaves the well-fit one: objective 0.1, all within 10%
+    clean = crunch.summarize(df, cap=1.0, drop_degenerate=True)
+    assert abs(float(clean["objective_capped_weighted"].iloc[0]) - 0.1) < 1e-9
+    assert abs(float(clean["frac_within"].iloc[0]) - 1.0) < 1e-9
 
 
 def test_rows_from_run_emits_degenerate_metrics():

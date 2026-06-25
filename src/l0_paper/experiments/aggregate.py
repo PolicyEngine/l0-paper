@@ -226,6 +226,8 @@ TARGET_DIAG_COLUMNS = (
     "geography_level",
     "target_value",
     "achieved_value",
+    "scale",
+    "loss_weight",
     "absolute_relative_error",
     "is_degenerate",
 )
@@ -255,6 +257,8 @@ def target_diagnostic_rows(
             "geography_level": row["geography_level"],
             "target_value": row["target_value"],
             "achieved_value": row["achieved_value"],
+            "scale": row.get("scale"),
+            "loss_weight": row.get("loss_weight"),
             "absolute_relative_error": row["absolute_relative_error"],
             "is_degenerate": bool(row["name"] in degenerate),
         }
@@ -279,8 +283,9 @@ def load_target_diagnostics(path: str | Path) -> pd.DataFrame:
     if "l2_lambda" not in df.columns:
         df["l2_lambda"] = 0.0
     df["l2_lambda"] = pd.to_numeric(df["l2_lambda"], errors="coerce").fillna(0.0)
-    for col in ("target_value", "achieved_value", "absolute_relative_error"):
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+    for col in ("target_value", "achieved_value", "scale", "loss_weight", "absolute_relative_error"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
     df["is_degenerate"] = df["is_degenerate"].astype(bool)
     return df
 
