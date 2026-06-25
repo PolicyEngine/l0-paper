@@ -1,6 +1,7 @@
 "use client";
 
 import { ReactNode } from "react";
+import Image from "@/components/core/BasePathImage";
 import { useSlideshowContextSafe } from "@/components/core/SlideshowContext";
 
 interface SlideProps {
@@ -31,12 +32,6 @@ export default function Slide({
         className,
       ].join(" ")}
     >
-      {(isCover || isEnd) && (
-        <div className="absolute left-16 top-14 z-10 text-2xl font-bold tracking-tight text-white">
-          PolicyEngine
-        </div>
-      )}
-
       {fullBleed ? (
         <div className="absolute inset-0">{children}</div>
       ) : (
@@ -52,7 +47,14 @@ export default function Slide({
 
       {showFooter && !isCover && !isEnd && (
         <footer className="gradient-footer absolute bottom-0 left-0 right-0 z-20 flex h-18 items-center justify-between px-16 text-white">
-          <div className="text-lg font-bold tracking-tight">PolicyEngine</div>
+          <Image
+            alt="PolicyEngine"
+            className="opacity-90"
+            height={50}
+            src="/logos/white.svg"
+            style={{ height: "auto" }}
+            width={180}
+          />
           <div className="text-sm font-medium opacity-90">{footerText}</div>
         </footer>
       )}

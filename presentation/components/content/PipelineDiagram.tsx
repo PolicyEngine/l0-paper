@@ -1,10 +1,10 @@
 const stages = [
-  ["Sources", "CPS ASEC", "IRS PUF, ACS, SCF"],
+  ["Sources", "surveys", "administrative facts"],
   ["Combine", "entity tables", "typed weights"],
-  ["Impute", "weighted QRF", "tax and assets"],
-  ["Geography", "assign areas", "may appear in many"],
-  ["Build targets", "admin totals", "sparse matrix"],
-  ["Calibrate", "L0 gates", "prune to budget"],
+  ["Impute", "fill support gaps", "preserve uncertainty"],
+  ["Geography", "attach areas", "respect hierarchy"],
+  ["Compose targets", "source-backed facts", "model mappings"],
+  ["Represent", "calibrate weights", "prune to budget"],
 ];
 
 export default function PipelineDiagram() {
