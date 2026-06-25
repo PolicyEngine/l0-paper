@@ -30,7 +30,8 @@ jobs:
 
       - name: Run tests
         working-directory: l0-paper
-        run: uv run --locked pytest
+        # --extra viz so the end-to-end test exercises the figure renderers too.
+        run: uv run --locked --extra viz pytest
 
       - name: Run Ruff
         working-directory: l0-paper

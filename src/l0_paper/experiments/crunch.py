@@ -86,6 +86,10 @@ def objective(df: pd.DataFrame, *, cap: float = 1.0) -> float:
     """
     rel = capped_relative_error(df, cap=cap)
     weights = df["loss_weight"].to_numpy(dtype=float) if "loss_weight" in df.columns else None
+    # Uniform-weighted runs store no omega (the column is all-NaN); fall back to an
+    # unweighted mean rather than propagating NaN.
+    if weights is not None and np.all(np.isnan(weights)):
+        weights = None
     return _weighted_mean(rel, weights)
 
 
