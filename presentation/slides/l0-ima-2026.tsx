@@ -38,27 +38,47 @@ export function SubnationalProblemSlide() {
         <div>
           <SlideTitle kicker="Motivation">Subnational microsimulation raises the calibration burden</SlideTitle>
           <p className="mt-8 max-w-4xl text-2xl leading-snug text-slate-600">
-            National surveys support national estimates. State, district, and local analysis need the
-            same households to aggregate correctly across several geographic levels.
+            The data stack is moving from national-only calibration toward target systems that
+            must hold together across national, state, and district-level geographies.
+          </p>
+          <p className="mt-6 max-w-4xl text-xl leading-snug text-slate-500">
+            Arch can materialize thousands of source-backed aggregate facts. Populace then decides
+            which facts are active for a build, which are validation-only, and which cannot yet be
+            estimated by the current support universe.
           </p>
         </div>
-        <div className="space-y-5">
-          <StatNumber value="many" label="target families" sublabel="tax, transfer, health, and income aggregates" />
-          <StatNumber value="nested" label="geographies" sublabel="national, state, and future local targets" />
-          <StatNumber value="fixed" label="record budget" sublabel="the final dataset still has to run quickly" />
+        <div className="grid grid-cols-2 gap-4">
+          <StatNumber compact value="22,456" label="candidate facts" sublabel="Arch source-package rows x measures" />
+          <StatNumber compact value="9,177" label="district facts" sublabel="ACS S0101 and S2201 congressional district packages" />
+          <StatNumber compact value="4,582" label="active US targets" sublabel="current Populace production release" />
+          <StatNumber compact value="75,112" label="households" sublabel="US 2024 compact file used here" />
         </div>
       </div>
     </Slide>
   );
 }
 
-export function CandidateUniverseSlide() {
+export function PopulaceValueSlide() {
   return (
-    <SectionSlide
-      section="The operational problem"
-      title="Fidelity grows the candidate universe; deployment needs it smaller"
-      subtitle="The pipeline can add information through imputation and geography, but the final file must still be cheap to store, calibrate, and simulate."
-    />
+    <Slide>
+      <div className="grid h-full grid-cols-[0.95fr_1.05fr] items-center gap-12">
+        <div>
+          <SlideTitle kicker="Populace">A population is a weighted sampling frame, not a flat table</SlideTitle>
+          <BulletList
+            className="mt-10"
+            items={[
+              "Entity tables preserve household, person, tax-unit, and family structure.",
+              "Typed weights make each stage explicit: design, importance, then calibrated.",
+              "Strata carry provenance, so generation owns support while calibration owns representation.",
+            ]}
+          />
+        </div>
+        <FigurePlaceholder
+          title="Populace visual placeholder"
+          subtitle="Frame, typed weights, entity links, source strata"
+        />
+      </div>
+    </Slide>
   );
 }
 
@@ -75,6 +95,42 @@ export function PipelineSlide() {
   );
 }
 
+export function BuildBigThenPruneSlide() {
+  return (
+    <Slide>
+      <div className="grid h-full grid-cols-[0.95fr_1.05fr] items-center gap-12">
+        <div>
+          <SlideTitle kicker="Operational problem">Build big, then prune</SlideTitle>
+          <p className="mt-8 text-2xl leading-snug text-slate-600">
+            The long-run Populace design is to generate a richer support pool first, then use
+            calibration to decide which records are worth carrying into the published artifact.
+          </p>
+        </div>
+        <div className="space-y-5">
+          <ContentCard title="Build big" accent="teal">
+            <p className="text-xl leading-snug text-slate-600">
+              Pool survey records, attach country-specific imputations, add geography, and
+              oversample rare support where the population needs detail.
+            </p>
+          </ContentCard>
+          <ContentCard title="The pressure point" accent="amber">
+            <p className="text-xl leading-snug text-slate-600">
+              Calibration memory scales with targets times records; the production file still has
+              to be cheap to store, load, and simulate.
+            </p>
+          </ContentCard>
+          <ContentCard title="Prune with evidence" accent="slate">
+            <p className="text-xl leading-snug text-slate-600">
+              Keep records because they help reproduce source-backed targets, not because they won
+              an arbitrary random draw.
+            </p>
+          </ContentCard>
+        </div>
+      </div>
+    </Slide>
+  );
+}
+
 export function SamplingQuestionSlide() {
   return (
     <Slide>
@@ -83,7 +139,7 @@ export function SamplingQuestionSlide() {
           <SlideTitle kicker="Paper question">Which records should survive?</SlideTitle>
           <p className="mt-8 text-2xl leading-snug text-slate-600">
             Given a candidate universe and a target system, the reduction problem becomes a sampling
-            problem with fitted weights.
+            problem with fitted weights and geographic representativeness constraints.
           </p>
         </div>
         <ContentCard accent="teal">
@@ -95,10 +151,37 @@ export function SamplingQuestionSlide() {
               <span className="font-bold text-pe-dark">Constraint:</span> retain a deployable number of records
             </div>
             <div>
+              <span className="font-bold text-pe-dark">Goal:</span> preserve target fit for each represented geography
+            </div>
+            <div>
               <span className="font-bold text-pe-dark">Output:</span> selected records and calibrated positive weights
             </div>
           </div>
         </ContentCard>
+      </div>
+    </Slide>
+  );
+}
+
+export function L0SolutionSlide() {
+  return (
+    <Slide>
+      <div className="grid h-full grid-cols-[1fr_1fr] items-center gap-12">
+        <div>
+          <SlideTitle kicker="Our approach">Add hard-concrete gates to a gradient calibrator</SlideTitle>
+          <p className="mt-8 text-2xl leading-snug text-slate-600">
+            We adapt Louizos, Welling, and Kingma&apos;s L0 regularization idea:
+            each record receives a stochastic gate whose expected open probability is penalized.
+          </p>
+          <p className="mt-6 text-xl leading-snug text-slate-500">
+            During training the gate is differentiable, so Adam can optimize weights and selection
+            together. At publication time, gates become a deterministic retained-record set.
+          </p>
+        </div>
+        <FigurePlaceholder
+          title="L0 approach visual placeholder"
+          subtitle="Gates, weights, and retained records"
+        />
       </div>
     </Slide>
   );
@@ -129,6 +212,32 @@ export function BaselinesSlide() {
         <p className="mt-10 max-w-5xl text-2xl leading-snug text-slate-600">
           The comparison holds the targets and candidate universe fixed, so the difference is where
           selection enters the workflow.
+        </p>
+      </div>
+    </Slide>
+  );
+}
+
+export function L0MathSlide() {
+  return (
+    <Slide>
+      <div className="flex h-full flex-col">
+        <SlideTitle kicker="L0 objective">Target fit and record selection are optimized together</SlideTitle>
+        <div className="mt-9 grid grid-cols-2 gap-8">
+          <EquationCard
+            title="Training objective"
+            equation="L_target(z * w) + lambda_L0 * sum_i P(z_i > 0) + lambda_L2 * ||w / w0||^2"
+            note="The hard-concrete relaxation makes the gate probability differentiable, following Louizos et al."
+          />
+          <EquationCard
+            title="Published dataset"
+            equation="keep record i when z_i is open; recalibrate positive weights on the retained support"
+            note="The final artifact is an ordinary sparse microdataset with calibrated positive weights."
+          />
+        </div>
+        <p className="mt-9 max-w-6xl text-2xl leading-snug text-slate-600">
+          The technical claim is not that L0 changes the target definition. It changes the sampling
+          decision: selection is trained against the same target system the final weights must match.
         </p>
       </div>
     </Slide>
@@ -181,17 +290,17 @@ export function CalibrationObjectiveSlide() {
   return (
     <Slide>
       <div className="flex h-full flex-col">
-        <SlideTitle kicker="Objective">The loss separates fit, size, and concentration</SlideTitle>
+        <SlideTitle kicker="Evaluation objective">Every comparison uses the same calibration loss</SlideTitle>
         <div className="mt-9 grid grid-cols-2 gap-8">
           <EquationCard
-            title="Shared calibration loss"
+            title="Fit metric"
             equation="capped weighted MAPE(t_hat, t)"
-            note="The cap keeps one hard-to-fit target from dominating the gradient; target weights are uniform in the current draft runs."
+            note="Relative error keeps heterogeneous count and amount targets on a common scale; the cap limits the influence of near-zero or hard-to-fit targets."
           />
           <EquationCard
-            title="Informed selection loss"
-            equation="calibration + lambda_L0 * open gates + lambda_L2 * weight ratio squared"
-            note="lambda_L0 controls retained count. lambda_L2 and max_weight_ratio expose the weight-concentration tradeoff."
+            title="Comparison rule"
+            equation="same targets + same loss + same weight bounds"
+            note="The experiment tests sampling and selection. The calibration objective is held fixed across informed L0, random reweighting, and survey-weight sampling."
           />
         </div>
       </div>
@@ -213,7 +322,7 @@ export function ExperimentDesignSlide() {
         <ContentCard className="mt-8" accent="teal">
           <p className="text-2xl leading-snug text-slate-700">
             The fixed holdout keeps Medicaid, SNAP, state income tax, and validation-only CBO
-            targets out of every method's fit, then scores them only after calibration.
+            targets out of every method&apos;s fit, then scores them only after calibration.
           </p>
         </ContentCard>
       </div>
@@ -319,28 +428,28 @@ export function OperabilitySlide() {
   );
 }
 
-export function CaveatsSlide() {
+export function FutureWorkSlide() {
   return (
     <Slide>
       <div className="grid h-full grid-cols-[0.9fr_1.1fr] items-center gap-12">
-        <SlideTitle kicker="Caveats">The claims need to stay bounded by the current target surface</SlideTitle>
+        <SlideTitle kicker="Future work">Move from proof of concept to production-scale pruning</SlideTitle>
         <div className="space-y-5">
-          <ContentCard title="Current geography" accent="slate">
+          <ContentCard title="Congressional-district production builds" accent="teal">
             <p className="text-xl leading-snug text-slate-600">
-              The paper motivates subnational production use, but the scored target surface is national
-              and state in the current proof of concept.
+              Populace production work already includes congressional-district calibrated datasets;
+              the L0 evaluation should score that full geographic setting directly.
             </p>
           </ContentCard>
-          <ContentCard title="Metric tail" accent="amber">
+          <ContentCard title="Build really large, then prune" accent="amber">
             <p className="text-xl leading-snug text-slate-600">
-              Near-zero-denominator targets can inflate mean relative error, so median error and named
-              sensitivity checks matter.
+              The current experiments use a compact candidate file. The next test is a deliberately
+              over-built pool, then L0 pruning back to a publishable artifact.
             </p>
           </ContentCard>
-          <ContentCard title="Weight concentration" accent="teal">
+          <ContentCard title="Broader target surfaces" accent="slate">
             <p className="text-xl leading-snug text-slate-600">
-              High concentration may be acceptable for aggregate calibration but is still an operational
-              cost to report.
+              District-level age, SNAP, and SOI facts should be part of the held-out target design,
+              not just motivation for the method.
             </p>
           </ContentCard>
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, createElement, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { SlideshowProvider } from "@/components/core/SlideshowContext";
 import { buildSlideUrl } from "@/lib/slide-url";
@@ -13,29 +13,25 @@ interface SlideshowViewerProps {
 function SlideshowViewerClient({ config }: SlideshowViewerProps) {
   const searchParams = useSearchParams();
   const slides = useMemo(() => config.slides, [config.slides]);
-  const [currentSlide, setCurrentSlide] = useState(0);
-  const [mounted, setMounted] = useState(false);
+  const [currentSlide, setCurrentSlide] = useState(() => {
+    const initialSlide = Number.parseInt(searchParams.get("slide") || "0", 10);
+    return Math.max(0, Math.min(initialSlide, slides.length - 1));
+  });
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
-    const initialSlide = Number.parseInt(searchParams.get("slide") || "0", 10);
-    setCurrentSlide(Math.max(0, Math.min(initialSlide, slides.length - 1)));
-    setIsFullscreen(!!document.fullscreenElement);
-
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
     };
 
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
-  }, [searchParams, slides.length]);
+  }, []);
 
   useEffect(() => {
-    if (!mounted) return;
     const url = buildSlideUrl(window.location.href, currentSlide);
     window.history.replaceState(null, "", url);
-  }, [currentSlide, mounted]);
+  }, [currentSlide]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -65,7 +61,7 @@ function SlideshowViewerClient({ config }: SlideshowViewerProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [slides.length]);
 
-  const CurrentSlide = getSlideComponent(slides[currentSlide]);
+  const currentSlideElement = createElement(getSlideComponent(slides[currentSlide]));
   const footerText = config.footerText ?? `${config.id.replace(/-/g, " ")} - ${config.date}`;
 
   return (
@@ -84,11 +80,7 @@ function SlideshowViewerClient({ config }: SlideshowViewerProps) {
         className="relative cursor-pointer"
         onClick={() => setCurrentSlide((previous) => Math.min(previous + 1, slides.length - 1))}
       >
-        {mounted && (
-          <div className="slide-active">
-            <CurrentSlide />
-          </div>
-        )}
+        <div className="slide-active">{currentSlideElement}</div>
 
         {!isFullscreen && (
           <div className="pointer-events-none fixed bottom-0 left-0 right-0 z-50 flex h-18 items-center justify-end gap-4 px-8 text-white">

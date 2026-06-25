@@ -1,4 +1,5 @@
 import Slide from "@/components/core/Slide";
+import Image from "@/components/core/BasePathImage";
 import { formatDate, SpeakerInfo } from "@/lib/types";
 
 interface CoverSlideProps {
@@ -18,30 +19,47 @@ export default function CoverSlide({
 }: CoverSlideProps) {
   return (
     <Slide isCover>
-      <div className="mx-auto flex max-w-6xl flex-col items-center justify-center text-center">
-        <div className="mb-10 h-1 w-24 rounded-full bg-white/30" />
-        <h1 className="max-w-5xl text-6xl font-extrabold leading-tight tracking-tight text-white">
+      <div className="relative z-10 flex h-full flex-col items-center justify-center space-y-9 text-center">
+        <Image
+          alt="PolicyEngine"
+          className="opacity-100"
+          height={100}
+          priority
+          src="/logos/white.svg"
+          style={{ height: "auto" }}
+          width={350}
+        />
+
+        <div className="h-1 w-20 rounded-full bg-white/30" />
+
+        <h1 className="max-w-6xl text-center font-display text-6xl font-bold leading-tight text-white">
           {title}
         </h1>
-        <p className="mt-8 max-w-4xl text-2xl font-light leading-snug text-white/85">
+
+        <p className="max-w-4xl text-center text-2xl leading-relaxed text-white/80">
           {subtitle}
         </p>
-        <div className="mt-14 flex flex-wrap items-center justify-center gap-10">
+
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-8">
           {speakers.map((speaker) => (
-            <div key={speaker.name} className="text-center">
-              <div className="mx-auto mb-3 flex h-20 w-20 items-center justify-center rounded-full border border-white/35 bg-white/10 text-2xl font-bold">
+            <div key={speaker.name} className="flex items-center justify-center gap-6">
+              <div className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-white/40 bg-white/10 text-3xl font-bold">
                 {speaker.name
                   .split(" ")
                   .map((part) => part[0])
                   .join("")}
               </div>
-              <div className="text-xl font-semibold">{speaker.name}</div>
-              <div className="text-sm text-white/70">{speaker.title}</div>
+              <div className="text-left">
+                <p className="text-2xl font-semibold text-white">{speaker.name}</p>
+                <p className="text-lg font-light text-white/70">{speaker.title}</p>
+              </div>
             </div>
           ))}
         </div>
-        <div className="mt-10 text-base font-medium text-white/70">
-          {event} - {formatDate(date)}
+
+        <div className="pt-2 text-center text-white opacity-60">
+          <p>{event}</p>
+          <p>{formatDate(date)}</p>
         </div>
       </div>
     </Slide>
