@@ -92,7 +92,7 @@ def _first_difference(a: Any, b: Any, path: str = "") -> str | None:
     if isinstance(a, list) and isinstance(b, list):
         if len(a) != len(b):
             return f"{path} (length {len(a)} vs {len(b)})"
-        for i, (x, y) in enumerate(zip(a, b)):
+        for i, (x, y) in enumerate(zip(a, b, strict=False)):
             diff = _first_difference(x, y, f"{path}[{i}]")
             if diff:
                 return diff
@@ -141,7 +141,7 @@ def merge_runs(inputs: list[Path], out: Path, run_id: str | None) -> dict[str, A
 
     # --- Guard 1: identical except l2. Refuse to fabricate a confounded compare.
     base_cmp = _canonical_for_compare(manifests[0])
-    for run_dir, manifest in zip(inputs[1:], manifests[1:]):
+    for run_dir, manifest in zip(inputs[1:], manifests[1:], strict=False):
         diff = _first_difference(base_cmp, _canonical_for_compare(manifest))
         if diff is not None:
             raise ValueError(
@@ -151,7 +151,7 @@ def merge_runs(inputs: list[Path], out: Path, run_id: str | None) -> dict[str, A
             )
 
     # --- Guard 2: each run is a single, distinct penalty.
-    l2_by_run = [_l2_of(m, d) for m, d in zip(manifests, inputs)]
+    l2_by_run = [_l2_of(m, d) for m, d in zip(manifests, inputs, strict=False)]
     if len(set(l2_by_run)) != len(l2_by_run):
         raise ValueError(f"Inputs do not have distinct l2_lambdas: {l2_by_run}")
     l2_union = sorted(set(l2_by_run))
@@ -160,7 +160,7 @@ def merge_runs(inputs: list[Path], out: Path, run_id: str | None) -> dict[str, A
 
     # --- Merge metrics_long.csv (header from first, data verbatim from all). -----
     headers, data_blocks, total_rows = [], [], 0
-    for run_dir, declared_l2 in zip(inputs, l2_by_run):
+    for run_dir, declared_l2 in zip(inputs, l2_by_run, strict=False):
         header, data = _read_csv_lines(run_dir / "metrics_long.csv")
         headers.append(header)
         found = {float(v) for v in _distinct_l2_in_csv(data, header)}
