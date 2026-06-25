@@ -571,6 +571,43 @@ def test_absolute_path_preserves_h5_symlink_suffix(tmp_path):
     assert _absolute_path(link).resolve().suffix == ""
 
 
+def test_drop_columns_preserves_frame_metadata():
+    """Imported base-frame cleanup removes only named columns."""
+    from l0_paper.precalibration import _drop_columns
+    from populace.frame import Frame
+
+    frame, _truths = make_toy_frame(seed=0, n=5)
+    tables = {entity: frame.table(entity).copy() for entity in frame.entities}
+    tables["person"]["employment_income"] = np.arange(5, dtype=float)
+    tables["household"]["income_tax"] = np.arange(5, dtype=float)
+    tables["household"]["keep_me"] = 1.0
+    dirty = Frame(
+        tables,
+        frame.schema,
+        {entity: frame.weights_for(entity) for entity in frame.weighted_entities},
+        frame.strata,
+        mass_log=frame.mass_log,
+    )
+
+    clean, dropped = _drop_columns(
+        dirty, {"employment_income", "income_tax", "missing_column"}
+    )
+
+    assert dropped == {
+        "person": ["employment_income"],
+        "household": ["income_tax"],
+    }
+    assert "employment_income" not in clean.table("person")
+    assert "income_tax" not in clean.table("household")
+    assert "keep_me" in clean.table("household")
+    assert clean.schema == dirty.schema
+    assert clean.mass_log == dirty.mass_log
+    assert np.array_equal(
+        clean.weights_for("household").values,
+        dirty.weights_for("household").values,
+    )
+
+
 def test_validation_only_families_tracks_populace():
     """Returns Populace-classified validation-only families (cbo), never hard ones."""
     fams = holdout.validation_only_families()
