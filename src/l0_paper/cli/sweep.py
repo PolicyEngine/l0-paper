@@ -25,11 +25,11 @@ Example
     uv run --extra data l0 sweep \
         --reuse-precalibration runs/poc/precalibration \
         --out runs/sweep-moderate \
-        --budgets 1000 2000 5000 10000 20000 \
+        --budgets 2000 5000 10000 20000 40000 \
         --seeds 0 1 2 \
         --epochs 1000 \
-        --holdout-families census_population state_income_tax \
-        --rotation-folds 5 --rotation-budget 5000 \
+        --holdout-families cms_medicaid usda_snap state_income_tax \
+        --rotation-folds 5 --rotation-budget 10000 \
         --target-loss-cap 10 \
         --methods informed_l0 random_reweight dense_sample
 

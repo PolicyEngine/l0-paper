@@ -47,6 +47,7 @@ they run as `l0 <command>` (or `uv run l0 <command>`):
 
 ```text
 l0 demo              run the whole pipeline end-to-end on the toy frame (no data)
+l0 paper             current-paper reproduction workflow
 l0 poc               single-budget run; builds/reuses the precalibration cache
 l0 sweep             budget x seed sweep of the calibration conditions
 l0 figures           render figures + LaTeX tables from a sweep's metrics_long.csv
@@ -91,29 +92,23 @@ The design freezes the expensive pre-calibration input, then varies only the
 calibration/sampling method.
 
 ```bash
-# 1. Build (or reuse) a frozen pre-calibration artifact.
-uv run --extra data l0 poc \
-    --ledger-facts data/targets/consumer_facts.jsonl \
-    --period 2024 --out runs/poc --subsample 20000 \
-    --target-records 5000 --seed 0
-
-# 2. Sweep budgets x seeds from that frozen artifact.
-uv run --extra data l0 sweep \
-    --reuse-precalibration runs/poc/precalibration \
-    --out runs/sweep --budgets 1000 2000 5000 10000 20000 \
-    --seeds 0 1 2 --epochs 1000 \
-    --holdout-families state_income_tax --rotation-folds 5 --rotation-budget 5000 \
-    --target-loss-cap 10 \
-    --methods informed_l0 random_reweight dense_sample
-
-# 3. Regenerate the paper's figures and tables from the sweep.
-uv run --extra viz l0 figures --sweep runs/sweep --paper-figures
+# Full current-paper workflow: build/reuse precalibration, run the sweep, render figures.
+uv run --extra data --extra viz l0 paper \
+    --consumer-facts data/targets/consumer_facts.jsonl
 ```
 
-The command above reproduces the current manuscript's three-method, `c=10`
-frontier. Omit `--methods` to run all available arms, including the proximal
-`informed_l1` baseline, and omit `--target-loss-cap 10` to use the current
-production US-fiscal cap (`c=1`).
+`l0 paper` encodes the current manuscript defaults: budgets
+2,000/5,000/10,000/20,000/40,000, seeds 0-2, the fixed held-out families
+`cms_medicaid`, `usda_snap`, and `state_income_tax`, target-loss cap `c=10`,
+the three reported methods, and the `lambda_L2 in {0, 1e-4}` operability
+contrast. Pass `--reuse-precalibration <dir>` to skip the data build, or
+`--build-targets --target-base <consumer_facts.jsonl>` to build
+`data/targets/consumer_facts.jsonl` first. Lower-level commands (`l0 poc`,
+`l0 sweep`, `l0 figures`) remain available for custom runs.
+
+For exploratory runs, pass `--methods informed_l0 informed_l1 random_reweight
+dense_sample` to include the proximal `informed_l1` baseline, and pass
+`--target-loss-cap 1` to use the current production US-fiscal cap.
 
 Methods available in the sweep:
 
@@ -143,11 +138,16 @@ uv run --extra data l0 build-targets --base /path/to/base/consumer_facts.jsonl
 
 ## Rendering the paper
 
-The manuscript is LaTeX-first:
+The manuscript PDF is Quarto-first:
 
 ```bash
-cd paper && latexmk -pdf main.tex      # or pdflatex; bibtex; pdflatex x2
+quarto render paper/index.qmd
 ```
+
+`l0 paper --rebuild-pdf` runs the same Quarto render after updating figures and
+copies `_output/paper/index.pdf` to `paper/main.pdf`. Use
+`--pdf-builder latexmk` only when you need the legacy direct-LaTeX route through
+`paper/main.tex`.
 
 The pipeline overview figure is generated separately:
 

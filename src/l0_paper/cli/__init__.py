@@ -20,6 +20,7 @@ _COMMANDS: dict[str, tuple[str, str]] = {
     "figures": ("l0_paper.cli.figures", "Render figures + LaTeX tables from a sweep's metrics_long.csv."),
     "summarize": ("l0_paper.cli.summarize", "Readable summaries (CSV/Markdown) from a run manifest."),
     "merge-l2": ("l0_paper.cli.merge_l2", "Merge single-l2 sweep runs into one comparison directory."),
+    "paper": ("l0_paper.cli.paper", "Run the current-paper reproduction workflow."),
     "build-candidate": ("l0_paper.cli.build_candidate", "Build the candidate-universe precalibration frame."),
     "build-targets": ("l0_paper.cli.build_targets", "Build the calibration target bundle from arch-data."),
     "demo": ("l0_paper.cli.demo", "Run the whole pipeline end-to-end on the toy frame (no real data)."),

@@ -1,6 +1,6 @@
 """``l0 demo`` -- run the whole pipeline end-to-end on the toy frame.
 
-No network, no PolicyEngine-US, no restricted data: it builds the in-package toy
+No network, no PolicyEngine-US, no real data: it builds the in-package toy
 frame, runs all four sampling arms across a small budget x seed grid, writes the
 long-format and per-target CSVs, crunches the calibration objective, and (unless
 ``--no-figures``) renders the figure set. This is the smallest faithful exercise

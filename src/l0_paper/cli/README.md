@@ -106,6 +106,25 @@ as `unsupported_filter_dropped`). Pass `--keep-unsupported-targets` to
 
 ## Running
 
+For the current manuscript reproduction, prefer the wrapper:
+
+```bash
+uv run --extra data --extra viz l0 paper \
+    --consumer-facts data/targets/consumer_facts.jsonl
+```
+
+It builds or reuses `runs/weighted-loss-3seed/precalibration`, runs the paper
+budget x seed sweep, renders report tables/figures, and copies PNG figures into
+`paper/figures`. Add `--rebuild-pdf` to render `paper/index.qmd` with Quarto
+and copy the result to `paper/main.pdf`; `--pdf-builder latexmk` keeps the
+legacy direct-LaTeX path through `paper/main.tex`. Add
+`--build-targets --target-base <consumer_facts.jsonl>` to first construct
+`data/targets/consumer_facts.jsonl`, or pass `--reuse-precalibration <dir>`
+when the frozen artifact already exists.
+
+The lower-level commands below are useful for custom smoke runs and individual
+steps.
+
 ```bash
 # Full proof-of-concept (downloads the published base frame from HuggingFace,
 # runs the PolicyEngine-US materialization, then all conditions). Uses the
@@ -175,11 +194,11 @@ leak-free out-of-sample test. [`sweep.py`](sweep.py) provides that.
 uv run --extra data l0 sweep \
     --reuse-precalibration runs/full-20k-cbo-state-tax-holdout/precalibration \
     --out runs/sweep-moderate \
-    --budgets 1000 2000 5000 10000 20000 \
+    --budgets 2000 5000 10000 20000 40000 \
     --seeds 0 1 2 \
     --epochs 1000 \
-    --holdout-families state_income_tax \
-    --rotation-folds 5 --rotation-budget 5000 \
+    --holdout-families cms_medicaid usda_snap state_income_tax \
+    --rotation-folds 5 --rotation-budget 10000 \
     --target-loss-cap 10 \
     --methods informed_l0 random_reweight dense_sample
 ```

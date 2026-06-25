@@ -2,6 +2,7 @@
 /.quarto/
 /_output/
 /.jupyter_cache/
+/paper/index.tex
 
 # Python local state
 /.venv/
@@ -55,3 +56,5 @@ results/
 *-blx.aux
 *-blx.bib
 *.run.xml
+
+**/*.quarto_ipynb
