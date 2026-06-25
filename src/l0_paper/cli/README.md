@@ -51,7 +51,7 @@ Target values come from a PolicyEngine Ledger `consumer_facts.jsonl`, produced b
 - A small stand-in may be available in an `arch-data` checkout as
   `arch/fixtures/consumer_facts.jsonl` (real schema, partial coverage — use with
   `--allow-partial-facts`). It is not committed in this repository.
-- The full mixed-vintage file is emitted in one call from a clone of
+- A default-source base bundle is emitted in one call from a clone of
   `PolicyEngine/arch-data`:
 
   ```bash
@@ -59,17 +59,15 @@ Target values come from a PolicyEngine Ledger `consumer_facts.jsonl`, produced b
   # writes /tmp/arch-us-2024/consumer_facts.jsonl  (+ coverage.json, reports/)
   ```
 
-  `build-bundle` merges all default source packages, each at its own vintage:
-  year-pinned aliases (`jct-tax-expenditures-2024`, `census-pep-2024-*`,
-  `ssa-…-2025`, `soi-*-2022`) carry their fixed period regardless of `--year`,
-  while `--year` only sets the year-templated sources (the `soi-table-*`
-  distribution tables, whose latest published tax year is **2023**). So
-  `--year 2023` yields the complete set for a **2024 dataset**; arch-data
-  resolves the mix, and Populace maps it onto its 2024 target period (run with
-  `--period 2024`, the default). Check `coverage.json` / `reports/build_bundle.json`
-  to confirm no families were skipped. Source bytes come from the private
-  `arch-raw` R2 bucket (Wrangler auth) or, with `ARCH_SOURCE_ARTIFACT_FETCH=1`,
-  are fetched from each source's public URL and SHA-256-verified.
+  `build-bundle` uses the requested literal `--year` when it looks up source
+  artifacts. That makes it a useful default-source base bundle, but not the
+  complete paper feed: sources whose artifacts are pinned to another year are
+  skipped here and added by `l0 build-targets` in the next section. For example,
+  `--year 2023` captures the latest SOI distribution tables, while the paper
+  feed separately adds 2024 JCT, ACS, and SNAP-by-district sources plus CMS ACA
+  sources at their pinned years. Source bytes come from the private `arch-raw`
+  R2 bucket (Wrangler auth) or, with `ARCH_SOURCE_ARTIFACT_FETCH=1`, are fetched
+  from each source's public URL and SHA-256-verified.
 
 > The production registry compile requires a fact for **every** declared
 > reference (including the JCT tax-expenditure rows), so a partial file needs

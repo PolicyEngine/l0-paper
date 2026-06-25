@@ -10,7 +10,9 @@ no real data.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -112,15 +114,55 @@ def test_paper_implicit_precalibration_reuse_validates_manifest(tmp_path):
         "allow_partial_facts": False,
         "drop_unsupported_filters": True,
         "ledger_facts_sha256": paper._sha256(facts),
+        "base_h5_sha256": paper.PAPER_BASE_H5_SHA256,
     }
     (precalibration / paper.MANIFEST_JSON).write_text(json.dumps(manifest))
     args = paper._parse_args(["--out", str(out), "--consumer-facts", str(facts)])
 
     assert paper._prepare_precalibration(args, facts) == precalibration
 
+    manifest["base_h5_sha256"] = "0" * 64
+    (precalibration / paper.MANIFEST_JSON).write_text(json.dumps(manifest))
+    with pytest.raises(SystemExit) as exc:
+        paper._prepare_precalibration(args, facts)
+
+    assert "base_h5_sha256" in str(exc.value)
+
+    manifest["base_h5_sha256"] = paper.PAPER_BASE_H5_SHA256
+    (precalibration / paper.MANIFEST_JSON).write_text(json.dumps(manifest))
     args.weight_entity = "tax_unit"
     with pytest.raises(SystemExit) as exc:
         paper._prepare_precalibration(args, facts)
 
     assert "does not match this run" in str(exc.value)
     assert "weight_entity" in str(exc.value)
+
+
+def test_paper_base_h5_uses_pinned_snapshot_and_validates_hash(monkeypatch, tmp_path):
+    base_h5 = tmp_path / "populace_us_2024.h5"
+    base_h5.write_text("base frame placeholder")
+    calls = {}
+
+    def fake_hf_hub_download(**kwargs):
+        calls.update(kwargs)
+        return str(base_h5)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "huggingface_hub",
+        SimpleNamespace(hf_hub_download=fake_hf_hub_download),
+    )
+    monkeypatch.setattr(paper, "PAPER_BASE_H5_SHA256", paper._sha256(base_h5))
+    args = paper._parse_args([])
+
+    assert paper._base_h5_for_build(args) == base_h5
+    assert calls == {
+        "repo_id": paper.PAPER_BASE_REPO_ID,
+        "filename": paper.PAPER_BASE_FILENAME,
+        "repo_type": "dataset",
+        "revision": paper.PAPER_BASE_REVISION,
+    }
+
+    monkeypatch.setattr(paper, "PAPER_BASE_H5_SHA256", "0" * 64)
+    with pytest.raises(SystemExit, match="base frame hash mismatch"):
+        paper._base_h5_for_build(args)

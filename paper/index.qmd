@@ -1,15 +1,6 @@
 ---
-title: "$L_0$ regularization for subnational microsimulation calibration"
-author:
-  - name: María Juaristi
-    affiliation: PolicyEngine
-    email: maria@policyengine.org
-  - name: Nikhil Woodruff
-    affiliation: PolicyEngine
-  - name: Ben Ogorek
-    affiliation: PolicyEngine
-  - name: Max Ghenis
-    affiliation: PolicyEngine
+title-meta: "$L_0$ regularization for subnational microsimulation calibration"
+author-meta: "María Juaristi; Nikhil Woodruff; Ben Ogorek; Max Ghenis"
 date: ""
 bibliography: bibliography/references.bib
 cite-method: natbib
@@ -24,6 +15,18 @@ format:
     keep-tex: true
 number-sections: true
 ---
+
+\title{$L_0$ regularization for subnational microsimulation calibration}
+
+\author{
+    María Juaristi\thanks{PolicyEngine. Corresponding author: maria@policyengine.org} \and
+    Nikhil Woodruff\footnotemark[1] \and
+    Ben Ogorek\footnotemark[1] \and
+    Max Ghenis\footnotemark[1]
+}
+\date{}
+
+\maketitle
 
 \input{sections/abstract}
 \input{sections/introduction}
@@ -48,9 +51,11 @@ open source at \url{https://github.com/PolicyEngine/populace}; earlier prototype
 \texttt{microplex} and \texttt{microplex-us} repositories is retained only as a migration reference.
 The administrative targets are source-backed facts from PolicyEngine Ledger, open source at
 \url{https://github.com/PolicyEngine/arch-data}. The \texttt{l0-python} PyTorch package that implements
-the Hard Concrete optimizer is available at \url{https://github.com/PolicyEngine/l0-python}. Calibrated
-datasets are hosted on HuggingFace at \texttt{policyengine/policyengine-us-data}. The current
-reproduction workflow relies on public code and generated data artifacts.
+the Hard Concrete optimizer is available at \url{https://github.com/PolicyEngine/l0-python}. The
+candidate universe used here is the public Hugging Face dataset
+\texttt{policyengine/populace-us}, snapshot \texttt{be80a14f}, file
+\texttt{populace\_us\_2024.h5}, with H5 SHA-256 beginning \texttt{f0af2519}. The
+current reproduction workflow relies on public code and generated data artifacts.
 
 \section*{Use of generative AI}
 The authors used Claude (Anthropic) and Codex (OpenAI) for code assistance and manuscript drafting.

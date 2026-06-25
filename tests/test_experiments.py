@@ -639,6 +639,16 @@ def test_production_us_fiscal_target_loss_imports_populace_helper():
     assert target_loss.target_loss_weight_summary(weights)["kind"] == "provided"
 
 
+def test_production_module_path_uses_shared_populace_discovery(monkeypatch, tmp_path):
+    driver = tmp_path / "tools" / "build_us_fiscal_refresh_release.py"
+    driver.parent.mkdir(parents=True)
+    driver.write_text("# helper placeholder\n")
+
+    monkeypatch.setattr(target_loss, "_populace_repo_root", lambda: tmp_path)
+
+    assert target_loss._production_module_path() == driver
+
+
 # --- Amplified sweep: family-grouped folds ------------------------------------
 
 

@@ -37,6 +37,12 @@ DEFAULT_OUT = Path("runs/weighted-loss-3seed")
 DEFAULT_CONSUMER_FACTS = Path("data/targets/consumer_facts.jsonl")
 DEFAULT_QUARTO_PDF = Path("_output/paper/index.pdf")
 DEFAULT_PAPER_PDF = Path("paper/main.pdf")
+PAPER_BASE_REPO_ID = "policyengine/populace-us"
+PAPER_BASE_FILENAME = "populace_us_2024.h5"
+PAPER_BASE_REVISION = "be80a14f5ac24d726d2dddb7da78c55570515aa3"
+PAPER_BASE_H5_SHA256 = (
+    "f0af25192d6c8a7efc2638da2bd8ec4278b066a1092cc89ef2275811efaff11d"
+)
 
 
 def _call_cli(label: str, main: Callable[[], object], args: Sequence[object]) -> None:
@@ -193,10 +199,11 @@ def _prepare_precalibration(args: argparse.Namespace, facts: Path) -> Path:
         return precal_dir
 
     print(f"Building precalibration -> {precal_dir}")
+    base_h5 = _base_h5_for_build(args)
     artifact = build_precalibration_dataset(
         ledger_facts=facts,
         out_dir=precal_dir,
-        base_h5=args.base_h5,
+        base_h5=base_h5,
         period=args.period,
         reset_weights=args.reset_weights,
         weight_entity=args.weight_entity,
@@ -206,6 +213,28 @@ def _prepare_precalibration(args: argparse.Namespace, facts: Path) -> Path:
         drop_unsupported_filters=not args.keep_unsupported_targets,
     )
     return artifact.directory
+
+
+def _base_h5_for_build(args: argparse.Namespace) -> Path:
+    if args.base_h5 is not None:
+        return args.base_h5.expanduser()
+    from huggingface_hub import hf_hub_download
+
+    path = Path(
+        hf_hub_download(
+            repo_id=PAPER_BASE_REPO_ID,
+            filename=PAPER_BASE_FILENAME,
+            repo_type="dataset",
+            revision=PAPER_BASE_REVISION,
+        )
+    )
+    actual = _sha256(path)
+    if actual != PAPER_BASE_H5_SHA256:
+        raise SystemExit(
+            "l0 paper: downloaded paper base frame hash mismatch "
+            f"(expected {PAPER_BASE_H5_SHA256}, got {actual})."
+        )
+    return path
 
 
 def _validate_implicit_precalibration_reuse(
@@ -222,8 +251,11 @@ def _validate_implicit_precalibration_reuse(
         "drop_unsupported_filters": not args.keep_unsupported_targets,
         "ledger_facts_sha256": _sha256(facts.expanduser().resolve()),
     }
-    if args.base_h5 is not None:
-        expected["base_h5_sha256"] = _sha256(args.base_h5.expanduser().resolve())
+    expected["base_h5_sha256"] = (
+        _sha256(args.base_h5.expanduser().resolve())
+        if args.base_h5 is not None
+        else PAPER_BASE_H5_SHA256
+    )
 
     mismatches = [
         f"{key}: manifest={manifest.get(key)!r}, requested={value!r}"

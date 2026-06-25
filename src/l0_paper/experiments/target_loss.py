@@ -18,6 +18,7 @@ from typing import Any
 
 import numpy as np
 
+from l0_paper._populace_driver import _DRIVER_RELPATH, _populace_repo_root
 from populace.calibrate.target import TargetSet
 
 UNIFORM = "uniform"
@@ -109,13 +110,11 @@ def _production_module():
 
 
 def _production_module_path() -> Path:
-    repo_root = Path(__file__).resolve().parents[3]
-    path = repo_root.parent / "populace" / "tools" / "build_us_fiscal_refresh_release.py"
+    path = _populace_repo_root() / _DRIVER_RELPATH
     if not path.is_file():
         raise FileNotFoundError(
             "Populace production target-loss helper not found at "
-            f"{path}. Run from the sibling l0-paper-expanded/populace checkout "
-            "layout or expose the helper from Populace before using "
-            f"{PRODUCTION_US_FISCAL!r}."
+            f"{path}. Set L0_PAPER_POPULACE_REPO or expose the helper from "
+            f"Populace before using {PRODUCTION_US_FISCAL!r}."
         )
     return path
