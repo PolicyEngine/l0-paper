@@ -21,16 +21,15 @@ instead.
 
 Example
 -------
-    uv run python experiments/merge_l2_runs.py \
-        --inputs experiments/runs/weighted-loss-3seed/0l2 \
-                 experiments/runs/weighted-loss-3seed/1l2 \
-        --out experiments/runs/weighted-loss-3seed \
+    uv run l0 merge-l2 \
+        --inputs runs/weighted-loss-3seed/0l2 \
+                 runs/weighted-loss-3seed/1l2 \
+        --out runs/weighted-loss-3seed \
         --run-id weighted-loss-3seed
 
 Then regenerate the report (note ``--sweep`` reads the merged metrics_long.csv):
 
-    uv run --extra viz python experiments/figures.py \
-        --sweep experiments/runs/weighted-loss-3seed
+    uv run --extra viz l0 figures --sweep runs/weighted-loss-3seed
 """
 
 from __future__ import annotations

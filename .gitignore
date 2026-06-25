@@ -17,15 +17,14 @@ build/
 # Experiment outputs (results, metrics CSVs, per-target diagnostics, figures)
 artifacts/
 benchmarks/results/
-experiments/runs/
-experiments/l2-runs/
+runs/
+demo-run/
 results/
 
 # Local working / decision docs (runbooks, plans -- not part of the codebase)
 /NEXT_STEPS.md
-/experiments/RUN_EXPANDED.md
 
-# Generated calibration-target bundles (regenerate with experiments/build_targets.py)
+# Generated calibration-target bundles (regenerate with `l0 build-targets`)
 /data/
 
 # LaTeX auxiliary files

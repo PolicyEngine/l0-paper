@@ -22,9 +22,9 @@ Design choices that keep it honest and affordable:
 
 Example
 -------
-    uv run python experiments/run_sweep.py \
-        --reuse-precalibration experiments/runs/full-20k-cbo-state-tax-holdout/precalibration \
-        --out experiments/runs/sweep-moderate \
+    uv run --extra data l0 sweep \
+        --reuse-precalibration runs/poc/precalibration \
+        --out runs/sweep-moderate \
         --budgets 1000 2000 5000 10000 20000 \
         --seeds 0 1 2 \
         --epochs 1000 \

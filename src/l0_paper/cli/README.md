@@ -18,7 +18,7 @@ frozen artifact.
 
 ## Calibration conditions (this issue)
 
-[`l0_paper.experiments.conditions`](../src/l0_paper/experiments/conditions.py):
+[`l0_paper.experiments.conditions`](../experiments/conditions.py):
 
 1. **Informed L0** (`run_l0`) — `calibrate(..., target_records=N)` jointly fits
    weights and Hard-Concrete gates to retain ~N records.
@@ -34,8 +34,8 @@ frozen artifact.
    descent (gates off). The paper's method 2.
 
 All three return a full-length weight vector (zero for unretained records), scored
-in- and out-of-sample by [`metrics`](../src/l0_paper/experiments/metrics.py) with
-targets held out via [`holdout`](../src/l0_paper/experiments/holdout.py). The
+in- and out-of-sample by [`metrics`](../experiments/metrics.py) with
+targets held out via [`holdout`](../experiments/holdout.py). The
 sampling-comparison table now fills three of its four method rows (combinatorial
 optimisation remains `\tbc`).
 
@@ -84,9 +84,9 @@ their pinned years (`build-suite`) and merges them into the base bundle:
 
 ```bash
 # Cheap: reuse a default-source bundle (the output of `arch build-bundle --year 2023`):
-uv run python experiments/build_targets.py --base /path/to/base/consumer_facts.jsonl
+uv run --extra data l0 build-targets --base /path/to/base/consumer_facts.jsonl
 # From scratch (slow base build; needs arch-data source access / ARCH_SOURCE_ARTIFACT_FETCH=1):
-uv run python experiments/build_targets.py --build-base --year 2023
+uv run --extra data l0 build-targets --build-base --year 2023
 ```
 
 It writes the full target set to `data/targets/consumer_facts.jsonl` plus a
@@ -106,23 +106,23 @@ as `unsupported_filter_dropped`). Pass `--keep-unsupported-targets` to
 # Full proof-of-concept (downloads the published base frame from HuggingFace,
 # runs the PolicyEngine-US materialization, then all conditions). Uses the
 # complete in-repo target set; no --allow-partial-facts needed:
-uv run python experiments/run_poc.py \
+uv run --extra data l0 poc \
     --ledger-facts data/targets/consumer_facts.jsonl \
     --period 2024 \
-    --out experiments/runs/poc \
+    --out runs/poc \
     --subsample 20000 --target-records 5000 --seed 0
 
 # Reuse a frozen pre-calibration dataset (skips the heavy build):
-uv run python experiments/run_poc.py \
-    --reuse-precalibration experiments/runs/poc/precalibration \
-    --out experiments/runs/poc2 --target-records 5000 --seed 0
+uv run --extra data l0 poc \
+    --reuse-precalibration runs/poc/precalibration \
+    --out runs/poc2 --target-records 5000 --seed 0
 
 # Smoke the whole real pipeline with the arch-data fixture (tiny):
-uv run python experiments/run_poc.py \
+uv run --extra data l0 poc \
     --ledger-facts /path/to/arch-data/arch/fixtures/consumer_facts.jsonl \
     --allow-partial-facts \
     --period 2023 --subsample 2000 --target-records 800 --epochs 60 \
-    --mass free --holdout-frac 0.0 --out experiments/runs/smoke
+    --mass free --holdout-frac 0.0 --out runs/smoke
 ```
 
 Outputs per run: `run_manifest.json` (Populace commit, registry version, base-H5
@@ -168,9 +168,9 @@ each method's accuracy moves as the record budget shrinks, with error bars and a
 leak-free out-of-sample test. [`run_sweep.py`](run_sweep.py) provides that.
 
 ```bash
-uv run --extra data python experiments/run_sweep.py \
-    --reuse-precalibration experiments/runs/full-20k-cbo-state-tax-holdout/precalibration \
-    --out experiments/runs/sweep-moderate \
+uv run --extra data l0 sweep \
+    --reuse-precalibration runs/full-20k-cbo-state-tax-holdout/precalibration \
+    --out runs/sweep-moderate \
     --budgets 1000 2000 5000 10000 20000 \
     --seeds 0 1 2 \
     --epochs 1000 \
@@ -195,13 +195,13 @@ Design points:
   their ESS and max weight are reported so concentration is visible. Use
   `--methods informed_l0` to run only the (expensive) L0 condition.
 - **Dense reuse**: the dense fit for survey-weight sampling does not depend on the
-  budget, so [`conditions.calibrate_dense`](../src/l0_paper/experiments/conditions.py)
-  computes it once per seed and [`conditions.sample_from_dense`](../src/l0_paper/experiments/conditions.py)
+  budget, so [`conditions.calibrate_dense`](../experiments/conditions.py)
+  computes it once per seed and [`conditions.sample_from_dense`](../experiments/conditions.py)
   resamples it at every budget.
 - **Leak-free holdout**: the frontier uses one fixed *family-level* split
   (`split_registry_by_family`) so nested cells (a national total and its state
   parts) never straddle the fit/holdout boundary. `--rotation-folds k` adds a
-  robustness panel at `--rotation-budget`: [`holdout.family_grouped_folds`](../src/l0_paper/experiments/holdout.py)
+  robustness panel at `--rotation-budget`: [`holdout.family_grouped_folds`](../experiments/holdout.py)
   deals **whole families** into `k` balanced folds so every family is held out
   exactly once, with no within-family leakage. Validation-only families (`cbo`)
   are excluded from every fit and scored out-of-sample only.
@@ -220,7 +220,7 @@ Output: one tidy **long CSV** (`metrics_long.csv`) — one row per
 
 ### Aggregation, figures, and tables
 
-[`aggregate.py`](../src/l0_paper/experiments/aggregate.py) (pure
+[`aggregate.py`](../experiments/aggregate.py) (pure
 numpy/pandas/scipy) turns the long CSV into cross-seed statistics:
 mean ± t confidence interval (`frontier_table`), the paired same-seed
 `informed_l0` − `random_reweight` difference with a significance flag and paired
@@ -233,8 +233,8 @@ and per-budget run diagnostics (`run_metric`, e.g. ESS / max weight).
 dependency needed — plus matplotlib figures (static PDF/PNG/SVG):
 
 ```bash
-uv run --extra viz python experiments/figures.py \
-    --sweep experiments/runs/sweep-moderate --paper-figures
+uv run --extra viz l0 figures \
+    --sweep runs/sweep-moderate --paper-figures
 ```
 
 - **F1** frontier — out-of-sample mean & median ARE vs retained records (seed bands).

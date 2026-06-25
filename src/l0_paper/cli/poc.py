@@ -7,16 +7,16 @@ writes paper-ready artifacts and tables.
 
 Example
 -------
-    uv run python experiments/run_poc.py \
+    uv run --extra data l0 poc \
         --ledger-facts /path/to/consumer_facts.jsonl \
-        --out experiments/runs/poc \
+        --out runs/poc \
         --subsample 20000 --target-records 5000 --seed 0
 
 Reuse a previously frozen pre-calibration dataset (skips the heavy build):
 
-    uv run python experiments/run_poc.py \
-        --reuse-precalibration experiments/runs/poc/precalibration \
-        --out experiments/runs/poc2 --target-records 5000 --seed 0
+    uv run --extra data l0 poc \
+        --reuse-precalibration runs/poc/precalibration \
+        --out runs/poc2 --target-records 5000 --seed 0
 """
 
 from __future__ import annotations
@@ -40,8 +40,8 @@ from l0_paper.precalibration import (
     load_precalibration_dataset,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-PAPER_TABLES = REPO_ROOT / "paper" / "tables"
+# Resolved from the working directory (run from the repo checkout).
+PAPER_TABLES = Path.cwd() / "paper" / "tables"
 
 
 def _parse_args() -> argparse.Namespace:

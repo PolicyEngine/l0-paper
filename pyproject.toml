@@ -13,6 +13,9 @@ dependencies = [
     "populace-build>=0.1,<0.2",
 ]
 
+[project.scripts]
+l0 = "l0_paper.cli:main"
+
 [project.optional-dependencies]
 data = [
     "populace-data>=0.1,<0.2",
@@ -63,3 +66,5 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/l0_paper"]
+# Ship the vendored Inter fonts (used by the figure renderers) in the wheel.
+artifacts = ["src/l0_paper/cli/assets/**/*.ttf"]

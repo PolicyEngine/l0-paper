@@ -3,13 +3,11 @@
 These exercise both calibration conditions, scoring, holdout splitting, artifact
 summaries, and table rendering on the toy Populace frame -- no PolicyEngine-US and
 no network, so CI stays fast and self-contained. The real-data path is driven by
-``experiments/run_poc.py``.
+``l0 poc`` / ``l0 sweep``.
 """
 
-import importlib.util
 import json
 from collections import defaultdict
-from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -396,14 +394,7 @@ def test_manifest_is_strict_json_with_empty_holdout(tmp_path):
 
 
 def test_summarize_run_writes_readable_tables(tmp_path):
-    spec = importlib.util.spec_from_file_location(
-        "summarize_run",
-        Path(__file__).resolve().parents[1] / "experiments" / "summarize_run.py",
-    )
-    assert spec is not None
-    assert spec.loader is not None
-    summarize_run = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(summarize_run)
+    from l0_paper.cli import summarize as summarize_run
 
     manifest = {
         "run_id": "toy-run",

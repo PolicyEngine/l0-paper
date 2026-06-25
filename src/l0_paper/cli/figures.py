@@ -37,9 +37,11 @@ import pandas as pd
 from l0_paper.experiments import aggregate, tables
 from l0_paper.experiments.tables import SWEEP_METHOD_LABELS, SWEEP_METHOD_ORDER
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-PAPER_FIGURES = REPO_ROOT / "paper" / "figures"
-FONTS_DIR = REPO_ROOT / "experiments" / "assets" / "fonts" / "Inter"
+# Fonts are vendored with the package (found via __file__, so they ship in the
+# wheel). The paper's figure directory is resolved from the working directory --
+# these commands run from the repo checkout.
+FONTS_DIR = Path(__file__).resolve().parent / "assets" / "fonts" / "Inter"
+PAPER_FIGURES = Path.cwd() / "paper" / "figures"
 
 # PolicyEngine palette (theme.css --chart-1/2/5), stable per method across every
 # figure. Each method also gets a distinct marker so the series stay legible in
@@ -486,7 +488,7 @@ def _setup_style() -> None:
         fm.fontManager.addfont(str(ttf))
     if not ttfs:
         print(
-            "Inter not vendored under experiments/assets/fonts/Inter -- falling "
+            "Inter not vendored under l0_paper/cli/assets/fonts/Inter -- falling "
             "back to a system sans. For brand fidelity: brew install --cask font-inter"
         )
 

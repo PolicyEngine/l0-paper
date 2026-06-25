@@ -1,98 +1,68 @@
 # L0 paper
 
-Paper and experiment workspace for PolicyEngine's $L_0$ dataset-reduction work
-on the Populace microsimulation data stack.
+Paper and experiment workspace for PolicyEngine's $L_0$ dataset-reduction work on
+the Populace microsimulation data stack.
 
 This repository contains the manuscript, figures, tables, and reproducibility
-code for evaluating Hard Concrete / $L_0$ record selection as a way to compress a
-large calibrated microsimulation candidate universe into a deployable dataset.
-The paper is being prepared for IMA 2026 in Brussels:
+code for evaluating Hard Concrete / $L_0$ record selection (against random,
+survey-weight, and convex $L_1$ baselines) as a way to compress a large
+calibrated microsimulation candidate universe into a deployable dataset. The
+paper is being prepared for IMA 2026 in Brussels:
 <https://ima26.brussels/blog/presentation_maria_juaristi/>.
 
 The implementation targets active `PolicyEngine/populace` APIs. Archived
 `microplex` and `microplex-us` repositories are mentioned only as historical
 migration context.
 
-## Repository Layout
+## Repository layout
 
 ```text
 l0-paper/
-├── data/
-│   └── targets/              # generated Ledger fact bundles and target manifest
-├── experiments/
-│   ├── build_targets.py      # assemble the target fact bundle used by the paper
-│   ├── run_poc.py            # one-budget proof-of-concept run
-│   ├── run_sweep.py          # multi-budget, multi-seed sweep
-│   ├── figures.py            # aggregate sweep outputs into figures/tables
-│   ├── summarize_run.py      # inspect individual run manifests
-│   ├── runs/                 # generated experiment outputs
-│   └── README.md             # detailed experiment protocol
-├── paper/
-│   ├── main.tex              # LaTeX root used for the current manuscript
-│   ├── main.pdf              # compiled manuscript artifact
-│   ├── sections/             # manuscript sections
-│   ├── tables/               # paper-ready LaTeX tables
-│   ├── figures/              # paper figures and selected figure generators
-│   ├── bibliography/         # BibTeX references
-│   └── index.qmd             # Quarto entry point retained for incremental migration
 ├── src/l0_paper/
-│   ├── precalibration.py     # freeze Frame + TargetRegistry before calibration
-│   ├── _populace_driver.py   # small Populace wiring helpers
-│   ├── populace_smoke.py     # tiny Populace smoke-calibration path
-│   └── experiments/          # calibration conditions, metrics, holdout, tables
-├── tests/                    # offline tests for experiment logic and smoke path
-├── pyproject.toml            # package metadata, extras, and local Populace paths
-├── uv.lock                   # locked Python environment
-└── .github/workflows/ci.yml  # pytest + ruff against sibling Populace checkout
+│   ├── cli/                 # the `l0` command line (drivers ship in the package)
+│   │   ├── sweep.py         #   l0 sweep            multi-budget, multi-seed sweep
+│   │   ├── poc.py           #   l0 poc              one-budget run; builds precalibration
+│   │   ├── figures.py       #   l0 figures          figures + LaTeX tables from a sweep
+│   │   ├── summarize.py     #   l0 summarize        readable summaries from a manifest
+│   │   ├── merge_l2.py      #   l0 merge-l2         stitch single-l2 runs together
+│   │   ├── build_candidate.py / build_targets.py   #   l0 build-candidate / build-targets
+│   │   ├── demo.py          #   l0 demo             whole pipeline on the toy frame (no data)
+│   │   └── assets/          #   vendored fonts for the figures
+│   ├── experiments/         # library: conditions, metrics, holdout, crunch, aggregate, tables
+│   ├── precalibration.py    # freeze Frame + TargetRegistry before calibration
+│   ├── populace_smoke.py    # tiny toy Populace frame/targets (used by demo + tests)
+│   └── _populace_driver.py  # Populace wiring helpers
+├── paper/                   # main.tex, sections/, tables/, figures/, bibliography/
+├── tests/                   # offline tests (toy frame); no network, no PolicyEngine-US
+├── pyproject.toml           # package metadata, the `l0` entry point, extras, Populace paths
+├── uv.lock                  # locked Python environment
+└── .github/workflows/ci.yml # pytest + ruff against a pinned Populace checkout
 ```
 
-## Current Artifacts
+## The `l0` command line
 
-The current paper figures live in `paper/figures/`:
+The experiment drivers ship inside the package, so once the environment is set up
+they run as `l0 <command>` (or `uv run l0 <command>`):
 
-| Figure | File(s) | Source |
-| --- | --- | --- |
-| Pipeline overview | `populace_pipeline.png`, `populace_pipeline.py` | Local figure script |
-| Frontier | `f1_frontier.pdf/png` | `experiments/figures.py` from sweep outputs |
-| Usability | `f2_usability.pdf/png` | `experiments/figures.py` |
-| Generalization gap | `f3_generalization_gap.pdf/png` | `experiments/figures.py` |
-| Family breakdown | `f4_by_family.pdf/png` | `experiments/figures.py` |
-| Cost accuracy | `f5_cost_accuracy.pdf/png` | `experiments/figures.py` |
-| Operability | `f6_operability.pdf/png` | `experiments/figures.py` |
-
-`paper/tables/` contains the LaTeX tables currently included by the manuscript.
-The expanded three-seed sweep outputs are under `experiments/runs/`; the long
-CSV files and sweep manifests are the source of truth for derived figures and
-tables.
-
-## Data And Provenance
-
-The calibration candidate universe used in the current manuscript is the
-Populace US 2024 household file distributed on Hugging Face as
-`policyengine/populace-us`. The paper pins the artifact used in these experiments
-to snapshot `be80a14f`, built from Populace commit `6e1bcd0`, with the H5
-SHA-256 beginning `f0af2519`.
-
-Target values come from PolicyEngine Ledger / `arch-data` consumer facts. The
-checked-in target bundle is under `data/targets/`:
-
-- `consumer_facts.jsonl` - target fact bundle used by the experiments.
-- `base_consumer_facts.jsonl` - base bundle before off-year source merge.
-- `targets_manifest.json` - provenance for the generated target bundle.
-
-Rebuild the target bundle with:
-
-```bash
-uv run python experiments/build_targets.py --base /path/to/base/consumer_facts.jsonl
+```text
+l0 demo              run the whole pipeline end-to-end on the toy frame (no data)
+l0 poc               single-budget run; builds/reuses the precalibration cache
+l0 sweep             budget x seed sweep of the calibration conditions
+l0 figures           render figures + LaTeX tables from a sweep's metrics_long.csv
+l0 summarize         readable CSV/Markdown summaries from a run manifest
+l0 build-candidate   build the candidate-universe precalibration frame
+l0 build-targets     build the calibration target bundle from arch-data
+l0 merge-l2          merge single-l2 sweep runs into one comparison directory
 ```
 
-See `experiments/README.md` for the full `arch-data` workflow, off-year target
-sources, unsupported target filters, and the distinction between fit targets and
-validation-only families.
+`l0 demo` needs nothing beyond the base install and is what CI runs to exercise
+the experiment + figure path; the other commands need the `data`/`viz` extras
+and, for the real run, the pinned Populace artifact below.
 
 ## Setup
 
-This repository expects to be cloned next to `PolicyEngine/populace`:
+This repository expects to be cloned next to `PolicyEngine/populace`, which
+`pyproject.toml` references in editable mode:
 
 ```text
 PolicyEngine/
@@ -100,116 +70,89 @@ PolicyEngine/
   populace/
 ```
 
-`pyproject.toml` points `uv` at the sibling Populace packages in editable mode,
-so local tests and experiments use the active Populace checkout.
-
 ```bash
-uv sync --all-extras --dev
+uv sync --all-extras
+uv run l0 demo            # toy end-to-end sanity check
 uv run pytest
 uv run ruff check .
 ```
 
-Useful extras:
+Extras: `--extra data` installs the heavy real-data path (`populace-data`,
+`policyengine-us`, Hugging Face, H5 I/O); `--extra viz` installs the plotting
+dependencies the figure renderers need.
 
-- `--extra data` installs the heavier real-data path: `populace-data`,
-  `policyengine-us`, Hugging Face support, and H5 I/O.
-- `--extra viz` installs plotting dependencies for `experiments/figures.py`.
+CI checks out `l0-paper` and a pinned `PolicyEngine/populace` ref, then runs
+`uv run --locked --extra viz pytest` and `uv run --locked ruff check .`.
 
-CI checks out both `l0-paper` and `PolicyEngine/populace`, then runs:
+## Experiment workflow
 
-```bash
-uv run --locked pytest
-uv run --locked ruff check .
-```
-
-## Experiment Workflow
-
-The experiment design freezes the expensive pre-calibration input, then varies
-only the calibration/sampling method.
-
-1. Build or reuse a frozen pre-calibration artifact:
-
-   ```bash
-   uv run --extra data python experiments/run_poc.py \
-       --ledger-facts data/targets/consumer_facts.jsonl \
-       --period 2024 \
-       --out experiments/runs/poc \
-       --subsample 20000 \
-       --target-records 5000 \
-       --seed 0
-   ```
-
-2. Run the budget sweep from that frozen artifact:
-
-   ```bash
-   uv run --extra data python experiments/run_sweep.py \
-       --reuse-precalibration experiments/runs/poc/precalibration \
-       --out experiments/runs/sweep-moderate \
-       --budgets 1000 2000 5000 10000 20000 \
-       --seeds 0 1 2 \
-       --epochs 1000 \
-       --holdout-families state_income_tax \
-       --rotation-folds 5 \
-       --rotation-budget 5000
-   ```
-
-3. Regenerate sweep-derived paper figures and tables:
-
-   ```bash
-   uv run --extra viz python experiments/figures.py \
-       --sweep experiments/runs/sweep-moderate \
-       --paper-figures
-   ```
-
-Methods compared by the current sweep:
-
-- `informed_l0`: Populace calibration with Hard Concrete gates and a target
-  record budget.
-- `random_reweight`: uniform random subset followed by gradient-descent
-  reweighting.
-- `dense_sample`: dense calibration followed by survey-weight / PPS sampling at
-  the matched retained count.
-
-The detailed experiment protocol, metric definitions, holdout design, cap
-semantics, and generated output schema are documented in `experiments/README.md`.
-
-## Rendering The Paper
-
-The current manuscript is LaTeX-first:
+The design freezes the expensive pre-calibration input, then varies only the
+calibration/sampling method.
 
 ```bash
-cd paper
-pdflatex -interaction=nonstopmode main.tex
-bibtex main
-pdflatex -interaction=nonstopmode main.tex
-pdflatex -interaction=nonstopmode main.tex
+# 1. Build (or reuse) a frozen pre-calibration artifact.
+uv run --extra data l0 poc \
+    --ledger-facts data/targets/consumer_facts.jsonl \
+    --period 2024 --out runs/poc --subsample 20000 \
+    --target-records 5000 --seed 0
+
+# 2. Sweep budgets x seeds from that frozen artifact.
+uv run --extra data l0 sweep \
+    --reuse-precalibration runs/poc/precalibration \
+    --out runs/sweep --budgets 1000 2000 5000 10000 20000 \
+    --seeds 0 1 2 --epochs 1000 \
+    --holdout-families state_income_tax --rotation-folds 5 --rotation-budget 5000
+
+# 3. Regenerate the paper's figures and tables from the sweep.
+uv run --extra viz l0 figures --sweep runs/sweep --paper-figures
 ```
 
-If `latexmk` is available, this is equivalent:
+Methods compared by the sweep:
+
+- `informed_l0` — Populace calibration with Hard Concrete gates at a target budget.
+- `informed_l1` — the convex-sparse analog: proximal ($L_1$ soft-threshold)
+  selection at the matched budget (`method="prox"`, `l1_lambda`).
+- `random_reweight` — uniform random subset, then gradient-descent reweighting.
+- `dense_sample` — dense calibration, then survey-weight / PPS sampling.
+
+The detailed protocol — metric definitions, holdout design, cap semantics, and
+the output schema — is in [`src/l0_paper/cli/README.md`](src/l0_paper/cli/README.md).
+
+## Data and provenance
+
+The candidate universe is the Populace US 2024 household file on Hugging Face
+(`policyengine/populace-us`), pinned to snapshot `be80a14f`, built from Populace
+commit `6e1bcd0`, H5 SHA-256 beginning `f0af2519`. Target values come from
+PolicyEngine Ledger / `arch-data` consumer facts.
+
+The target bundle under `data/targets/` (`consumer_facts.jsonl`,
+`base_consumer_facts.jsonl`, `targets_manifest.json`) is **generated, not checked
+in** (it is git-ignored). Rebuild it with:
 
 ```bash
-cd paper
-latexmk -pdf main.tex
+uv run --extra data l0 build-targets --base /path/to/base/consumer_facts.jsonl
 ```
 
-The Quarto entry point is retained at `paper/index.qmd`, but the active compiled
-artifact is `paper/main.pdf`.
+## Rendering the paper
+
+The manuscript is LaTeX-first:
+
+```bash
+cd paper && latexmk -pdf main.tex      # or pdflatex; bibtex; pdflatex x2
+```
 
 The pipeline overview figure is generated separately:
 
 ```bash
-uv run --locked python paper/figures/populace_pipeline.py
+uv run python paper/figures/populace_pipeline.py
 ```
 
 ## Tests
 
-The test suite is designed to run offline. It covers the toy calibration
-conditions, metrics, holdout logic, artifact summaries, table rendering, and a
-small Populace smoke path.
+The suite runs offline on the toy frame (no network, no PolicyEngine-US), and
+includes an end-to-end check that the four arms run, the objective crunches, the
+figures render, and the `l0` CLI works:
 
 ```bash
-uv run --locked pytest
+uv run --extra viz pytest
 ```
-
-Use the real-data commands only when the heavier data dependencies and external
-source artifacts are available.
