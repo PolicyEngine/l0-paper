@@ -24,15 +24,32 @@ UNIFORM = "uniform"
 PRODUCTION_US_FISCAL = "production_us_fiscal"
 TARGET_LOSS_WEIGHTINGS = (UNIFORM, PRODUCTION_US_FISCAL)
 
+#: Generic solver fallback cap (Populace's ``_DEFAULT_TARGET_LOSS_CAP``); the cap
+#: for the uniform-weighting baseline.
 DEFAULT_TARGET_LOSS_CAP = 10.0
+#: Production US-fiscal cap, mirroring ``US_FISCAL_TARGET_LOSS_CAP`` in Populace's
+#: ``tools/build_us_fiscal_refresh_release.py`` so the production weighting inherits
+#: the production cap rather than the generic 10.0.
+PRODUCTION_US_FISCAL_TARGET_LOSS_CAP = 1.0
+
+#: Default target-loss cap per weighting when none is passed explicitly.
+_DEFAULT_TARGET_LOSS_CAP_BY_WEIGHTING = {
+    UNIFORM: DEFAULT_TARGET_LOSS_CAP,
+    PRODUCTION_US_FISCAL: PRODUCTION_US_FISCAL_TARGET_LOSS_CAP,
+}
 
 
 def resolve_target_loss_cap(weighting: str, cap: float | None) -> float:
-    """Return the effective cap for a target-loss weighting scheme."""
+    """Return the effective cap for a target-loss weighting scheme.
+
+    An explicit ``cap`` always wins. Otherwise the default is per weighting:
+    ``production_us_fiscal`` inherits the production cap (1.0); ``uniform`` keeps the
+    generic solver default (10.0).
+    """
     if cap is not None:
         resolved = float(cap)
-    elif weighting in TARGET_LOSS_WEIGHTINGS:
-        resolved = DEFAULT_TARGET_LOSS_CAP
+    elif weighting in _DEFAULT_TARGET_LOSS_CAP_BY_WEIGHTING:
+        resolved = _DEFAULT_TARGET_LOSS_CAP_BY_WEIGHTING[weighting]
     else:
         raise ValueError(f"Unknown target-loss weighting {weighting!r}.")
     if not np.isfinite(resolved) or resolved <= 0.0:

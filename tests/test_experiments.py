@@ -604,11 +604,14 @@ def test_production_us_fiscal_target_loss_imports_populace_helper():
     assert np.isclose(weights.mean(), 1.0)
     # Reuses Populace's production rule: sqrt(value) within the amount basis.
     assert np.isclose(weights[1] / weights[0], 2.0)
+    # production_us_fiscal inherits Populace's production cap (1.0), not the generic 10.0
     assert target_loss.resolve_target_loss_cap(
         target_loss.PRODUCTION_US_FISCAL,
         None,
-    ) == 10.0
+    ) == 1.0
     assert target_loss.resolve_target_loss_cap(target_loss.UNIFORM, None) == 10.0
+    # an explicit cap always wins over the per-weighting default
+    assert target_loss.resolve_target_loss_cap(target_loss.PRODUCTION_US_FISCAL, 10.0) == 10.0
     assert target_loss.target_loss_weight_summary(weights)["kind"] == "provided"
 
 
