@@ -317,15 +317,14 @@ def render_paired_comparison(
     """Table: paired (same-seed) challenger-vs-baseline difference per budget.
 
     ``paired_df`` is :func:`aggregate.paired_method_diff` output. A negative
-    difference (challenger lower error) with a CI excluding zero and enough paired
-    seeds is a significant win, flagged with ``$^\\star$``.
+    difference means the challenger has lower error. The confidence intervals and
+    p-values are descriptive diagnostics of the paired seed differences.
     """
     ch_label = SWEEP_METHOD_LABELS.get(challenger, challenger)
     bl_label = SWEEP_METHOD_LABELS.get(baseline, baseline)
     ch_mean_col, bl_mean_col = f"{challenger}_mean", f"{baseline}_mean"
     rows = []
     for _, row in paired_df.iterrows():
-        star = r"$^\star$" if row.get("significant") else ""
         diff = _ci_cell(row["diff_mean"], row["diff_lo"], row["diff_hi"])
         p = row.get("p_value")
         p_str = "--" if p is None or (isinstance(p, float) and math.isnan(p)) else f"{float(p):.3f}"
@@ -334,7 +333,7 @@ def render_paired_comparison(
             budget = f"{budget} ($\\lambda_2={float(row['l2_lambda']):g}$)"
         rows.append(
             f"{budget} & {_ci_cell(row[ch_mean_col], None, None)} & "
-            f"{_ci_cell(row[bl_mean_col], None, None)} & {diff}{star} & {p_str} \\\\"
+            f"{_ci_cell(row[bl_mean_col], None, None)} & {diff} & {p_str} \\\\"
         )
     body = "\n".join(rows)
     return rf"""\begin{{table}}[ht]
@@ -350,8 +349,8 @@ Budget & {ch_label} (\%) & {bl_label} (\%) & $\Delta$ (pp) & $p$ \\
 }}
 \caption{{Paired out-of-sample comparison of {ch_label} against {bl_label} at each
 budget. $\Delta$ is the cross-seed mean of the per-seed error difference (negative
-favours {ch_label}) with a 95\% confidence interval; $^\star$ marks a CI excluding
-zero with at least three paired seeds. $p$ is a paired $t$-test.}}
+favours {ch_label}) with a 95\% confidence interval. $p$ is a paired $t$-test and
+should be read as descriptive rather than strong inferential evidence.}}
 \label{{tab:paired_comparison}}
 \end{{table}}
 """

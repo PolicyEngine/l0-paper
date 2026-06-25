@@ -185,16 +185,27 @@ def run_l1(
                 target_loss_weights=target_loss_weights,
                 target_loss_cap=target_loss_cap,
             )
-        except ValueError:
+        except ValueError as exc:
             # l1_lambda large enough to zero every weight: report as zero survivors
-            # so the search backs the penalty off.
+            # so the search backs the penalty off. Other ValueErrors are genuine
+            # input/solver failures and should stop the sweep loudly.
+            if "L1 penalty zeroed every weight" not in str(exc):
+                raise
             return None
 
-    log_lo = float(np.log10(l1_lambda_bracket[0]))
-    log_hi = float(np.log10(l1_lambda_bracket[1]))
+    if len(l1_lambda_bracket) != 2:
+        raise ValueError("l1_lambda_bracket must contain exactly two positive bounds.")
+    bracket = tuple(float(x) for x in l1_lambda_bracket)
+    if bracket[0] <= 0 or bracket[1] <= 0:
+        raise ValueError("l1_lambda_bracket bounds must be positive.")
+    if bracket[0] > bracket[1]:
+        raise ValueError("l1_lambda_bracket lower bound must be <= upper bound.")
+
+    log_lo = float(np.log10(bracket[0]))
+    log_hi = float(np.log10(bracket[1]))
     best = None
     best_gap = None
-    chosen_l1 = float(l1_lambda_bracket[0])
+    chosen_l1 = bracket[0]
     for _ in range(budget_iters):
         mid = (log_lo + log_hi) / 2.0
         l1_lambda = float(10.0**mid)
@@ -211,8 +222,13 @@ def run_l1(
     if best is None:
         # Nothing in the bracket fit without zeroing every weight; fall back to the
         # smallest penalty, which retains the most records.
-        chosen_l1 = float(l1_lambda_bracket[0])
+        chosen_l1 = bracket[0]
         best = _fit(chosen_l1)
+        if best is None:
+            raise ValueError(
+                "L1 lambda bracket zeroed every weight even at the lower bound "
+                f"{chosen_l1:g}; widen the bracket downward or lower the learning rate."
+            )
     runtime = time.perf_counter() - start
 
     weights = np.asarray(best.weights, dtype=np.float64)
@@ -220,7 +236,7 @@ def run_l1(
     options.update(
         {
             "l1_lambda": chosen_l1,
-            "l1_lambda_bracket": list(l1_lambda_bracket),
+            "l1_lambda_bracket": list(bracket),
             "budget_iters": budget_iters,
             "target_loss_cap": target_loss_cap,
         }

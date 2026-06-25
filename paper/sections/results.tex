@@ -50,12 +50,13 @@ diagnostics, in particular the effective sample size that the matched accuracy i
 \end{figure}
 
 The hypothesis behind informed selection is that it lowers calibration error at a fixed budget, because
-the gates retain the records the targets constrain. Table~\ref{tab:paired_comparison} tests that per
-budget against random + reweight with a paired test across the three seeds. The advantage holds only
-under aggressive compression: informed $L_0$ is ahead at 2{,}000 records ($p=0.017$), the two are
-statistically indistinguishable at 5{,}000 ($p=0.43$, where random + reweight's seed variance is large),
-and random + reweight is ahead at 10{,}000 and 20{,}000 ($p=0.023$ and $p=0.049$); the 40{,}000
-difference is not significant ($p=0.086$).
+the gates retain the records the targets constrain. Table~\ref{tab:paired_comparison} reports the
+same-seed difference against random + reweight at each budget. With only three seeds, the paired
+$t$-statistics are descriptive diagnostics rather than strong inferential evidence. On that descriptive
+read, the advantage appears only under aggressive compression: informed $L_0$ is ahead at 2{,}000 records
+($p=0.017$), the two are close at 5{,}000 ($p=0.43$, where random + reweight's seed variance is large),
+and random + reweight is ahead at 10{,}000 and 20{,}000 ($p=0.023$ and $p=0.049$); the 40{,}000-record
+difference is smaller ($p=0.086$).
 
 \input{tables/paired_comparison}
 

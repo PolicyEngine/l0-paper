@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 """Merge single-``l2_lambda`` sweep runs into one combined run directory.
 
-When the L2 penalties are swept in *separate* invocations of ``run_sweep.py``
+When the L2 penalties are swept in *separate* invocations of ``l0 sweep``
 (one run per ``l2_lambda``), each run directory holds only one penalty value, so
 the figures that contrast penalties -- F6 operability (ESS / accuracy vs
 ``lambda_L2``) and the multi-``l2`` table columns -- cannot be drawn from any one
 directory. This tool stitches those runs back into the single combined layout
-``run_sweep.py`` would have produced had ``--l2-lambdas`` listed every penalty at
+``l0 sweep`` would have produced had ``--l2-lambdas`` listed every penalty at
 once (the ``expanded-3seed`` layout), so ``figures.py`` can render the L2
 comparison.
 

@@ -63,12 +63,12 @@ consumes is regenerable from one command.
 Example
 -------
     # Reuse an existing default-source bundle, add the off-year sources, write into repo:
-    uv run python experiments/build_targets.py \
+    uv run l0 build-targets \
         --base /path/to/arch-us-2024/consumer_facts.jsonl
 
     # Or build everything from scratch (the slow base build needs arch-data source
     # access: arch-raw R2 auth, or ARCH_SOURCE_ARTIFACT_FETCH=1 for public URLs):
-    uv run python experiments/build_targets.py --build-base --year 2023
+    uv run l0 build-targets --build-base --year 2023
 """
 
 from __future__ import annotations
@@ -240,7 +240,7 @@ def main() -> None:
         "counts": counts,
         "note": (
             "Complete L0 target bundle: base default-source bundle + off-year "
-            "sources merged by concatenation. Regenerate with experiments/build_targets.py."
+            "sources merged by concatenation. Regenerate with l0 build-targets."
         ),
     }
     (out.parent / "targets_manifest.json").write_text(json.dumps(manifest, indent=2))

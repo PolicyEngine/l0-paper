@@ -4,10 +4,11 @@ Paper and experiment workspace for PolicyEngine's $L_0$ dataset-reduction work o
 the Populace microsimulation data stack.
 
 This repository contains the manuscript, figures, tables, and reproducibility
-code for evaluating Hard Concrete / $L_0$ record selection (against random,
-survey-weight, and convex $L_1$ baselines) as a way to compress a large
-calibrated microsimulation candidate universe into a deployable dataset. The
-paper is being prepared for IMA 2026 in Brussels:
+code for evaluating Hard Concrete / $L_0$ record selection as a way to compress a
+large calibrated microsimulation candidate universe into a deployable dataset.
+The current manuscript reports the comparison against random and survey-weight
+baselines; the experiment package also includes a proximal $L_1$ arm for the
+next real-data sweep. The paper is being prepared for IMA 2026 in Brussels:
 <https://ima26.brussels/blog/presentation_maria_juaristi/>.
 
 The implementation targets active `PolicyEngine/populace` APIs. Archived
@@ -36,7 +37,7 @@ l0-paper/
 ├── tests/                   # offline tests (toy frame); no network, no PolicyEngine-US
 ├── pyproject.toml           # package metadata, the `l0` entry point, extras, Populace paths
 ├── uv.lock                  # locked Python environment
-└── .github/workflows/ci.yml # pytest + ruff against a pinned Populace checkout
+└── .github/workflows/ci.yml # pytest + ruff against a pinned Populace commit
 ```
 
 ## The `l0` command line
@@ -81,7 +82,7 @@ Extras: `--extra data` installs the heavy real-data path (`populace-data`,
 `policyengine-us`, Hugging Face, H5 I/O); `--extra viz` installs the plotting
 dependencies the figure renderers need.
 
-CI checks out `l0-paper` and a pinned `PolicyEngine/populace` ref, then runs
+CI checks out `l0-paper` and a pinned `PolicyEngine/populace` commit, then runs
 `uv run --locked --extra viz pytest` and `uv run --locked ruff check .`.
 
 ## Experiment workflow
@@ -101,13 +102,20 @@ uv run --extra data l0 sweep \
     --reuse-precalibration runs/poc/precalibration \
     --out runs/sweep --budgets 1000 2000 5000 10000 20000 \
     --seeds 0 1 2 --epochs 1000 \
-    --holdout-families state_income_tax --rotation-folds 5 --rotation-budget 5000
+    --holdout-families state_income_tax --rotation-folds 5 --rotation-budget 5000 \
+    --target-loss-cap 10 \
+    --methods informed_l0 random_reweight dense_sample
 
 # 3. Regenerate the paper's figures and tables from the sweep.
 uv run --extra viz l0 figures --sweep runs/sweep --paper-figures
 ```
 
-Methods compared by the sweep:
+The command above reproduces the current manuscript's three-method, `c=10`
+frontier. Omit `--methods` to run all available arms, including the proximal
+`informed_l1` baseline, and omit `--target-loss-cap 10` to use the current
+production US-fiscal cap (`c=1`).
+
+Methods available in the sweep:
 
 - `informed_l0` — Populace calibration with Hard Concrete gates at a target budget.
 - `informed_l1` — the convex-sparse analog: proximal ($L_1$ soft-threshold)

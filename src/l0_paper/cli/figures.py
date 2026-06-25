@@ -21,8 +21,8 @@ Figures
 
 Run
 ---
-    uv run --extra viz python experiments/figures.py \
-        --sweep experiments/runs/sweep-moderate \
+    uv run --extra viz l0 figures \
+        --sweep runs/sweep-moderate \
         --paper-figures
 """
 
@@ -212,7 +212,7 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
 
     lines += ["", "## Paired L0 vs random+reweight (out-of-sample)", ""]
     if not paired.empty:
-        lines.append("| Budget | L0 | random | diff (pp) | p | significant |")
+        lines.append("| Budget | L0 | random | diff (pp) | p | CI excludes 0 |")
         lines.append("| --- | --- | --- | --- | --- | --- |")
         for _, r in paired.iterrows():
             budget_label = f"{r['budget_requested']:,.0f}"
@@ -221,7 +221,7 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
             lines.append(
                 f"| {budget_label} | {_fmt_pct(r['informed_l0_mean'])} | "
                 f"{_fmt_pct(r['random_reweight_mean'])} | {r['diff_mean'] * 100:+.2f} | "
-                f"{r['p_value']:.3f} | {'yes' if r['significant'] else 'no'} |"
+                f"{r['p_value']:.3f} | {'yes' if r['ci_excludes_zero'] else 'no'} |"
             )
 
     # Family macro-average (equal weight per family) de-biases the SOI-dominated

@@ -12,32 +12,36 @@ so the calibration method is the only thing that varies between conditions.
 as: resolve Ledger facts into a target registry → load the base frame →
 materialize the target measures → **calibrate**. We freeze the dataset at the step
 *before* `calibrate`: the materialized `(Frame, TargetRegistry)` pair, written by
-[`l0_paper.precalibration`](../src/l0_paper/precalibration.py) as a pickle +
+[`l0_paper.precalibration`](../precalibration.py) as a pickle +
 `registry.json` + `precalibration_manifest.json`. Every experiment loads this one
 frozen artifact.
 
-## Calibration conditions (this issue)
+## Calibration conditions
 
 [`l0_paper.experiments.conditions`](../experiments/conditions.py):
 
 1. **Informed L0** (`run_l0`) — `calibrate(..., target_records=N)` jointly fits
    weights and Hard-Concrete gates to retain ~N records.
-2. **Survey-weight sampling** (`run_dense_then_sample`) — calibrate-then-reduce:
+2. **Informed L1** (`run_l1`) — proximal L1 soft-thresholding
+   (`method="prox"`, `l1_lambda`) selects an exact-zero sparse subset at the
+   matched budget. The code path is wired for the next real-data sweep; the
+   current manuscript's committed figures and tables predate those results.
+3. **Survey-weight sampling** (`run_dense_then_sample`) — calibrate-then-reduce:
    `calibrate(..., target_records=None, l0_lambda=0.0)` fits all weights, then
-   draws a **probability-proportional (PPS) random** sample of `n = ` (the L0
+   draws a **probability-proportional (PPS) random** sample of `n` (the L0
    retained count), each record drawn with probability ∝ its fitted weight, and
    reweights it (integerisation). This is the paper's method 3 — it is *not*
    "keep the largest weights" (that would be deterministic top-weight selection).
-3. **Random + reweight** (`run_random_then_reweight`) — reduce-first: draw a
+4. **Random + reweight** (`run_random_then_reweight`) — reduce-first: draw a
    **uniform** (equal-probability) random subset of size `n`, weight it up to the
    population total, then reweight just that subset to the targets by gradient
    descent (gates off). The paper's method 2.
 
-All three return a full-length weight vector (zero for unretained records), scored
+All four return a full-length weight vector (zero for unretained records), scored
 in- and out-of-sample by [`metrics`](../experiments/metrics.py) with
-targets held out via [`holdout`](../experiments/holdout.py). The
-sampling-comparison table now fills three of its four method rows (combinatorial
-optimisation remains `\tbc`).
+targets held out via [`holdout`](../experiments/holdout.py). The current paper
+tables report the three real-data arms that have been run: informed L0,
+random + reweight, and survey-weight sampling.
 
 ## Getting the Ledger facts file
 
@@ -98,7 +102,7 @@ A few granular IRS SOI targets (table 2.5 `qualifying_children`, table 4.3
 cannot compute. They stay in the bundle file; `build_precalibration_dataset`
 drops them **at materialization time** (recorded in the pre-calibration manifest
 as `unsupported_filter_dropped`). Pass `--keep-unsupported-targets` to
-`run_poc.py` to retain them and let materialization abort loudly instead.
+`l0 poc` to retain them and let materialization abort loudly instead.
 
 ## Running
 
@@ -143,8 +147,8 @@ are left uncapped and their weight concentration is reported directly. Because t
 cap is relative to each record's initial weight and the experiment resets weights
 to uniform, a small cap (e.g. 5) gives every record the same low ceiling and
 forbids the ~100x concentration the fiscal targets require -- so it must be treated
-as a swept axis, not a fixed default (see issue #4). `l2_lambda` is reported for
-parity with the paper notation but is not applied by the current Populace solver.
+as a swept axis, not a fixed default (see issue #4). `l2_lambda` applies to the
+informed-L0 path only.
 
 Holdout note: Populace itself uses **rotated k-fold** holdout
 (`populace/build/holdout.py`, every target held out once) plus **family-level
@@ -163,9 +167,9 @@ them in the fit. The set is recorded per run in
 
 ## Amplified budget sweep
 
-`run_poc.py` runs one budget at one seed. The paper needs the **frontier**: how
+`l0 poc` runs one budget at one seed. The paper needs the **frontier**: how
 each method's accuracy moves as the record budget shrinks, with error bars and a
-leak-free out-of-sample test. [`run_sweep.py`](run_sweep.py) provides that.
+leak-free out-of-sample test. [`sweep.py`](sweep.py) provides that.
 
 ```bash
 uv run --extra data l0 sweep \
@@ -175,17 +179,23 @@ uv run --extra data l0 sweep \
     --seeds 0 1 2 \
     --epochs 1000 \
     --holdout-families state_income_tax \
-    --max-weight-ratio 5 \
-    --rotation-folds 5 --rotation-budget 5000
+    --rotation-folds 5 --rotation-budget 5000 \
+    --target-loss-cap 10 \
+    --methods informed_l0 random_reweight dense_sample
 ```
+
+Production US-fiscal weighting defaults to the production target-loss cap
+(`c=1`). The current manuscript's committed real-data runs used the generic
+solver cap (`c=10`), so pass `--target-loss-cap 10` when reproducing those
+figures and tables.
 
 Design points:
 
 - **Frozen input only** (`--reuse-precalibration`): the calibration method is the
-  only thing that varies. Build the artifact once with `run_poc.py`.
+  only thing that varies. Build the artifact once with `l0 poc`.
 - **Matched budget**: informed L0 sets the budget at each `(seed, budget)` point;
-  `random_reweight` and `dense_sample` (survey-weight sampling) match its retained
-  count.
+  `informed_l1`, `random_reweight`, and `dense_sample` (survey-weight sampling)
+  match its retained count.
 - **Weight concentration**: `--max-weight-ratio` is an informed-L0 **per-record**
   cap (weight <= ratio x *initial* weight), default **None (uncapped)**. Since the
   experiment resets weights to uniform, the cap is relative to a flat initial
@@ -223,8 +233,8 @@ Output: one tidy **long CSV** (`metrics_long.csv`) — one row per
 [`aggregate.py`](../experiments/aggregate.py) (pure
 numpy/pandas/scipy) turns the long CSV into cross-seed statistics:
 mean ± t confidence interval (`frontier_table`), the paired same-seed
-`informed_l0` − `random_reweight` difference with a significance flag and paired
-t-test (`paired_method_diff`; stars require at least three paired seeds), the
+`informed_l0` - `random_reweight` difference with paired descriptive diagnostics
+(`paired_method_diff`), the
 family macro-average that de-biases the SOI-dominated micro mean (`macro_average`),
 and per-budget run diagnostics (`run_metric`, e.g. ESS / max weight).
 
@@ -242,6 +252,7 @@ uv run --extra viz l0 figures \
 - **F3** generalization gap — out-of-sample minus in-sample mean ARE.
 - **F4** by-family ARE at the anchor budget (rotation holdout when present).
 - **F5** cost–accuracy — runtime vs out-of-sample mean ARE.
+- **F6** operability — L2 concentration penalty versus fit.
 
 Matplotlib is imported lazily, so without the `viz` extra the tables and summary
 are still written and the figures are skipped with a note.
@@ -254,14 +265,14 @@ they remain available in the by-family diagnostics.
 
 ## Full candidate universe (generate-big build)
 
-[`build_full_candidate.py`](build_full_candidate.py) wires Populace's 15-stage
-imputation (`populace.build.us.us_plan` → `StagePlan.run`) for the true pre-prune
+[`build_candidate.py`](build_candidate.py) wires Populace's 15-stage
+imputation (`populace.build.us_runtime.us_plan` -> `StagePlan.run`) for the true pre-prune
 candidate universe. It is **not run by default** (needs donor source data and
 ~48 GB RAM) and has one extension point — the per-stage implementations Populace
 does not yet export publicly.
 
 ## Tests
 
-`tests/test_experiments.py` exercises both conditions, scoring, holdout, artifact
-summaries, and table rendering on the toy frame — offline, no PolicyEngine-US, no
-network (`uv run pytest`).
+`tests/test_experiments.py` and `tests/test_end_to_end.py` exercise the sampling
+conditions, scoring, holdout, artifact summaries, table rendering, and toy
+four-arm demo — offline, no PolicyEngine-US, no network (`uv run pytest`).

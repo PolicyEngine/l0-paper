@@ -1,6 +1,6 @@
 """Offline end-to-end tests for the experiment harness.
 
-These exercise both calibration conditions, scoring, holdout splitting, artifact
+These exercise calibration conditions, scoring, holdout splitting, artifact
 summaries, and table rendering on the toy Populace frame -- no PolicyEngine-US and
 no network, so CI stays fast and self-contained. The real-data path is driven by
 ``l0 poc`` / ``l0 sweep``.
@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from l0_paper.experiments import (
     aggregate,
@@ -26,6 +27,7 @@ from l0_paper.experiments.conditions import (
     calibrate_dense,
     run_dense_then_sample,
     run_l0,
+    run_l1,
     run_random_then_reweight,
     sample_from_dense,
     weighted_sample,
@@ -50,8 +52,6 @@ def test_split_targets_partitions():
 
 
 def test_split_registry_by_family_rejects_unknown_family():
-    import pytest
-
     _, targets = _toy()
     target_list = list(targets)
     registry = SimpleNamespace(
@@ -107,6 +107,39 @@ def test_run_random_then_reweight_matched_budget():
     assert result.n_selected == 40  # uniform subset of distinct households
     assert result.sampling["strategy"] == "uniform_random"
     assert result.sampling["n_sample"] == 40
+
+
+def test_run_l1_reraises_non_overpruning_value_errors(monkeypatch):
+    """Only the specific all-zero L1 case is treated as a zero-survivor fit."""
+    frame, targets = _toy()
+
+    def fail_calibrate(*_args, **_kwargs):
+        raise ValueError("target_loss_weights must be finite.")
+
+    monkeypatch.setattr("l0_paper.experiments.conditions.calibrate", fail_calibrate)
+
+    with pytest.raises(ValueError, match="target_loss_weights must be finite"):
+        run_l1(frame, targets, target_records=40, budget_iters=1)
+
+
+def test_run_l1_all_zero_bracket_fails_cleanly(monkeypatch):
+    """An over-strong bracket should produce a named error, not AttributeError."""
+    frame, targets = _toy()
+
+    def overpruned_calibrate(*_args, **_kwargs):
+        raise ValueError("L1 penalty zeroed every weight: lower l1_lambda.")
+
+    monkeypatch.setattr("l0_paper.experiments.conditions.calibrate", overpruned_calibrate)
+
+    with pytest.raises(ValueError, match="L1 lambda bracket zeroed every weight"):
+        run_l1(frame, targets, target_records=40, budget_iters=1)
+
+
+def test_run_l1_rejects_nonpositive_bracket_without_runtime_warning():
+    frame, targets = _toy()
+
+    with pytest.raises(ValueError, match="l1_lambda_bracket bounds must be positive"):
+        run_l1(frame, targets, target_records=40, l1_lambda_bracket=(0.0, 0.0))
 
 
 def test_random_reweight_fills_table_row():
@@ -821,18 +854,18 @@ def test_frontier_and_paired_aggregation():
     paired = aggregate.paired_method_diff(df)
     assert (paired["diff_mean"] < 0).all()  # challenger (L0) better
     assert paired["challenger_better"].all()
-    assert paired["significant"].all()  # CI excludes zero
+    assert paired["ci_excludes_zero"].all()
     assert paired["p_value"].notna().all()  # >=2 seeds with non-zero variance
 
 
-def test_paired_significance_requires_three_seeds():
+def test_paired_ci_flag_requires_three_seeds():
     df = pd.DataFrame(_synthetic_long_rows())
     single_seed = df[df["seed"] == 0]
 
     paired = aggregate.paired_method_diff(single_seed)
 
     assert not paired.empty
-    assert not paired["significant"].any()
+    assert not paired["ci_excludes_zero"].any()
     assert paired["p_value"].isna().all()
 
 
@@ -929,4 +962,5 @@ def test_render_frontier_and_paired_tables():
 
     paired_tex = tables.render_paired_comparison(paired)
     assert "Random + reweight" in paired_tex
-    assert "$^\\star$" in paired_tex  # all synthetic budgets are significant
+    assert "descriptive rather than strong inferential evidence" in paired_tex
+    assert "$^\\star$" not in paired_tex

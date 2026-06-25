@@ -19,11 +19,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: PolicyEngine/populace
-          # Pinned to the branch carrying the proximal L1 solver (method="prox",
-          # l1_lambda) the L1 arm needs; previously this used the default branch
-          # HEAD, so CI silently tracked whatever populace was on. Repoint to the
-          # merged commit/tag once the L1 + L2 solver work lands on main.
-          ref: l1-proximal-solver
+          # Commit carrying the proximal L1 solver (method="prox", l1_lambda).
+          # Repoint to the merged commit/tag once the L1 + L2 solver lands on main.
+          ref: 258e7eb453baa8e1d154e35b0522c3b3c88fed7e
           path: populace
 
       - name: Set up uv

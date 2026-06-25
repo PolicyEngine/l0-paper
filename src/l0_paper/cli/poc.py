@@ -97,7 +97,9 @@ def _parse_args() -> argparse.Namespace:
                         help="Target-row weights used inside Populace's calibration "
                              "loss. Default matches the production US fiscal weighting.")
     parser.add_argument("--target-loss-cap", type=float, default=None,
-                        help="Per-target cap in the calibration loss. Defaults to 10.0.")
+                        help="Per-target cap in the calibration loss. Defaults by "
+                             "weighting: production_us_fiscal -> 1.0, uniform -> "
+                             "10.0. Pass 10.0 to reproduce the current paper runs.")
 
     # Out-of-sample split.
     parser.add_argument("--holdout-frac", type=float, default=0.2)

@@ -28,7 +28,7 @@ data = [
 ]
 viz = [
     # Figures for the budget sweep. matplotlib exports vector PDF/SVG for LaTeX
-    # natively (no headless-Chrome dependency); see experiments/figures.py.
+    # natively (no headless-Chrome dependency); see l0 figures.
     "matplotlib>=3.8",
 ]
 
