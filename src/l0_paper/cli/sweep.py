@@ -251,6 +251,72 @@ def _completed_cell_keys(rows: list[dict], methods: list[str]) -> set[CellKey]:
     }
 
 
+def _progress_prefix(
+    *,
+    holdout_type: str,
+    fold: int,
+    seed: int,
+    budget: int,
+    l2_lambda: float,
+) -> str:
+    return (
+        f"[{holdout_type} fold={fold} seed={seed} budget={budget} "
+        f"l2={l2_lambda:g}]"
+    )
+
+
+def _l0_budget_progress_logger(
+    *,
+    holdout_type: str,
+    fold: int,
+    seed: int,
+    budget: int,
+    l2_lambda: float,
+    started_at: float,
+) -> Callable[[dict[str, object]], None]:
+    """Print one start/result pair for each Populace L0 budget-search iteration."""
+    prefix = _progress_prefix(
+        holdout_type=holdout_type,
+        fold=fold,
+        seed=seed,
+        budget=budget,
+        l2_lambda=l2_lambda,
+    )
+    started_iterations: set[int] = set()
+    completed_iterations: set[int] = set()
+
+    def log(event: dict[str, object]) -> None:
+        if not event.get("budget_search"):
+            return
+        iteration = int(event.get("budget_iteration") or 0)
+        total = int(event.get("budget_iters") or 0)
+        epoch = int(event.get("epoch") or 0)
+        epochs = int(event.get("epochs") or 0)
+        l0_lambda = float(event.get("l0_lambda") or 0.0)
+        if iteration <= 0 or epochs <= 0:
+            return
+
+        if epoch == 1 and iteration not in started_iterations:
+            started_iterations.add(iteration)
+            print(
+                f"    {prefix} L0 budget iter {iteration}/{total}: "
+                f"lambda={l0_lambda:.3e} started.",
+                flush=True,
+            )
+        if epoch == epochs and iteration not in completed_iterations:
+            completed_iterations.add(iteration)
+            loss = float(event["loss"])
+            elapsed = perf_counter() - started_at
+            print(
+                f"    {prefix} L0 budget iter {iteration}/{total}: "
+                f"lambda={l0_lambda:.3e}, loss={loss:.6g}, "
+                f"elapsed={elapsed:.1f}s.",
+                flush=True,
+            )
+
+    return log
+
+
 def _resume_manifest_mismatches(
     args: argparse.Namespace,
     manifest: dict,
@@ -563,8 +629,30 @@ def _sweep_split(
             )
             runs = []
             if want_l0:
+                budget_search_start = perf_counter()
+                progress_prefix = _progress_prefix(
+                    holdout_type=holdout_type,
+                    fold=fold,
+                    seed=seed,
+                    budget=budget,
+                    l2_lambda=l2_lambda,
+                )
+                print(
+                    f"  {progress_prefix} L0 budget search: target={budget:,}, "
+                    f"iters={split_l0_optimizer['budget_iters']}, "
+                    f"epochs={split_l0_optimizer['epochs']}.",
+                    flush=True,
+                )
                 l0 = run_l0(
                     frame, fit_targets, target_records=budget, seed=seed,
+                    progress_callback=_l0_budget_progress_logger(
+                        holdout_type=holdout_type,
+                        fold=fold,
+                        seed=seed,
+                        budget=budget,
+                        l2_lambda=l2_lambda,
+                        started_at=budget_search_start,
+                    ),
                     **split_l0_optimizer,
                 )
                 matched = l0.n_selected

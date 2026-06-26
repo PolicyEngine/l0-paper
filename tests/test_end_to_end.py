@@ -176,6 +176,47 @@ def test_sweep_completed_cell_keys_require_all_requested_methods():
     )
 
 
+def test_sweep_l0_budget_progress_logger_reports_iteration_results(capsys):
+    logger = sweep._l0_budget_progress_logger(
+        holdout_type="fixed_family",
+        fold=-1,
+        seed=0,
+        budget=2000,
+        l2_lambda=0.0,
+        started_at=0.0,
+    )
+
+    logger(
+        {
+            "budget_search": True,
+            "budget_iteration": 1,
+            "budget_iters": 8,
+            "l0_lambda": 1e-3,
+            "epoch": 1,
+            "epochs": 2,
+            "loss": 4.2,
+        }
+    )
+    logger(
+        {
+            "budget_search": True,
+            "budget_iteration": 1,
+            "budget_iters": 8,
+            "l0_lambda": 1e-3,
+            "epoch": 2,
+            "epochs": 2,
+            "loss": 3.5,
+        }
+    )
+    logger({"kind": "calibration_epoch", "epoch": 1, "epochs": 1, "loss": 99.0})
+
+    out = capsys.readouterr().out
+    assert "L0 budget iter 1/8" in out
+    assert "lambda=1.000e-03 started" in out
+    assert "loss=3.5" in out
+    assert "99" not in out
+
+
 def test_paper_implicit_precalibration_reuse_validates_manifest(tmp_path):
     facts = tmp_path / "consumer_facts.jsonl"
     facts.write_text('{"aggregate_fact_key": "x"}\n')

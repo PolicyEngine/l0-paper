@@ -67,9 +67,10 @@ def test_split_registry_by_family_rejects_unknown_family():
 
 def test_run_l0_prunes_at_budget():
     frame, targets = _toy()
+    events = []
     result = run_l0(
         frame, targets, target_records=60, seed=0, epochs=120,
-        learning_rate=0.15, mass="free",
+        learning_rate=0.15, mass="free", progress_callback=events.append,
     )
     assert result.method == "informed_l0"
     assert result.n_selected < result.n_records
@@ -78,6 +79,7 @@ def test_run_l0_prunes_at_budget():
     # l2_lambda is zero unless the informed-L0/Hard-Concrete condition opts in.
     assert result.l2_lambda == 0.0
     assert hasattr(result, "max_weight_ratio")
+    assert any(event.get("budget_search") for event in events)
 
 
 def test_dense_then_sample_matched_budget():

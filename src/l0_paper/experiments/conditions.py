@@ -22,6 +22,7 @@ condition A's retained count, the two are compared at a matched record budget.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -84,6 +85,7 @@ def run_l0(
     budget_iters: int = 10,
     target_loss_weights: np.ndarray | None = None,
     target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
+    progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> RunResult:
     """Condition A: informed L0 sampling with Hard-Concrete gates at a budget.
 
@@ -107,6 +109,7 @@ def run_l0(
         seed=seed,
         target_loss_weights=target_loss_weights,
         target_loss_cap=target_loss_cap,
+        progress_callback=progress_callback,
     )
     runtime = time.perf_counter() - start
     weights = np.asarray(result.weights, dtype=np.float64)
