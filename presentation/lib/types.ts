@@ -3,6 +3,8 @@ import { ComponentType } from "react";
 export interface SpeakerInfo {
   name: string;
   title: string;
+  /** Optional headshot image path (under /public); falls back to initials. */
+  headshot?: string;
 }
 
 export interface SlideEntry {
