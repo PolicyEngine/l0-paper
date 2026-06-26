@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from l0_paper.cli import _COMMANDS, paper
+from l0_paper.cli import _COMMANDS, paper, sweep
 from l0_paper.cli.demo import run_demo
 from l0_paper.experiments import aggregate, crunch
 
@@ -63,6 +63,33 @@ def test_paper_command_is_registered_with_manuscript_defaults():
     assert args.l2_lambdas == [0.0, 1e-4]
     assert args.holdout_families == ["cms_medicaid", "usda_snap", "state_income_tax"]
     assert args.pdf_builder == "quarto"
+    assert args.resume is True
+    assert args.smoke is False
+
+
+def test_paper_smoke_preset_is_small_and_resumable():
+    args = paper._parse_args(["--smoke"])
+
+    assert args.out == paper.SMOKE_OUT
+    assert args.run_id == paper.SMOKE_RUN_ID
+    assert args.budgets == [2000]
+    assert args.seeds == [0]
+    assert args.epochs == 50
+    assert args.budget_iters == 1
+    assert args.l2_lambdas == [0.0]
+    assert args.rotation_folds == 1
+    assert args.skip_figures is True
+    assert args.resume is True
+
+
+def test_paper_smoke_respects_explicit_out_and_run_id(tmp_path):
+    out = tmp_path / "custom-smoke"
+    args = paper._parse_args(
+        ["--smoke", "--out", str(out), "--run-id", "custom-smoke"]
+    )
+
+    assert args.out == out
+    assert args.run_id == "custom-smoke"
 
 
 def test_paper_command_fails_early_when_artifacts_are_missing(tmp_path):
@@ -92,11 +119,61 @@ def test_paper_sweep_args_forward_entity_and_manuscript_defaults(monkeypatch, tm
     assert sweep_args[sweep_args.index("--weight-entity") + 1] == "tax_unit"
     assert sweep_args[sweep_args.index("--rotation-budget") + 1] == "10000"
     assert sweep_args[sweep_args.index("--target-loss-cap") + 1] == "10.0"
+    assert "--resume" in sweep_args
     assert sweep_args[sweep_args.index("--methods") + 1:] == [
         "informed_l0",
         "random_reweight",
         "dense_sample",
     ]
+
+
+def test_paper_sweep_args_can_disable_resume(monkeypatch, tmp_path):
+    captured: dict[str, list[str]] = {}
+
+    def fake_call_cli(label, _main, args):
+        captured[label] = [str(arg) for arg in args]
+
+    monkeypatch.setattr(paper, "_call_cli", fake_call_cli)
+    args = paper._parse_args(["--out", str(tmp_path / "run"), "--no-resume"])
+
+    paper._run_sweep(args, tmp_path / "precalibration")
+
+    assert "--no-resume" in captured["l0 sweep"]
+    assert "--resume" not in captured["l0 sweep"]
+
+
+def test_sweep_completed_cell_keys_require_all_requested_methods():
+    base = {
+        "seed": "0",
+        "budget_requested": "2000",
+        "l2_lambda": "0.0",
+        "holdout_type": "fixed_family",
+        "fold": "-1",
+        "split": "na",
+        "scope": "run",
+        "scope_value": "",
+        "metric": "budget_achieved",
+        "value": "1928.0",
+    }
+    rows = [
+        {**base, "method": "informed_l0"},
+        {**base, "method": "random_reweight"},
+        {**base, "method": "dense_sample", "metric": "runtime_s"},
+    ]
+    key = sweep._cell_key(
+        holdout_type="fixed_family",
+        fold=-1,
+        seed=0,
+        budget=2000,
+        l2_lambda=0.0,
+    )
+
+    assert key in sweep._completed_cell_keys(
+        rows, ["informed_l0", "random_reweight"]
+    )
+    assert key not in sweep._completed_cell_keys(
+        rows, ["informed_l0", "random_reweight", "dense_sample"]
+    )
 
 
 def test_paper_implicit_precalibration_reuse_validates_manifest(tmp_path):

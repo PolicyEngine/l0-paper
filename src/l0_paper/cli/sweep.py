@@ -41,9 +41,12 @@ production US-fiscal cap.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from time import perf_counter
 
 import numpy as np
 
@@ -58,6 +61,32 @@ from l0_paper.experiments.conditions import (
     sample_from_dense,
 )
 from l0_paper.precalibration import MANIFEST_JSON, load_precalibration_dataset
+
+METRICS_CSV = "metrics_long.csv"
+TARGET_DIAGNOSTICS_CSV = "target_diagnostics_long.csv"
+SWEEP_MANIFEST_JSON = "sweep_manifest.json"
+
+CellKey = tuple[str, int, int, int, float]
+
+_RESUME_COMPAT_ARG_KEYS = (
+    "weight_entity",
+    "epochs",
+    "learning_rate",
+    "mass",
+    "max_weight_ratio",
+    "budget_iters",
+    "target_loss_weighting",
+    "target_loss_cap",
+    "holdout_families",
+    "holdout_frac",
+    "fit_validation_only",
+    "rotation_folds",
+    "rotation_budget",
+    "rotation_balance",
+    "rotation_seed",
+    "sample_reweight",
+    "sample_replace",
+)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -156,7 +185,178 @@ def _parse_args() -> argparse.Namespace:
              "cheap baselines can be added in a later run at matched budgets.",
     )
     parser.add_argument("--run-id", default=None)
+    parser.add_argument(
+        "--resume",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Resume from existing metrics_long.csv in --out by skipping completed "
+        "budget/seed/fold cells (default: yes). Pass --no-resume to overwrite.",
+    )
     return parser.parse_args()
+
+
+def _read_csv_rows(path: Path) -> list[dict[str, str]]:
+    if not path.is_file():
+        return []
+    with path.open(newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _load_existing_manifest(path: Path) -> dict:
+    if not path.is_file():
+        return {}
+    return json.loads(path.read_text())
+
+
+def _cell_key(
+    *,
+    holdout_type: str,
+    fold: int,
+    seed: int,
+    budget: int,
+    l2_lambda: float,
+) -> CellKey:
+    return (holdout_type, int(fold), int(seed), int(budget), float(l2_lambda))
+
+
+def _cell_key_from_row(row: dict) -> CellKey:
+    return _cell_key(
+        holdout_type=str(row["holdout_type"]),
+        fold=int(float(row["fold"])),
+        seed=int(float(row["seed"])),
+        budget=int(float(row["budget_requested"])),
+        l2_lambda=float(row.get("l2_lambda") or 0.0),
+    )
+
+
+def _completed_cell_keys(rows: list[dict], methods: list[str]) -> set[CellKey]:
+    """Return cells that have a completed run metric for every requested method."""
+    requested_methods = set(methods)
+    methods_by_cell: dict[CellKey, set[str]] = {}
+    for row in rows:
+        if row.get("scope") != "run" or row.get("metric") != "budget_achieved":
+            continue
+        method = str(row.get("method", ""))
+        if method not in requested_methods:
+            continue
+        try:
+            key = _cell_key_from_row(row)
+        except (KeyError, TypeError, ValueError):
+            continue
+        methods_by_cell.setdefault(key, set()).add(method)
+    return {
+        key
+        for key, completed_methods in methods_by_cell.items()
+        if requested_methods <= completed_methods
+    }
+
+
+def _resume_manifest_mismatches(
+    args: argparse.Namespace,
+    manifest: dict,
+    *,
+    precal_dir: Path,
+) -> list[str]:
+    previous_args = manifest.get("command_args")
+    if not isinstance(previous_args, dict):
+        return []
+
+    mismatches: list[str] = []
+    previous_precal = manifest.get("precalibration_dir")
+    if previous_precal is not None:
+        previous_precal_path = Path(str(previous_precal)).expanduser().resolve()
+        if previous_precal_path != precal_dir:
+            mismatches.append(
+                f"precalibration_dir: previous={previous_precal_path}, "
+                f"current={precal_dir}"
+            )
+
+    for key in _RESUME_COMPAT_ARG_KEYS:
+        if key not in previous_args:
+            continue
+        previous = previous_args[key]
+        current = str(getattr(args, key))
+        if previous != current:
+            mismatches.append(f"{key}: previous={previous!r}, current={current!r}")
+    return mismatches
+
+
+def _build_manifest(
+    *,
+    args: argparse.Namespace,
+    status: str,
+    run_id: str,
+    created_at: str,
+    precal_dir: Path,
+    precal_manifest: dict,
+    target_loss_cap: float,
+    frontier_target_loss_weights: np.ndarray,
+    baseline_optimizer: dict,
+    fit_targets,
+    holdout_targets,
+    holdout_families: list[str],
+    validation_only: set[str],
+    frontier_dense_runtimes: dict[str, dict[str, float]],
+    rotation_meta: dict,
+    rows: list[dict],
+    diag_rows: list[dict],
+    completed_cells: set[CellKey],
+    out: Path,
+) -> dict:
+    return {
+        "schema_version": 1,
+        "run_id": run_id,
+        "status": status,
+        "created_at": created_at,
+        "updated_at": datetime.now(UTC).isoformat(),
+        "command_args": {k: str(v) for k, v in vars(args).items()},
+        "precalibration_dir": str(precal_dir),
+        "precalibration": precal_manifest,
+        "grid": {
+            "budgets": args.budgets,
+            "seeds": args.seeds,
+            "epochs": args.epochs,
+            "l2_lambdas": args.l2_lambdas,
+        },
+        "target_loss": {
+            "weighting": args.target_loss_weighting,
+            "cap": target_loss_cap,
+            "frontier_fit_weight_summary": target_loss.target_loss_weight_summary(
+                frontier_target_loss_weights
+            ),
+            "production_source_path": (
+                target_loss.production_source_path()
+                if args.target_loss_weighting == target_loss.PRODUCTION_US_FISCAL
+                else None
+            ),
+        },
+        "l0_optimizer": _jsonable(
+            {
+                **baseline_optimizer,
+                "max_weight_ratio": args.max_weight_ratio,
+                "budget_iters": args.budget_iters,
+                "l2_lambdas": args.l2_lambdas,
+                "l2_applies_to": "informed_l0_only",
+            }
+        ),
+        "baseline_optimizer": _jsonable(baseline_optimizer),
+        "frontier_split": {
+            "fit": len(fit_targets),
+            "holdout": len(holdout_targets),
+            "holdout_families": holdout_families,
+            "validation_only_families": sorted(validation_only),
+            "holdout_frac": args.holdout_frac,
+        },
+        "frontier_dense_runtimes_s": frontier_dense_runtimes,
+        "rotation": rotation_meta,
+        "long_csv": str(out / METRICS_CSV),
+        "target_diagnostics_csv": (
+            str(out / TARGET_DIAGNOSTICS_CSV) if diag_rows else None
+        ),
+        "n_rows": len(rows),
+        "n_target_diagnostic_rows": len(diag_rows),
+        "completed_cells": len(completed_cells),
+    }
 
 
 def _score_and_emit(
@@ -254,6 +454,8 @@ def _sweep_split(
     l2_lambda: float,
     target_loss_weighting: str,
     diag_rows: list[dict] | None = None,
+    completed_cells: set[CellKey] | None = None,
+    checkpoint: Callable[[str], None] | None = None,
 ) -> dict[str, float]:
     """Run the selected conditions across budgets x seeds for one (fit, holdout) split.
 
@@ -265,6 +467,7 @@ def _sweep_split(
     want_l1 = "informed_l1" in methods
     want_survey = "dense_sample" in methods
     want_random = "random_reweight" in methods
+    completed_cells = completed_cells if completed_cells is not None else set()
 
     # Denominator-degenerate targets are a property of the split (not the run), so
     # compute them once here and reuse across budgets/seeds/methods.
@@ -298,14 +501,66 @@ def _sweep_split(
 
     dense_runtimes: dict[str, float] = {}
     for seed in seeds:
+        pending_budgets = [
+            budget
+            for budget in budgets
+            if _cell_key(
+                holdout_type=holdout_type,
+                fold=fold,
+                seed=seed,
+                budget=budget,
+                l2_lambda=l2_lambda,
+            )
+            not in completed_cells
+        ]
+        if not pending_budgets:
+            print(
+                f"  [{holdout_type} fold={fold} seed={seed} l2={l2_lambda:g}] "
+                f"skipping {len(budgets)} completed budget cell(s).",
+                flush=True,
+            )
+            continue
+
         dense = None
         dense_runtime = 0.0
         if want_survey:
+            print(
+                f"  [{holdout_type} fold={fold} seed={seed} l2={l2_lambda:g}] "
+                "calibrating dense baseline once for pending budgets...",
+                flush=True,
+            )
+            dense_start = perf_counter()
             dense, dense_runtime = calibrate_dense(
                 frame, fit_targets, seed=seed, **split_baseline_optimizer
             )
             dense_runtimes[str(seed)] = dense_runtime
+            print(
+                f"  [{holdout_type} fold={fold} seed={seed} l2={l2_lambda:g}] "
+                f"dense baseline ready in {perf_counter() - dense_start:.1f}s.",
+                flush=True,
+            )
         for budget in budgets:
+            key = _cell_key(
+                holdout_type=holdout_type,
+                fold=fold,
+                seed=seed,
+                budget=budget,
+                l2_lambda=l2_lambda,
+            )
+            if key in completed_cells:
+                print(
+                    f"  [{holdout_type} fold={fold} seed={seed} budget={budget} "
+                    f"l2={l2_lambda:g}] skipping completed cell.",
+                    flush=True,
+                )
+                continue
+
+            cell_start = perf_counter()
+            print(
+                f"  [{holdout_type} fold={fold} seed={seed} budget={budget} "
+                f"l2={l2_lambda:g}] starting {', '.join(methods)}.",
+                flush=True,
+            )
             runs = []
             if want_l0:
                 l0 = run_l0(
@@ -316,13 +571,15 @@ def _sweep_split(
                 runs.append(l0)
                 print(f"  [{holdout_type} fold={fold} seed={seed} budget={budget} "
                       f"l2={l2_lambda:g}] "
-                      f"L0 retained {matched:,} (l0_lambda={l0.l0_lambda:.3e})")
+                      f"L0 retained {matched:,} (l0_lambda={l0.l0_lambda:.3e})",
+                      flush=True)
             else:
                 # No L0 to set the budget; match the requested budget directly.
                 matched = budget
                 print(f"  [{holdout_type} fold={fold} seed={seed} budget={budget} "
                       f"l2={l2_lambda:g}] "
-                      f"baselines at requested budget {matched:,} (no L0).")
+                      f"baselines at requested budget {matched:,} (no L0).",
+                      flush=True)
             if want_survey:
                 runs.append(sample_from_dense(
                     dense, n_sample=matched, seed=seed, dense_runtime=dense_runtime,
@@ -353,6 +610,17 @@ def _sweep_split(
                     holdout_loss_weights=holdout_loss_weights,
                     diag_rows=diag_rows,
                 )
+            completed_cells.add(key)
+            if checkpoint is not None:
+                checkpoint(
+                    f"{holdout_type} fold={fold} seed={seed} budget={budget} "
+                    f"l2={l2_lambda:g}"
+                )
+            print(
+                f"  [{holdout_type} fold={fold} seed={seed} budget={budget} "
+                f"l2={l2_lambda:g}] completed in {perf_counter() - cell_start:.1f}s.",
+                flush=True,
+            )
     return dense_runtimes
 
 
@@ -388,8 +656,51 @@ def main() -> None:
         replace=args.sample_replace,
     )
 
-    rows: list[dict] = []
-    diag_rows: list[dict] = []  # per-target OOS diagnostics for the headline split
+    metrics_path = out / METRICS_CSV
+    diagnostics_path = out / TARGET_DIAGNOSTICS_CSV
+    manifest_path = out / SWEEP_MANIFEST_JSON
+    existing_manifest = _load_existing_manifest(manifest_path) if args.resume else {}
+    rows: list[dict] = _read_csv_rows(metrics_path) if args.resume else []
+    # Per-target OOS diagnostics for the headline split.
+    diag_rows: list[dict] = _read_csv_rows(diagnostics_path) if args.resume else []
+
+    if rows and existing_manifest:
+        mismatches = _resume_manifest_mismatches(
+            args,
+            existing_manifest,
+            precal_dir=precal_dir,
+        )
+        if mismatches:
+            details = "; ".join(mismatches[:5])
+            if len(mismatches) > 5:
+                details += f"; and {len(mismatches) - 5} more"
+            raise SystemExit(
+                "l0 sweep: existing run output is not compatible with this "
+                f"resume ({details}). Use a new --out or pass --no-resume to "
+                "overwrite the metrics."
+            )
+
+    completed_cells = _completed_cell_keys(rows, args.methods)
+    if rows:
+        print(
+            f"Resuming from {metrics_path}: {len(rows):,} metric rows, "
+            f"{len(diag_rows):,} diagnostic rows, "
+            f"{len(completed_cells):,} completed cell(s).",
+            flush=True,
+        )
+    elif not args.resume and metrics_path.exists():
+        print(f"Starting fresh and overwriting existing output in {out}.", flush=True)
+
+    run_id = (
+        args.run_id
+        or existing_manifest.get("run_id")
+        or f"sweep-{datetime.now(UTC):%Y%m%dT%H%M%SZ}"
+    )
+    created_at = (
+        existing_manifest.get("created_at")
+        if existing_manifest.get("created_at")
+        else datetime.now(UTC).isoformat()
+    )
 
     # --- Frontier: one fixed leak-free family split, swept over budgets x seeds. ---
     if holdout_families:
@@ -415,6 +726,47 @@ def main() -> None:
         f"weights={target_loss.target_loss_weight_summary(frontier_target_loss_weights)}"
     )
 
+    frontier_dense_runtimes: dict[str, dict[str, float]] = existing_manifest.get(
+        "frontier_dense_runtimes_s",
+        {},
+    )
+    if not isinstance(frontier_dense_runtimes, dict):
+        frontier_dense_runtimes = {}
+    rotation_meta: dict = {}
+
+    def write_checkpoint(status: str, label: str) -> None:
+        long_csv = aggregate.write_long_csv(metrics_path, rows)
+        if diag_rows:
+            aggregate.write_target_diagnostics_csv(diagnostics_path, diag_rows)
+        manifest = _build_manifest(
+            args=args,
+            status=status,
+            run_id=run_id,
+            created_at=created_at,
+            precal_dir=precal_dir,
+            precal_manifest=precal_manifest,
+            target_loss_cap=target_loss_cap,
+            frontier_target_loss_weights=frontier_target_loss_weights,
+            baseline_optimizer=baseline_optimizer,
+            fit_targets=fit_targets,
+            holdout_targets=holdout_targets,
+            holdout_families=holdout_families,
+            validation_only=validation_only,
+            frontier_dense_runtimes=frontier_dense_runtimes,
+            rotation_meta=rotation_meta,
+            rows=rows,
+            diag_rows=diag_rows,
+            completed_cells=completed_cells,
+            out=out,
+        )
+        written_manifest = write_run_manifest(manifest_path, manifest)
+        print(
+            f"Checkpoint {label}: {len(rows):,} metric rows, "
+            f"{len(diag_rows):,} diagnostic rows -> {long_csv}; "
+            f"manifest -> {written_manifest}",
+            flush=True,
+        )
+
     # One-time audit naming the denominator-degenerate targets (identifiability
     # floor), so the targeted-removal sensitivity is transparent, not a cutoff.
     audit_rows = [
@@ -423,15 +775,13 @@ def main() -> None:
         for row in metrics.degenerate_audit(frame, tset, weight_entity=args.weight_entity)
     ]
     if audit_rows:
-        import csv as _csv
         audit_path = out / "degenerate_targets.csv"
         with audit_path.open("w", newline="") as handle:
-            writer = _csv.DictWriter(handle, fieldnames=list(audit_rows[0].keys()))
+            writer = csv.DictWriter(handle, fieldnames=list(audit_rows[0].keys()))
             writer.writeheader()
             writer.writerows(audit_rows)
         print(f"Degenerate-target audit: {len(audit_rows)} targets -> {audit_path}")
 
-    frontier_dense_runtimes: dict[str, dict[str, float]] = {}
     for l2_lambda in args.l2_lambdas:
         l0_optimizer = {
             **baseline_optimizer,
@@ -439,17 +789,19 @@ def main() -> None:
             "budget_iters": args.budget_iters,
             "l2_lambda": l2_lambda,
         }
-        frontier_dense_runtimes[str(l2_lambda)] = _sweep_split(
+        dense_runtimes = _sweep_split(
             rows, frame=frame, fit_targets=fit_targets, holdout_targets=holdout_targets,
             budgets=args.budgets, seeds=args.seeds, l0_optimizer=l0_optimizer,
             baseline_optimizer=baseline_optimizer,
             sample_kwargs=sample_kwargs, holdout_type="fixed_family", fold=-1,
             methods=args.methods, l2_lambda=l2_lambda,
             target_loss_weighting=args.target_loss_weighting, diag_rows=diag_rows,
+            completed_cells=completed_cells,
+            checkpoint=lambda label: write_checkpoint("running", label),
         )
+        frontier_dense_runtimes.setdefault(str(l2_lambda), {}).update(dense_runtimes)
 
     # --- Rotation robustness panel: family-grouped k-fold at one anchor budget. ---
-    rotation_meta: dict = {}
     if args.rotation_folds and args.rotation_folds > 1:
         anchor = args.rotation_budget or sorted(args.budgets)[len(args.budgets) // 2]
         folds = holdout.family_grouped_folds(
@@ -488,68 +840,12 @@ def main() -> None:
                     sample_kwargs=sample_kwargs, holdout_type="rotation", fold=fold_idx,
                     methods=args.methods, l2_lambda=l2_lambda,
                     target_loss_weighting=args.target_loss_weighting,
+                    completed_cells=completed_cells,
+                    checkpoint=lambda label: write_checkpoint("running", label),
                 )
 
     # --- Persist: long CSV (source of truth) + reproducibility manifest. ---
-    long_csv = aggregate.write_long_csv(out / "metrics_long.csv", rows)
-    print(f"Wrote {len(rows):,} rows -> {long_csv}")
-    if diag_rows:
-        diag_csv = aggregate.write_target_diagnostics_csv(
-            out / "target_diagnostics_long.csv", diag_rows
-        )
-        print(f"Wrote {len(diag_rows):,} per-target rows -> {diag_csv}")
-
-    run_id = args.run_id or f"sweep-{datetime.now(UTC):%Y%m%dT%H%M%SZ}"
-    manifest = {
-        "schema_version": 1,
-        "run_id": run_id,
-        "created_at": datetime.now(UTC).isoformat(),
-        "command_args": {k: str(v) for k, v in vars(args).items()},
-        "precalibration_dir": str(precal_dir),
-        "precalibration": precal_manifest,
-        "grid": {
-            "budgets": args.budgets,
-            "seeds": args.seeds,
-            "epochs": args.epochs,
-            "l2_lambdas": args.l2_lambdas,
-        },
-        "target_loss": {
-            "weighting": args.target_loss_weighting,
-            "cap": target_loss_cap,
-            "frontier_fit_weight_summary": target_loss.target_loss_weight_summary(
-                frontier_target_loss_weights
-            ),
-            "production_source_path": (
-                target_loss.production_source_path()
-                if args.target_loss_weighting == target_loss.PRODUCTION_US_FISCAL
-                else None
-            ),
-        },
-        "l0_optimizer": _jsonable({
-            **baseline_optimizer,
-            "max_weight_ratio": args.max_weight_ratio,
-            "budget_iters": args.budget_iters,
-            "l2_lambdas": args.l2_lambdas,
-            "l2_applies_to": "informed_l0_only",
-        }),
-        "baseline_optimizer": _jsonable(baseline_optimizer),
-        "frontier_split": {
-            "fit": len(fit_targets),
-            "holdout": len(holdout_targets),
-            "holdout_families": holdout_families,
-            "validation_only_families": sorted(validation_only),
-            "holdout_frac": args.holdout_frac,
-        },
-        "frontier_dense_runtimes_s": frontier_dense_runtimes,
-        "rotation": rotation_meta,
-        "long_csv": str(long_csv),
-        "target_diagnostics_csv": (
-            str(out / "target_diagnostics_long.csv") if diag_rows else None
-        ),
-        "n_rows": len(rows),
-    }
-    manifest_path = write_run_manifest(out / "sweep_manifest.json", manifest)
-    print(f"Wrote sweep manifest: {manifest_path}")
+    write_checkpoint("complete", "complete")
 
 
 if __name__ == "__main__":

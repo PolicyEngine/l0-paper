@@ -34,6 +34,9 @@ PAPER_HOLDOUT_FAMILIES = ("cms_medicaid", "usda_snap", "state_income_tax")
 PAPER_METHODS = ("informed_l0", "random_reweight", "dense_sample")
 PAPER_L2_LAMBDAS = (0.0, 1e-4)
 DEFAULT_OUT = Path("runs/weighted-loss-3seed")
+DEFAULT_RUN_ID = "weighted-loss-3seed"
+SMOKE_OUT = Path("runs/real-smoke")
+SMOKE_RUN_ID = "real-smoke"
 DEFAULT_CONSUMER_FACTS = Path("data/targets/consumer_facts.jsonl")
 DEFAULT_QUARTO_PDF = Path("_output/paper/index.pdf")
 DEFAULT_PAPER_PDF = Path("paper/main.pdf")
@@ -60,7 +63,34 @@ def _extend_option(argv: list[str], name: str, values: Sequence[object]) -> None
     argv.extend(str(value) for value in values)
 
 
+def _arg_was_provided(argv: Sequence[str], name: str) -> bool:
+    return any(arg == name or arg.startswith(f"{name}=") for arg in argv)
+
+
+def _apply_smoke_defaults(
+    args: argparse.Namespace,
+    *,
+    out_was_provided: bool,
+    run_id_was_provided: bool,
+) -> None:
+    """Mutate parsed args into the small real-data smoke preset."""
+    if not out_was_provided:
+        args.out = SMOKE_OUT
+    if not run_id_was_provided:
+        args.run_id = SMOKE_RUN_ID
+    args.budgets = [2_000]
+    args.seeds = [0]
+    args.epochs = 50
+    args.budget_iters = 1
+    args.l2_lambdas = [0.0]
+    args.rotation_folds = 1
+    args.skip_figures = True
+
+
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    out_was_provided = _arg_was_provided(raw_argv, "--out")
+    run_id_was_provided = _arg_was_provided(raw_argv, "--run-id")
     parser = argparse.ArgumentParser(
         prog="l0 paper",
         description=__doc__,
@@ -74,6 +104,12 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         help="Existing frozen precalibration directory. Skips facts/base-frame build.")
     parser.add_argument("--base-h5", type=Path, default=None,
                         help="Candidate frame for precalibration (default: Populace HF frame).")
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Use a one-cell real-data smoke preset: budget 2k, seed 0, "
+        "50 epochs, one budget iteration, no rotation, and no figure render.",
+    )
 
     # Optional target bundle build.
     parser.add_argument("--build-targets", action="store_true",
@@ -129,7 +165,10 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         default="equal_mass")
     parser.add_argument("--sample-replace", action=argparse.BooleanOptionalAction,
                         default=True)
-    parser.add_argument("--run-id", default="weighted-loss-3seed")
+    parser.add_argument("--resume", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="Resume an interrupted sweep in --out (default: yes).")
+    parser.add_argument("--run-id", default=DEFAULT_RUN_ID)
 
     # Outputs.
     parser.add_argument("--skip-sweep", action="store_true",
@@ -145,7 +184,14 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         help="PDF builder for --rebuild-pdf (default: quarto).")
     parser.add_argument("--pdf-output", type=Path, default=DEFAULT_PAPER_PDF,
                         help=f"Path to copy the rendered PDF to (default: {DEFAULT_PAPER_PDF}).")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.smoke:
+        _apply_smoke_defaults(
+            args,
+            out_was_provided=out_was_provided,
+            run_id_was_provided=run_id_was_provided,
+        )
+    return args
 
 
 def _maybe_build_targets(args: argparse.Namespace) -> Path:
@@ -298,13 +344,14 @@ def _run_sweep(args: argparse.Namespace, precal_dir: Path) -> None:
     _extend_option(sweep_args, "--seeds", args.seeds)
     _extend_option(sweep_args, "--l2-lambdas", args.l2_lambdas)
     _extend_option(sweep_args, "--holdout-families", args.holdout_families)
-    _extend_option(sweep_args, "--methods", args.methods)
     if args.max_weight_ratio is not None:
         sweep_args.extend(["--max-weight-ratio", args.max_weight_ratio])
     if args.fit_validation_only:
         sweep_args.append("--fit-validation-only")
     if not args.sample_replace:
         sweep_args.append("--no-sample-replace")
+    sweep_args.append("--resume" if args.resume else "--no-resume")
+    _extend_option(sweep_args, "--methods", args.methods)
 
     _call_cli("l0 sweep", sweep.main, sweep_args)
 

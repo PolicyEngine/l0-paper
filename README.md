@@ -95,6 +95,10 @@ calibration/sampling method.
 # Full current-paper workflow: build/reuse precalibration, run the sweep, render figures.
 uv run --extra data --extra viz l0 paper \
     --consumer-facts data/targets/consumer_facts.jsonl
+
+# Fast real-data smoke: reuse/build the same precalibration, run one small cell.
+uv run --extra data --extra viz l0 paper --smoke \
+    --consumer-facts data/targets/consumer_facts.jsonl
 ```
 
 `l0 paper` encodes the current manuscript defaults: budgets
@@ -105,6 +109,12 @@ contrast. Pass `--reuse-precalibration <dir>` to skip the data build, or
 `--build-targets --target-base <consumer_facts.jsonl>` to build
 `data/targets/consumer_facts.jsonl` first. Lower-level commands (`l0 poc`,
 `l0 sweep`, `l0 figures`) remain available for custom runs.
+
+Sweeps checkpoint after every completed budget/seed/fold cell and resume by
+default from `metrics_long.csv`; pass `--no-resume` to overwrite an output
+directory. `l0 paper --smoke` uses `runs/real-smoke` by default, sets budget
+2,000, seed 0, 50 epochs, one budget-bisection step, `lambda_L2=0`, disables
+rotation, and skips figure rendering.
 
 For exploratory runs, pass `--methods informed_l0 informed_l1 random_reweight
 dense_sample` to include the proximal `informed_l1` baseline, and pass
