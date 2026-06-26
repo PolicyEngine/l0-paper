@@ -67,6 +67,7 @@ TARGET_DIAGNOSTICS_CSV = "target_diagnostics_long.csv"
 SWEEP_MANIFEST_JSON = "sweep_manifest.json"
 
 CellKey = tuple[str, int, int, int, float]
+MethodKey = tuple[str, int, int, int, float, str]
 
 _RESUME_COMPAT_ARG_KEYS = (
     "weight_entity",
@@ -208,6 +209,57 @@ def _load_existing_manifest(path: Path) -> dict:
     return json.loads(path.read_text())
 
 
+def _atomic_write_long_csv(path: Path, rows: list[dict]) -> Path:
+    tmp = path.with_name(f".{path.name}.tmp")
+    aggregate.write_long_csv(tmp, rows)
+    tmp.replace(path)
+    return path
+
+
+def _atomic_write_target_diagnostics_csv(path: Path, rows: list[dict]) -> Path:
+    tmp = path.with_name(f".{path.name}.tmp")
+    aggregate.write_target_diagnostics_csv(tmp, rows)
+    tmp.replace(path)
+    return path
+
+
+def _atomic_write_manifest(path: Path, manifest: dict) -> Path:
+    tmp = path.with_name(f".{path.name}.tmp")
+    write_run_manifest(tmp, manifest)
+    tmp.replace(path)
+    return path
+
+
+def _validate_resume_checkpoint(
+    *,
+    manifest: dict,
+    rows: list[dict],
+    diag_rows: list[dict],
+    metrics_path: Path,
+    diagnostics_path: Path,
+    manifest_path: Path,
+) -> None:
+    """Reject resume state whose manifest does not certify the loaded CSVs."""
+    if not rows and not diag_rows:
+        return
+    if not manifest:
+        raise SystemExit(
+            f"l0 sweep: refusing to resume from {metrics_path} / "
+            f"{diagnostics_path} because "
+            f"{manifest_path} is missing. Pass --no-resume to overwrite."
+        )
+    expected_rows = manifest.get("n_rows")
+    expected_diag_rows = manifest.get("n_target_diagnostic_rows")
+    if expected_rows != len(rows) or expected_diag_rows != len(diag_rows):
+        raise SystemExit(
+            "l0 sweep: refusing to resume from an incomplete checkpoint "
+            f"(manifest n_rows={expected_rows!r}, loaded metrics={len(rows)}; "
+            f"manifest n_target_diagnostic_rows={expected_diag_rows!r}, "
+            f"loaded diagnostics={len(diag_rows)} from {diagnostics_path}). "
+            "Pass --no-resume to overwrite or repair the output directory."
+        )
+
+
 def _cell_key(
     *,
     holdout_type: str,
@@ -229,20 +281,86 @@ def _cell_key_from_row(row: dict) -> CellKey:
     )
 
 
-def _completed_cell_keys(rows: list[dict], methods: list[str]) -> set[CellKey]:
-    """Return cells that have a completed run metric for every requested method."""
-    requested_methods = set(methods)
-    methods_by_cell: dict[CellKey, set[str]] = {}
+def _method_key(
+    *,
+    holdout_type: str,
+    fold: int,
+    seed: int,
+    budget: int,
+    l2_lambda: float,
+    method: str,
+) -> MethodKey:
+    return (
+        holdout_type,
+        int(fold),
+        int(seed),
+        int(budget),
+        float(l2_lambda),
+        method,
+    )
+
+
+def _method_key_from_row(row: dict) -> MethodKey:
+    return _method_key(
+        holdout_type=str(row["holdout_type"]),
+        fold=int(float(row["fold"])),
+        seed=int(float(row["seed"])),
+        budget=int(float(row["budget_requested"])),
+        l2_lambda=float(row.get("l2_lambda") or 0.0),
+        method=str(row["method"]),
+    )
+
+
+def _completed_method_keys(
+    rows: list[dict],
+    methods: list[str] | None = None,
+) -> set[MethodKey]:
+    """Return method-level cells with a completed run-level budget marker."""
+    requested_methods = set(methods) if methods is not None else None
+    completed: set[MethodKey] = set()
     for row in rows:
         if row.get("scope") != "run" or row.get("metric") != "budget_achieved":
             continue
         method = str(row.get("method", ""))
-        if method not in requested_methods:
+        if requested_methods is not None and method not in requested_methods:
             continue
         try:
-            key = _cell_key_from_row(row)
+            key = _method_key_from_row(row)
         except (KeyError, TypeError, ValueError):
             continue
+        completed.add(key)
+    return completed
+
+
+def _budget_achieved_by_method(rows: list[dict]) -> dict[MethodKey, int]:
+    """Map completed method-level cells to their achieved record budget."""
+    achieved: dict[MethodKey, int] = {}
+    for row in rows:
+        if row.get("scope") != "run" or row.get("metric") != "budget_achieved":
+            continue
+        try:
+            key = _method_key_from_row(row)
+            achieved[key] = int(float(row["value"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return achieved
+
+
+def _completed_cell_keys(rows: list[dict], methods: list[str]) -> set[CellKey]:
+    """Return cells that have a completed run metric for every requested method."""
+    return _completed_cells_from_methods(_completed_method_keys(rows, methods), methods)
+
+
+def _completed_cells_from_methods(
+    completed_methods: set[MethodKey],
+    methods: list[str],
+) -> set[CellKey]:
+    requested_methods = set(methods)
+    methods_by_cell: dict[CellKey, set[str]] = {}
+    for holdout_type, fold, seed, budget, l2_lambda, method in completed_methods:
+        if method not in requested_methods:
+            continue
+        key = (holdout_type, fold, seed, budget, l2_lambda)
         methods_by_cell.setdefault(key, set()).add(method)
     return {
         key
@@ -520,7 +638,8 @@ def _sweep_split(
     l2_lambda: float,
     target_loss_weighting: str,
     diag_rows: list[dict] | None = None,
-    completed_cells: set[CellKey] | None = None,
+    completed_methods: set[MethodKey] | None = None,
+    budget_achieved_by_method: dict[MethodKey, int] | None = None,
     checkpoint: Callable[[str], None] | None = None,
 ) -> dict[str, float]:
     """Run the selected conditions across budgets x seeds for one (fit, holdout) split.
@@ -529,11 +648,9 @@ def _sweep_split(
     requested budget is used directly. Dense calibration is computed once per seed
     and only when ``dense_sample`` is requested. Returns per-seed dense runtimes.
     """
-    want_l0 = "informed_l0" in methods
-    want_l1 = "informed_l1" in methods
     want_survey = "dense_sample" in methods
-    want_random = "random_reweight" in methods
-    completed_cells = completed_cells if completed_cells is not None else set()
+    completed_methods = completed_methods if completed_methods is not None else set()
+    budget_achieved_by_method = budget_achieved_by_method or {}
 
     # Denominator-degenerate targets are a property of the split (not the run), so
     # compute them once here and reuse across budgets/seeds/methods.
@@ -567,17 +684,24 @@ def _sweep_split(
 
     dense_runtimes: dict[str, float] = {}
     for seed in seeds:
-        pending_budgets = [
-            budget
+        pending_methods_by_budget = {
+            budget: [
+                method
+                for method in methods
+                if _method_key(
+                    holdout_type=holdout_type,
+                    fold=fold,
+                    seed=seed,
+                    budget=budget,
+                    l2_lambda=l2_lambda,
+                    method=method,
+                )
+                not in completed_methods
+            ]
             for budget in budgets
-            if _cell_key(
-                holdout_type=holdout_type,
-                fold=fold,
-                seed=seed,
-                budget=budget,
-                l2_lambda=l2_lambda,
-            )
-            not in completed_cells
+        }
+        pending_budgets = [
+            budget for budget, pending in pending_methods_by_budget.items() if pending
         ]
         if not pending_budgets:
             print(
@@ -589,7 +713,11 @@ def _sweep_split(
 
         dense = None
         dense_runtime = 0.0
-        if want_survey:
+        needs_dense = want_survey and any(
+            "dense_sample" in pending
+            for pending in pending_methods_by_budget.values()
+        )
+        if needs_dense:
             print(
                 f"  [{holdout_type} fold={fold} seed={seed} l2={l2_lambda:g}] "
                 "calibrating dense baseline once for pending budgets...",
@@ -606,14 +734,8 @@ def _sweep_split(
                 flush=True,
             )
         for budget in budgets:
-            key = _cell_key(
-                holdout_type=holdout_type,
-                fold=fold,
-                seed=seed,
-                budget=budget,
-                l2_lambda=l2_lambda,
-            )
-            if key in completed_cells:
+            pending_methods = pending_methods_by_budget[budget]
+            if not pending_methods:
                 print(
                     f"  [{holdout_type} fold={fold} seed={seed} budget={budget} "
                     f"l2={l2_lambda:g}] skipping completed cell.",
@@ -624,11 +746,20 @@ def _sweep_split(
             cell_start = perf_counter()
             print(
                 f"  [{holdout_type} fold={fold} seed={seed} budget={budget} "
-                f"l2={l2_lambda:g}] starting {', '.join(methods)}.",
+                f"l2={l2_lambda:g}] starting {', '.join(pending_methods)}.",
                 flush=True,
             )
             runs = []
-            if want_l0:
+            l0_key = _method_key(
+                holdout_type=holdout_type,
+                fold=fold,
+                seed=seed,
+                budget=budget,
+                l2_lambda=l2_lambda,
+                method="informed_l0",
+            )
+            matched = budget_achieved_by_method.get(l0_key, budget)
+            if "informed_l0" in pending_methods:
                 budget_search_start = perf_counter()
                 progress_prefix = _progress_prefix(
                     holdout_type=holdout_type,
@@ -661,28 +792,34 @@ def _sweep_split(
                       f"l2={l2_lambda:g}] "
                       f"L0 retained {matched:,} (l0_lambda={l0.l0_lambda:.3e})",
                       flush=True)
+            elif l0_key in budget_achieved_by_method:
+                print(
+                    f"  [{holdout_type} fold={fold} seed={seed} budget={budget} "
+                    f"l2={l2_lambda:g}] reusing completed L0 matched budget "
+                    f"{matched:,}.",
+                    flush=True,
+                )
             else:
                 # No L0 to set the budget; match the requested budget directly.
-                matched = budget
                 print(f"  [{holdout_type} fold={fold} seed={seed} budget={budget} "
                       f"l2={l2_lambda:g}] "
                       f"baselines at requested budget {matched:,} (no L0).",
                       flush=True)
-            if want_survey:
+            if "dense_sample" in pending_methods:
                 runs.append(sample_from_dense(
                     dense, n_sample=matched, seed=seed, dense_runtime=dense_runtime,
                     max_weight_ratio=split_baseline_optimizer.get("max_weight_ratio"),
                     target_loss_cap=split_baseline_optimizer["target_loss_cap"],
                     **sample_kwargs,
                 ))
-            if want_l1:
+            if "informed_l1" in pending_methods:
                 # Convex-sparse selector: proximal L1 at the matched budget, its own
                 # bisection on l1_lambda hitting the same retained count as L0.
                 runs.append(run_l1(
                     frame, fit_targets, target_records=matched, seed=seed,
                     **split_baseline_optimizer,
                 ))
-            if want_random:
+            if "random_reweight" in pending_methods:
                 runs.append(run_random_then_reweight(
                     frame, fit_targets, n_sample=matched, seed=seed,
                     **split_baseline_optimizer,
@@ -698,7 +835,16 @@ def _sweep_split(
                     holdout_loss_weights=holdout_loss_weights,
                     diag_rows=diag_rows,
                 )
-            completed_cells.add(key)
+                run_key = _method_key(
+                    holdout_type=holdout_type,
+                    fold=fold,
+                    seed=seed,
+                    budget=budget,
+                    l2_lambda=l2_lambda,
+                    method=run.method,
+                )
+                completed_methods.add(run_key)
+                budget_achieved_by_method[run_key] = int(run.n_selected)
             if checkpoint is not None:
                 checkpoint(
                     f"{holdout_type} fold={fold} seed={seed} budget={budget} "
@@ -751,6 +897,14 @@ def main() -> None:
     rows: list[dict] = _read_csv_rows(metrics_path) if args.resume else []
     # Per-target OOS diagnostics for the headline split.
     diag_rows: list[dict] = _read_csv_rows(diagnostics_path) if args.resume else []
+    _validate_resume_checkpoint(
+        manifest=existing_manifest,
+        rows=rows,
+        diag_rows=diag_rows,
+        metrics_path=metrics_path,
+        diagnostics_path=diagnostics_path,
+        manifest_path=manifest_path,
+    )
 
     if rows and existing_manifest:
         mismatches = _resume_manifest_mismatches(
@@ -768,11 +922,14 @@ def main() -> None:
                 "overwrite the metrics."
             )
 
-    completed_cells = _completed_cell_keys(rows, args.methods)
+    completed_methods = _completed_method_keys(rows)
+    budget_achieved = _budget_achieved_by_method(rows)
+    completed_cells = _completed_cells_from_methods(completed_methods, args.methods)
     if rows:
         print(
             f"Resuming from {metrics_path}: {len(rows):,} metric rows, "
             f"{len(diag_rows):,} diagnostic rows, "
+            f"{len(completed_methods):,} completed method(s), "
             f"{len(completed_cells):,} completed cell(s).",
             flush=True,
         )
@@ -823,9 +980,12 @@ def main() -> None:
     rotation_meta: dict = {}
 
     def write_checkpoint(status: str, label: str) -> None:
-        long_csv = aggregate.write_long_csv(metrics_path, rows)
+        completed_cells = _completed_cells_from_methods(completed_methods, args.methods)
         if diag_rows:
-            aggregate.write_target_diagnostics_csv(diagnostics_path, diag_rows)
+            _atomic_write_target_diagnostics_csv(diagnostics_path, diag_rows)
+        elif diagnostics_path.exists():
+            diagnostics_path.unlink()
+        long_csv = _atomic_write_long_csv(metrics_path, rows)
         manifest = _build_manifest(
             args=args,
             status=status,
@@ -847,7 +1007,7 @@ def main() -> None:
             completed_cells=completed_cells,
             out=out,
         )
-        written_manifest = write_run_manifest(manifest_path, manifest)
+        written_manifest = _atomic_write_manifest(manifest_path, manifest)
         print(
             f"Checkpoint {label}: {len(rows):,} metric rows, "
             f"{len(diag_rows):,} diagnostic rows -> {long_csv}; "
@@ -884,7 +1044,8 @@ def main() -> None:
             sample_kwargs=sample_kwargs, holdout_type="fixed_family", fold=-1,
             methods=args.methods, l2_lambda=l2_lambda,
             target_loss_weighting=args.target_loss_weighting, diag_rows=diag_rows,
-            completed_cells=completed_cells,
+            completed_methods=completed_methods,
+            budget_achieved_by_method=budget_achieved,
             checkpoint=lambda label: write_checkpoint("running", label),
         )
         frontier_dense_runtimes.setdefault(str(l2_lambda), {}).update(dense_runtimes)
@@ -928,7 +1089,8 @@ def main() -> None:
                     sample_kwargs=sample_kwargs, holdout_type="rotation", fold=fold_idx,
                     methods=args.methods, l2_lambda=l2_lambda,
                     target_loss_weighting=args.target_loss_weighting,
-                    completed_cells=completed_cells,
+                    completed_methods=completed_methods,
+                    budget_achieved_by_method=budget_achieved,
                     checkpoint=lambda label: write_checkpoint("running", label),
                 )
 

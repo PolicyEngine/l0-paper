@@ -176,6 +176,170 @@ def test_sweep_completed_cell_keys_require_all_requested_methods():
     )
 
 
+def test_sweep_resume_tracks_completed_methods_and_achieved_budget():
+    row = {
+        "method": "informed_l0",
+        "seed": "0",
+        "budget_requested": "2000",
+        "budget_achieved": "1928",
+        "l2_lambda": "0.0",
+        "holdout_type": "fixed_family",
+        "fold": "-1",
+        "split": "na",
+        "scope": "run",
+        "scope_value": "",
+        "metric": "budget_achieved",
+        "value": "1928.0",
+    }
+    l0_key = sweep._method_key(
+        holdout_type="fixed_family",
+        fold=-1,
+        seed=0,
+        budget=2000,
+        l2_lambda=0.0,
+        method="informed_l0",
+    )
+    random_key = sweep._method_key(
+        holdout_type="fixed_family",
+        fold=-1,
+        seed=0,
+        budget=2000,
+        l2_lambda=0.0,
+        method="random_reweight",
+    )
+
+    completed = sweep._completed_method_keys([row])
+
+    assert l0_key in completed
+    assert random_key not in completed
+    assert sweep._budget_achieved_by_method([row])[l0_key] == 1928
+    assert not sweep._completed_cells_from_methods(
+        completed, ["informed_l0", "random_reweight"]
+    )
+
+
+def test_sweep_resume_rejects_checkpoint_row_count_mismatch(tmp_path):
+    metrics = tmp_path / "metrics_long.csv"
+    diagnostics = tmp_path / "target_diagnostics_long.csv"
+    manifest = tmp_path / "sweep_manifest.json"
+
+    with pytest.raises(SystemExit, match="incomplete checkpoint"):
+        sweep._validate_resume_checkpoint(
+            manifest={"n_rows": 2, "n_target_diagnostic_rows": 0},
+            rows=[{"method": "informed_l0"}],
+            diag_rows=[],
+            metrics_path=metrics,
+            diagnostics_path=diagnostics,
+            manifest_path=manifest,
+        )
+
+
+def test_sweep_resume_rejects_diagnostics_without_manifest(tmp_path):
+    metrics = tmp_path / "metrics_long.csv"
+    diagnostics = tmp_path / "target_diagnostics_long.csv"
+    manifest = tmp_path / "sweep_manifest.json"
+
+    with pytest.raises(SystemExit, match="manifest"):
+        sweep._validate_resume_checkpoint(
+            manifest={},
+            rows=[],
+            diag_rows=[{"method": "informed_l0"}],
+            metrics_path=metrics,
+            diagnostics_path=diagnostics,
+            manifest_path=manifest,
+        )
+
+
+def test_sweep_method_expansion_reuses_existing_l0_budget(monkeypatch):
+    rows = [
+        {
+            "method": "informed_l0",
+            "seed": "0",
+            "budget_requested": "2000",
+            "budget_achieved": "1928",
+            "l2_lambda": "0.0",
+            "holdout_type": "fixed_family",
+            "fold": "-1",
+            "split": "na",
+            "scope": "run",
+            "scope_value": "",
+            "metric": "budget_achieved",
+            "value": "1928.0",
+        }
+    ]
+    completed = sweep._completed_method_keys(rows)
+    achieved = sweep._budget_achieved_by_method(rows)
+    random_calls: list[int] = []
+
+    monkeypatch.setattr(
+        sweep.metrics,
+        "degenerate_target_names",
+        lambda *_args, **_kwargs: set(),
+    )
+    monkeypatch.setattr(
+        sweep.target_loss,
+        "target_loss_weights",
+        lambda *_args, **_kwargs: np.asarray([1.0]),
+    )
+    monkeypatch.setattr(
+        sweep,
+        "run_l0",
+        lambda *_args, **_kwargs: pytest.fail("completed L0 should not rerun"),
+    )
+
+    def fake_random(*_args, n_sample, seed, **_kwargs):
+        random_calls.append(n_sample)
+        return SimpleNamespace(
+            method="random_reweight",
+            n_selected=n_sample,
+            weights=np.ones(2),
+        )
+
+    def fake_score_and_emit(rows, *, run, method, seed, budget_requested, **_kwargs):
+        rows.append(
+            {
+                "method": method,
+                "seed": seed,
+                "budget_requested": budget_requested,
+                "budget_achieved": run.n_selected,
+                "l2_lambda": 0.0,
+                "holdout_type": "fixed_family",
+                "fold": -1,
+                "split": "na",
+                "scope": "run",
+                "scope_value": "",
+                "metric": "budget_achieved",
+                "value": float(run.n_selected),
+            }
+        )
+
+    monkeypatch.setattr(sweep, "run_random_then_reweight", fake_random)
+    monkeypatch.setattr(sweep, "_score_and_emit", fake_score_and_emit)
+
+    sweep._sweep_split(
+        rows,
+        frame=SimpleNamespace(),
+        fit_targets=(),
+        holdout_targets=(),
+        budgets=[2000],
+        seeds=[0],
+        l0_optimizer={"weight_entity": "household"},
+        baseline_optimizer={"weight_entity": "household"},
+        sample_kwargs={},
+        holdout_type="fixed_family",
+        fold=-1,
+        methods=["informed_l0", "random_reweight"],
+        l2_lambda=0.0,
+        target_loss_weighting="uniform",
+        completed_methods=completed,
+        budget_achieved_by_method=achieved,
+    )
+
+    assert random_calls == [1928]
+    assert [row["method"] for row in rows].count("informed_l0") == 1
+    assert any(row["method"] == "random_reweight" for row in rows)
+
+
 def test_sweep_l0_budget_progress_logger_reports_iteration_results(capsys):
     logger = sweep._l0_budget_progress_logger(
         holdout_type="fixed_family",
