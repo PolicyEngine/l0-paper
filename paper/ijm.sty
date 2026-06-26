@@ -37,7 +37,10 @@
 \RequirePackage{graphicx}
 
 % --- Citations: APA style via natbib ---
-\RequirePackage[round]{natbib}
+% Quarto/Pandoc may preload natbib before this style is included.
+\makeatletter
+\@ifpackageloaded{natbib}{}{\RequirePackage[round]{natbib}}
+\makeatother
 \bibpunct{(}{)}{;}{a}{,}{,}
 \setcitestyle{authoryear,round}
 

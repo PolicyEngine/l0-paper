@@ -63,8 +63,8 @@ gated estimate becomes $\hat{t}_j = \sum_i M_{ji} w_i z_i$, and the optimizer mi
     \label{eq:loss}
 \end{equation}
 The first term is the capped weighted MAPE of Equation~\ref{eq:loss_cal}, now evaluated on the gated
-weights $w_i z_i$. The second term is the $L_0$ penalty and sets the sample size: $\bar{z}_i$ is the
-expected activation of gate $i$, so $\sum_i \bar{z}_i$ is the expected number of open gates, the
+weights $w_i z_i$. The second term is the $L_0$ penalty and sets the sample size: $\bar{z}_i = \Pr(z_i \neq 0)$ is the
+expected activation of gate $i$ (Equation~\ref{eq:l0penalty}), so $\sum_i \bar{z}_i$ is the expected number of open gates, the
 expected retained-record count, and $\lambda_{L_0}$ sets how aggressively the optimizer prunes. Rather
 than set $\lambda_{L_0}$ by hand, each build tunes it by an outer bisection to a requested record count
 (Appendix~\ref{app:presets}). The third term is a soft concentration penalty: $\lambda_{L_2}$ multiplies the mean squared ratio of each

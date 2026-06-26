@@ -106,6 +106,61 @@ def _subsample_households(frame: Frame, n: int, seed: int) -> Frame:
     return frame.select(mask)
 
 
+def _policyengine_formula_owned_columns(frame: Frame, period: int) -> set[str]:
+    """Return PolicyEngine-computed columns present on ``frame``.
+
+    Published Populace H5 snapshots can contain columns that older
+    PolicyEngine-US versions accepted as inputs, but the current adapter now
+    owns through formulas/adds/subtracts. Before the L0 pre-calibration build
+    turns the imported frame back into a ``Microsimulation`` dataset, normalize
+    the frame to the current source-input surface and let PolicyEngine compute
+    those outputs itself.
+    """
+    from populace.frame.adapters.policyengine_us import PolicyEngineUSEngine
+
+    tables = {entity: frame.table(entity) for entity in frame.entities}
+    return PolicyEngineUSEngine()._engine_computed_columns(tables, period=period)
+
+
+def _drop_columns(
+    frame: Frame,
+    columns: set[str],
+) -> tuple[Frame, dict[str, list[str]]]:
+    """Drop globally named columns from their owning entity tables."""
+    if not columns:
+        return frame, {}
+
+    tables = {entity: frame.table(entity).copy() for entity in frame.entities}
+    dropped: dict[str, list[str]] = {}
+    for entity, table in tables.items():
+        entity_columns = sorted(column for column in columns if column in table.columns)
+        if entity_columns:
+            tables[entity] = table.drop(columns=entity_columns)
+            dropped[entity] = entity_columns
+
+    if not dropped:
+        return frame, {}
+
+    return (
+        Frame(
+            tables,
+            frame.schema,
+            {entity: frame.weights_for(entity) for entity in frame.weighted_entities},
+            frame.strata,
+            mass_log=frame.mass_log,
+        ),
+        dropped,
+    )
+
+
+def _drop_policyengine_formula_owned_columns(
+    frame: Frame,
+    period: int,
+) -> tuple[Frame, dict[str, list[str]]]:
+    """Strip current PolicyEngine formula outputs from an imported base frame."""
+    return _drop_columns(frame, _policyengine_formula_owned_columns(frame, period))
+
+
 def _reset_uniform(frame: Frame, weight_entity: str) -> Frame:
     """Replace ``weight_entity`` weights with a mass-preserving uniform vector.
 
@@ -238,6 +293,20 @@ def build_precalibration_dataset(
     if subsample is not None:
         frame = _subsample_households(frame, subsample, subsample_seed)
 
+    frame, formula_owned_dropped = _drop_policyengine_formula_owned_columns(
+        frame, period
+    )
+    if formula_owned_dropped:
+        count = sum(len(columns) for columns in formula_owned_dropped.values())
+        details = "; ".join(
+            f"{entity}: {', '.join(columns)}"
+            for entity, columns in sorted(formula_owned_dropped.items())
+        )
+        print(
+            f"Dropping {count} formula-owned PolicyEngine column(s) from the "
+            f"imported base frame before materialization: {details}"
+        )
+
     # The ACA source refresh is only valid when an APTC-recipient target exists;
     # the driver raises otherwise. Partial facts files routinely omit it, so guard.
     aca_tables = driver._aca_source_target_tables(target_specs)
@@ -273,6 +342,10 @@ def build_precalibration_dataset(
         "subsample_seed": subsample_seed if subsample is not None else None,
         "allow_partial_facts": allow_partial_facts,
         "drop_unsupported_filters": drop_unsupported_filters,
+        "formula_owned_dropped_count": sum(
+            len(columns) for columns in formula_owned_dropped.values()
+        ),
+        "formula_owned_dropped": formula_owned_dropped,
         "unsupported_filter_dropped_count": len(dropped_unsupported),
         "unsupported_filter_dropped": dropped_unsupported,
         "base_h5_path": str(base_path),
