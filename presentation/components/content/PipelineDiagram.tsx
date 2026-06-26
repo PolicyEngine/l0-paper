@@ -1,10 +1,10 @@
 const stages = [
-  ["Sources", "surveys", "administrative facts"],
+  ["Load sources", "surveys", "administrative facts"],
   ["Combine", "entity tables", "typed weights"],
   ["Impute", "fill support gaps", "preserve uncertainty"],
   ["Geography", "attach areas", "respect hierarchy"],
   ["Compose targets", "source-backed facts", "model mappings"],
-  ["Represent", "calibrate weights", "prune to budget"],
+  ["Calibrate + prune", "fit weights", "prune to budget"],
 ];
 
 export default function PipelineDiagram() {

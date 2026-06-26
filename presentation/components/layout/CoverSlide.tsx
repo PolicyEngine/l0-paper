@@ -43,12 +43,22 @@ export default function CoverSlide({
         <div className="mt-2 flex flex-wrap items-center justify-center gap-8">
           {speakers.map((speaker) => (
             <div key={speaker.name} className="flex items-center justify-center gap-6">
-              <div className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-white/40 bg-white/10 text-3xl font-bold">
-                {speaker.name
-                  .split(" ")
-                  .map((part) => part[0])
-                  .join("")}
-              </div>
+              {speaker.headshot ? (
+                <Image
+                  alt={speaker.name}
+                  className="h-24 w-24 rounded-full border-2 border-white/40 object-cover"
+                  height={96}
+                  src={speaker.headshot}
+                  width={96}
+                />
+              ) : (
+                <div className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-white/40 bg-white/10 text-3xl font-bold">
+                  {speaker.name
+                    .split(" ")
+                    .map((part) => part[0])
+                    .join("")}
+                </div>
+              )}
               <div className="text-left">
                 <p className="text-2xl font-semibold text-white">{speaker.name}</p>
                 <p className="text-lg font-light text-white/70">{speaker.title}</p>
