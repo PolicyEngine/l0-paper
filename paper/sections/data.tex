@@ -17,22 +17,28 @@ targets, and calibrates. Because every stage operates on the same structure, the
 the calibration method are components that can be swapped without rewriting the pipeline, and the
 method studied here is one calibration option among those the pipeline supports.
 
-This modular structure makes the steps that enlarge the candidate universe explicit, namely combining
-sources, imputing onto more records, and creating geographic variants, so the size of the candidate
-dataset is a property of the configuration rather than an accident of the code. \populace{} follows a
-generate-big-then-prune design: these middle stages grow the candidate universe well beyond the
-original survey, and calibration prunes it back to a deployable budget.
+This modular structure makes the candidate universe a property of the configuration rather than an
+accident of the code: the source-loading and imputation stages set what information each record
+carries, and calibration sets which records survive and at what weight. \populace{} follows a
+generate-then-prune design, assembling the candidate universe once and pruning it to a deployable
+budget at the calibration stage.
 
-\begin{figure}[ht]
+\begin{figure}[H]
     \centering
-    \fbox{\parbox{0.9\textwidth}{\centering\textit{[Pipeline overview diagram to be inserted]}}}
+    \makebox[\textwidth][c]{%
+        \includegraphics[width=1.18\textwidth]{figures/populace_pipeline}%
+    }
     \caption{\populace{} pipeline for the configuration used in this paper: load and combine the
     source surveys, impute missing variables, assign geography, construct the calibration targets,
     and calibrate. The calibration stage is the focus of this paper.}
     \label{fig:pipeline}
 \end{figure}
 
-\tbc[configuration-specific pipeline description for this build]
+For this build the candidate universe is the \populace{}-US 2024 household file: 75{,}112 households at
+period 2024, one row per household. We pin the exact artifact for reproducibility: HuggingFace
+repository \texttt{policyengine/populace-us}, snapshot \texttt{be80a14f}, built from \populace{} commit
+\texttt{6e1bcd0}, with H5 SHA-256 beginning \texttt{f0af2519}. The repository's \texttt{main} branch now
+points to a newer release, so the numbers reported here are tied to this pinned snapshot and file hash.
 
 \subsection{Base microdata}
 
@@ -47,40 +53,60 @@ SNAP, Medicaid, SSI, and TANF.
 The CPS is not a complete tax-benefit dataset on its own. Some tax variables are missing, others are
 measured with error, and top incomes are imperfectly captured relative to tax records
 \citep{burkhauser2012}. Benefit receipt is also underreported relative to administrative sources
-\citep{rothbaum2021, meyer2021}. The pipeline therefore augments the CPS before calibration.
+\citep{meyer2015}. The pipeline therefore augments the CPS before calibration.
 
 \subsubsection{Imputation from administrative and survey sources}
 
-The pipeline imputes tax variables from the IRS Public Use File (PUF) onto CPS records following
-\citet{woodruff2024}. The PUF carries detailed tax-return information but lacks household structure
-and demographic coverage. Quantile regression forests \citep{meinshausen2006quantile} predict the
-tax variables on the CPS from the PUF, imputing variables in sequence so that later variables
-condition on earlier imputed values. The pipeline draws additional variables from other surveys
-where the CPS is thin, including rent and real-estate tax, asset and net-worth components, and
-selected income items. \tbc[exact source and variable list for this build]
+The pipeline enriches the CPS base by imputing variables from administrative and survey donors. It
+imputes tax-return detail from the IRS Public Use File \citep[PUF;][]{bryant2023a} onto CPS records
+following \citet{woodruff2024}: the PUF carries detailed tax-return information but lacks household
+structure and demographic coverage, so quantile regression forests \citep{meinshausen2006quantile}
+predict the PUF variables on the CPS; \citet{meyer2021} assess the accuracy of such
+survey--administrative tax imputations. The imputation is sequential and regime-gated, drawing from a
+weighted bootstrap, so later variables condition on earlier imputed values. The same machinery draws
+further variables from the donors in Table~\ref{tab:donors} where the CPS is thin. Each step adds
+variables to the existing households rather than new records, so the candidate universe stays at one
+row per household.
 
-Each imputation step adds information, and several add variants of the same household. Combined with
-geographic assignment, these steps expand the candidate universe well beyond the size of the
-original survey.
+\begin{table}[H]
+\centering
+{\tablefont
+\begin{tabular}{@{}p{0.30\textwidth}p{0.60\textwidth}@{}}
+\toprule
+Donor source & Variables contributed (this build) \\
+\midrule
+CPS ASEC & Household and person structure, demographics, labour and transfer income, programme participation, unit assignment \\
+IRS PUF (2015, uprated) & Itemized-deduction detail, QBI/SSTB components, partnership and S-corp income, selected tax detail \\
+CPS ORG & Hourly wage, paid-hourly and union status, weekly hours, overtime inputs \\
+SCF & Wealth and net-worth components \\
+SIPP & Tips \\
+MEPS-IC & Employer-sponsored insurance premiums \\
+ACS (2022) & Rent (pre-subsidy) \\
+CMS marketplace PUFs and CPS ASEC & ACA take-up and the benchmark-plan ratio \\
+\bottomrule
+\end{tabular}
+}
+\caption{Donor sources imputed onto the CPS base for this build, from the \populace{}-US release stage
+manifest. The stages run in a fixed order, each conditioning on the variables already imputed.}
+\label{tab:donors}
+\end{table}
 
-\subsubsection{Geographic variation}
+\subsubsection{Geography}
 
-To support subnational targets, the pipeline assigns records to geographies below the level the
-survey identifies. A record can appear in more than one candidate placement, which raises the
-candidate count and gives the calibration step the freedom to match local totals.
-\tbc[geographic assignment configuration and the resulting candidate count]
+Each household carries a geographic identity. The CPS ASEC reports the household's state, which
+supports the state-level administrative targets this study calibrates to. The assembled file also
+carries county, congressional-district, tract, and block identifiers, but this study calibrates only
+to national and state targets, so the finer levels are present without being scored. For this build
+the candidate universe is one row per household: records are not replicated across alternative
+geographic placements, so the candidate count is the household count of 75{,}112.
 
 \subsection{Calibration targets}
 
-The target system combines aggregates from several administrative sources at the national, state,
-and district levels. This study does not calibrate to every target the pipeline could construct. It
+The target system combines aggregates from several administrative sources at the national and state
+levels. This study does not calibrate to every target the pipeline could construct. It
 calibrates to a prioritized subset, and it reports that subset explicitly rather than describing it
 as a complete or maximal target set. Appendix~\ref{app:targets} lists the target families used and
 the reason for including them. The exact counts come from each experiment's run manifest rather than
 from a pipeline-wide inventory.
 
 \input{tables/target_subset}
-
-Some targets depend on programme take-up, which the pipeline draws at the record level using
-deterministic seeds, so a record's contribution to a target stays consistent with the dataset it is
-later assembled into. \tbc[uprating and cross-geography reconciliation details for this build]

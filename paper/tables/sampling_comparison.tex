@@ -1,23 +1,29 @@
-\begin{table}[ht]
+\begin{table}[H]
 \centering
 {\tablefont
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{p{0.2\textwidth}rrrrrr}
+\begin{tabular}{p{0.20\textwidth}rrrrrr}
 \toprule
-Method & Budget & In-sample mean ARE (\%) & Out-of-sample mean ARE (\%) & ESS & Max weight & Runtime \\
+Method & Budget & In-sample median ARE (\%) & Out-of-sample median ARE (\%) & Out-of-sample mean ARE (\%) & ESS & Max weight \\
 \midrule
-Informed $L_0$ & \tbc & \tbc & \tbc & \tbc & \tbc & \tbc \\
-Random + reweight & \tbc & \tbc & \tbc & \tbc & \tbc & \tbc \\
-Survey-weight sampling & \tbc & \tbc & \tbc & \tbc & \tbc & \tbc \\
-Combinatorial optim.\ & \tbc & \tbc & \tbc & \tbc & \tbc & \tbc \\
+Informed $L_0$ & 10{,}000 & 11.0 & 23.6 & 36.0 & 1{,}476 & 838{,}997 \\
+Random + reweight & 10{,}000 & 2.0 & 19.6 & 28.1 & 979 & 1{,}272{,}562 \\
+Survey-weight (Hansen--Hurwitz) & 10{,}000 & 24.8 & 31.9 & 50.2 & 1{,}824 & 874{,}260 \\
 \bottomrule
 \end{tabular}
 }
 }
-\caption{Informed $L_0$ sampling against random and stratified sampling at a matched record budget.
-All methods share the candidate universe and the target set. ARE is absolute relative error across
-the scored targets; ESS is the effective sample size.}
+\caption{Informed $L_0$ sampling against the two matched-budget baselines at a representative budget (the
+$\sim$10{,}000-record anchor of Figure~\ref{fig:budget_frontier}). All methods share the candidate
+universe, the target set, and the fixed family-level holdout, and differ only in how records are
+selected. ARE is absolute relative error across the scored targets; the median is the headline read and
+the mean is reported alongside as tail-sensitive. ESS is the Kish effective sample size, reported as an
+output diagnostic because a sampler can fit the targets while concentrating population mass on a few
+records. Cells are the cross-seed summary over three seeds.}
 \label{tab:sampling_comparison}
-\tablenote{The record budget and target counts are read from each run's manifest. Out-of-sample
-columns score targets held out of every method's fit.}
+\tablenote{The matched record budget and target counts are read from each run's manifest; the
+out-of-sample columns score the held-out families. The survey-weight baseline is the unbiased
+Hansen--Hurwitz integerisation (probability-proportional-to-size with replacement). Informed $L_0$ runtime
+includes the eight-step budget bisection that sets $\lambda_{L_0}$; the baselines are run once at the
+matched budget. Runtime and the family macro-average are reported in the run summary.}
 \end{table}

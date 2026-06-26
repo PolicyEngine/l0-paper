@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Generate-big candidate universe via Populace's full US build plan (heavy).
 
-The proof-of-concept (``run_poc.py``) uses the published HuggingFace frame as the
+The proof-of-concept (``l0 poc``) uses the published HuggingFace frame as the
 candidate universe. This script is the code path for the *true* pre-prune
 candidate universe: Populace's "generate big, then prune" imputation pipeline,
 which grows the CPS ASEC well beyond the survey before calibration reduces it.
@@ -10,14 +10,14 @@ It is intentionally NOT run by default. At production scale the build needs the
 donor source data (PUF, SCF, SIPP, CPS ORG, MEPS-IC, ACS) and roughly 48 GB of
 RAM (see ``populace/SYSTEM_REQUIREMENTS.md``).
 
-Pipeline (15 stages, from ``populace.build.us.US_STAGE_NAMES``):
+Pipeline (15 stages, from ``populace.build.us_runtime.US_STAGE_NAMES``):
 
     asec_load -> unit_assignment -> derive_cps_carried -> puf_tax_detail
     -> scf_wealth -> sipp_tips -> org_wages -> meps_esi_premiums
     -> prior_year_income -> mortgage_conversion -> acs_rent -> vehicle_assets
     -> entity_placement -> aca_marketplace_inputs -> export
 
-``populace.build.us.us_plan`` assembles the ``StagePlan`` but requires one
+``populace.build.us_runtime.us_plan`` assembles the ``StagePlan`` but requires one
 ``transform(frame) -> Frame`` implementation per stage to be *injected*. The
 current Populace checkout does not expose a public factory for the production
 implementations (the release tool recalibrates an existing frame instead of
@@ -36,7 +36,7 @@ import argparse
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from populace.build.us import (  # noqa: F401 -- re-exported as the real building blocks
+from populace.build.us_runtime import (  # noqa: F401 -- re-exported as the real building blocks
     US_SOURCE_MANIFEST,
     US_STAGE_NAMES,
     us_plan,

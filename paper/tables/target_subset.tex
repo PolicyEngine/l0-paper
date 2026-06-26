@@ -1,19 +1,32 @@
-\begin{table}[ht]
+\begin{table}[H]
 \centering
 {\tablefont
-\begin{tabular}{p{0.5\textwidth}lr}
+\begin{tabular}{@{}p{0.52\textwidth}l r@{}}
 \toprule
-Target family & Geographic level & Count \\
+Target family & Geographic level & Targets \\
 \midrule
-\tbc[prioritized target families] & \tbc & \tbc \\
+IRS Statistics of Income (\texttt{irs\_soi}) & National, state & 3{,}107 \\
+Census population estimates (\texttt{census\_population}) & National, state & 936 \\
+Medicaid and CHIP, CMS (\texttt{cms\_medicaid}) & National, state & 104 \\
+ACA marketplace, CMS (\texttt{cms\_aca}) & State & 102 \\
+SNAP, USDA (\texttt{usda\_snap}) & National, state & 52 \\
+State income tax, Census STC (\texttt{state\_income\_tax}) & State & 45 \\
+TANF, HHS ACF (\texttt{hhs\_acf\_tanf}) & National, state & 30 \\
+Social Security OASDI, SSA (\texttt{ssa}) & National & 6 \\
+CBO revenue projections (\texttt{cbo}) & National & 5 \\
+JCT tax expenditures (\texttt{jct}) & National & 5 \\
+Medicare, CMS (\texttt{cms\_medicare}) & National & 1 \\
 \midrule
-\textbf{Total} & & \tbc \\
+\textbf{Total} & & \textbf{4{,}393} \\
 \bottomrule
 \end{tabular}
 }
 \caption{Prioritized target subset used in this study, by family and geographic level. The subset is
 chosen for the reasons given in Appendix~\ref{app:targets} and is not a complete inventory of the
-targets the pipeline can construct.}
+targets the pipeline can construct. All targets are at the national or state level; the surface holds
+no congressional-district targets.}
 \label{tab:target_subset}
-\tablenote{Counts are read from the run manifest for each experiment.}
+\tablenote{Counts are read from the run manifest. The \texttt{cbo} family is held out as a
+validation-only diagnostic and is never used to fit weights (Section~\ref{sec:oos}); the source for
+each family is listed in Appendix~\ref{app:targets}.}
 \end{table}

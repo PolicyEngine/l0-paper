@@ -1,23 +1,23 @@
 """Offline end-to-end tests for the experiment harness.
 
-These exercise both calibration conditions, scoring, holdout splitting, artifact
+These exercise calibration conditions, scoring, holdout splitting, artifact
 summaries, and table rendering on the toy Populace frame -- no PolicyEngine-US and
 no network, so CI stays fast and self-contained. The real-data path is driven by
-``experiments/run_poc.py``.
+``l0 poc`` / ``l0 sweep``.
 """
 
-import importlib.util
 import json
 from collections import defaultdict
-from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from l0_paper.experiments import (
     aggregate,
     artifacts,
+    crunch,
     holdout,
     metrics,
     tables,
@@ -27,6 +27,7 @@ from l0_paper.experiments.conditions import (
     calibrate_dense,
     run_dense_then_sample,
     run_l0,
+    run_l1,
     run_random_then_reweight,
     sample_from_dense,
     weighted_sample,
@@ -51,8 +52,6 @@ def test_split_targets_partitions():
 
 
 def test_split_registry_by_family_rejects_unknown_family():
-    import pytest
-
     _, targets = _toy()
     target_list = list(targets)
     registry = SimpleNamespace(
@@ -68,9 +67,10 @@ def test_split_registry_by_family_rejects_unknown_family():
 
 def test_run_l0_prunes_at_budget():
     frame, targets = _toy()
+    events = []
     result = run_l0(
         frame, targets, target_records=60, seed=0, epochs=120,
-        learning_rate=0.15, mass="free",
+        learning_rate=0.15, mass="free", progress_callback=events.append,
     )
     assert result.method == "informed_l0"
     assert result.n_selected < result.n_records
@@ -79,6 +79,7 @@ def test_run_l0_prunes_at_budget():
     # l2_lambda is zero unless the informed-L0/Hard-Concrete condition opts in.
     assert result.l2_lambda == 0.0
     assert hasattr(result, "max_weight_ratio")
+    assert any(event.get("budget_search") for event in events)
 
 
 def test_dense_then_sample_matched_budget():
@@ -108,6 +109,39 @@ def test_run_random_then_reweight_matched_budget():
     assert result.n_selected == 40  # uniform subset of distinct households
     assert result.sampling["strategy"] == "uniform_random"
     assert result.sampling["n_sample"] == 40
+
+
+def test_run_l1_reraises_non_overpruning_value_errors(monkeypatch):
+    """Only the specific all-zero L1 case is treated as a zero-survivor fit."""
+    frame, targets = _toy()
+
+    def fail_calibrate(*_args, **_kwargs):
+        raise ValueError("target_loss_weights must be finite.")
+
+    monkeypatch.setattr("l0_paper.experiments.conditions.calibrate", fail_calibrate)
+
+    with pytest.raises(ValueError, match="target_loss_weights must be finite"):
+        run_l1(frame, targets, target_records=40, budget_iters=1)
+
+
+def test_run_l1_all_zero_bracket_fails_cleanly(monkeypatch):
+    """An over-strong bracket should produce a named error, not AttributeError."""
+    frame, targets = _toy()
+
+    def overpruned_calibrate(*_args, **_kwargs):
+        raise ValueError("L1 penalty zeroed every weight: lower l1_lambda.")
+
+    monkeypatch.setattr("l0_paper.experiments.conditions.calibrate", overpruned_calibrate)
+
+    with pytest.raises(ValueError, match="L1 lambda bracket zeroed every weight"):
+        run_l1(frame, targets, target_records=40, budget_iters=1)
+
+
+def test_run_l1_rejects_nonpositive_bracket_without_runtime_warning():
+    frame, targets = _toy()
+
+    with pytest.raises(ValueError, match="l1_lambda_bracket bounds must be positive"):
+        run_l1(frame, targets, target_records=40, l1_lambda_bracket=(0.0, 0.0))
 
 
 def test_random_reweight_fills_table_row():
@@ -251,6 +285,57 @@ def test_target_diagnostics_persistence_and_attribution(tmp_path):
     assert top.iloc[0]["share_of_mean"] > 0.99
 
 
+def test_target_diagnostics_store_scale_and_loss_weight():
+    """The per-target store carries scale and the production omega for crunching."""
+    frame, truths = make_toy_frame(seed=0, n=120)
+    weights = frame.weights_for("household").values
+    targets = list(
+        TargetSet(
+            (
+                Target(name="total_income", entity="household", measure="income",
+                       value=truths["income"]),
+                Target(name="tiny_income", entity="household", measure="income",
+                       value=1.0),
+            )
+        )
+    )
+    omega = np.array([3.0, 1.0])
+    rows = metrics.target_diagnostics(frame, weights, targets, loss_weights=omega)
+    assert [r["scale"] for r in rows] == [max(abs(r["target_value"]), 1.0) for r in rows]
+    assert [r["loss_weight"] for r in rows] == [3.0, 1.0]
+
+
+def test_crunch_objective_caps_weights_and_drops_degenerate():
+    """The objective crunches from raw per-target values at any cap (Equation 8)."""
+    df = pd.DataFrame(
+        {
+            "method": ["informed_l0", "informed_l0"],
+            "split": ["out_of_sample", "out_of_sample"],
+            "l2_lambda": [0.0, 0.0],
+            "budget_requested": [10000, 10000],
+            "target_value": [1000.0, 1.0],
+            "achieved_value": [1100.0, 51.0],
+            "scale": [1000.0, 1.0],
+            "loss_weight": [10.0, 1.0],
+            "is_degenerate": [False, True],
+        }
+    )
+    # capped @ c=1: big = min(0.1, 1) = 0.1; tiny = min(50, 1) = 1
+    # weighted mean = (0.1*10 + 1*1) / 11 = 2/11
+    assert abs(crunch.objective(df, cap=1.0) - (2.0 / 11.0)) < 1e-9
+    # uncapped: (0.1*10 + 50*1) / 11 = 51/11
+    assert abs(crunch.objective(df, cap=None) - (51.0 / 11.0)) < 1e-9
+    summary = crunch.summarize(df, cap=1.0)
+    assert int(summary["n"].iloc[0]) == 2
+    # raw |a-t|/|t|: big 0.1, tiny 50 -> mean = median = 25.05; half within 10%
+    assert abs(float(summary["mean_are"].iloc[0]) - 25.05) < 1e-9
+    assert abs(float(summary["frac_within"].iloc[0]) - 0.5) < 1e-9
+    # dropping the degenerate target leaves the well-fit one: objective 0.1, all within 10%
+    clean = crunch.summarize(df, cap=1.0, drop_degenerate=True)
+    assert abs(float(clean["objective_capped_weighted"].iloc[0]) - 0.1) < 1e-9
+    assert abs(float(clean["frac_within"].iloc[0]) - 1.0) < 1e-9
+
+
 def test_rows_from_run_emits_degenerate_metrics():
     rows = aggregate.rows_from_run(
         method="informed_l0", seed=0, budget_requested=1000, budget_achieved=995,
@@ -344,14 +429,7 @@ def test_manifest_is_strict_json_with_empty_holdout(tmp_path):
 
 
 def test_summarize_run_writes_readable_tables(tmp_path):
-    spec = importlib.util.spec_from_file_location(
-        "summarize_run",
-        Path(__file__).resolve().parents[1] / "experiments" / "summarize_run.py",
-    )
-    assert spec is not None
-    assert spec.loader is not None
-    summarize_run = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(summarize_run)
+    from l0_paper.cli import summarize as summarize_run
 
     manifest = {
         "run_id": "toy-run",
@@ -495,6 +573,43 @@ def test_absolute_path_preserves_h5_symlink_suffix(tmp_path):
     assert _absolute_path(link).resolve().suffix == ""
 
 
+def test_drop_columns_preserves_frame_metadata():
+    """Imported base-frame cleanup removes only named columns."""
+    from l0_paper.precalibration import _drop_columns
+    from populace.frame import Frame
+
+    frame, _truths = make_toy_frame(seed=0, n=5)
+    tables = {entity: frame.table(entity).copy() for entity in frame.entities}
+    tables["person"]["employment_income"] = np.arange(5, dtype=float)
+    tables["household"]["income_tax"] = np.arange(5, dtype=float)
+    tables["household"]["keep_me"] = 1.0
+    dirty = Frame(
+        tables,
+        frame.schema,
+        {entity: frame.weights_for(entity) for entity in frame.weighted_entities},
+        frame.strata,
+        mass_log=frame.mass_log,
+    )
+
+    clean, dropped = _drop_columns(
+        dirty, {"employment_income", "income_tax", "missing_column"}
+    )
+
+    assert dropped == {
+        "person": ["employment_income"],
+        "household": ["income_tax"],
+    }
+    assert "employment_income" not in clean.table("person")
+    assert "income_tax" not in clean.table("household")
+    assert "keep_me" in clean.table("household")
+    assert clean.schema == dirty.schema
+    assert clean.mass_log == dirty.mass_log
+    assert np.array_equal(
+        clean.weights_for("household").values,
+        dirty.weights_for("household").values,
+    )
+
+
 def test_validation_only_families_tracks_populace():
     """Returns Populace-classified validation-only families (cbo), never hard ones."""
     fams = holdout.validation_only_families()
@@ -552,12 +667,25 @@ def test_production_us_fiscal_target_loss_imports_populace_helper():
     assert np.isclose(weights.mean(), 1.0)
     # Reuses Populace's production rule: sqrt(value) within the amount basis.
     assert np.isclose(weights[1] / weights[0], 2.0)
+    # production_us_fiscal inherits Populace's production cap (1.0), not the generic 10.0
     assert target_loss.resolve_target_loss_cap(
         target_loss.PRODUCTION_US_FISCAL,
         None,
-    ) == 10.0
+    ) == 1.0
     assert target_loss.resolve_target_loss_cap(target_loss.UNIFORM, None) == 10.0
+    # an explicit cap always wins over the per-weighting default
+    assert target_loss.resolve_target_loss_cap(target_loss.PRODUCTION_US_FISCAL, 10.0) == 10.0
     assert target_loss.target_loss_weight_summary(weights)["kind"] == "provided"
+
+
+def test_production_module_path_uses_shared_populace_discovery(monkeypatch, tmp_path):
+    driver = tmp_path / "tools" / "build_us_fiscal_refresh_release.py"
+    driver.parent.mkdir(parents=True)
+    driver.write_text("# helper placeholder\n")
+
+    monkeypatch.setattr(target_loss, "_populace_repo_root", lambda: tmp_path)
+
+    assert target_loss._production_module_path() == driver
 
 
 # --- Amplified sweep: family-grouped folds ------------------------------------
@@ -775,18 +903,18 @@ def test_frontier_and_paired_aggregation():
     paired = aggregate.paired_method_diff(df)
     assert (paired["diff_mean"] < 0).all()  # challenger (L0) better
     assert paired["challenger_better"].all()
-    assert paired["significant"].all()  # CI excludes zero
+    assert paired["ci_excludes_zero"].all()
     assert paired["p_value"].notna().all()  # >=2 seeds with non-zero variance
 
 
-def test_paired_significance_requires_three_seeds():
+def test_paired_ci_flag_requires_three_seeds():
     df = pd.DataFrame(_synthetic_long_rows())
     single_seed = df[df["seed"] == 0]
 
     paired = aggregate.paired_method_diff(single_seed)
 
     assert not paired.empty
-    assert not paired["significant"].any()
+    assert not paired["ci_excludes_zero"].any()
     assert paired["p_value"].isna().all()
 
 
@@ -883,4 +1011,5 @@ def test_render_frontier_and_paired_tables():
 
     paired_tex = tables.render_paired_comparison(paired)
     assert "Random + reweight" in paired_tex
-    assert "$^\\star$" in paired_tex  # all synthetic budgets are significant
+    assert "descriptive rather than strong inferential evidence" in paired_tex
+    assert "$^\\star$" not in paired_tex

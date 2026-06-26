@@ -63,12 +63,12 @@ consumes is regenerable from one command.
 Example
 -------
     # Reuse an existing default-source bundle, add the off-year sources, write into repo:
-    uv run python experiments/build_targets.py \
+    uv run l0 build-targets \
         --base /path/to/arch-us-2024/consumer_facts.jsonl
 
     # Or build everything from scratch (the slow base build needs arch-data source
     # access: arch-raw R2 auth, or ARCH_SOURCE_ARTIFACT_FETCH=1 for public URLs):
-    uv run python experiments/build_targets.py --build-base --year 2023
+    uv run l0 build-targets --build-base --year 2023
 """
 
 from __future__ import annotations
@@ -81,8 +81,9 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUT = REPO_ROOT / "data" / "targets" / "consumer_facts.jsonl"
+# Output and the arch-data sibling lookup resolve from the working directory
+# (run from the repo checkout).
+DEFAULT_OUT = Path.cwd() / "data" / "targets" / "consumer_facts.jsonl"
 
 #: Environment override for locating the arch-data checkout.
 ARCH_REPO_ENV = "L0_PAPER_ARCH_REPO"
@@ -110,7 +111,7 @@ OFF_YEAR_SOURCES: dict[str, int] = {
 
 def _arch_repo(override: str | None) -> Path:
     """Locate the arch-data checkout (override > env > sibling of this repo)."""
-    candidates = [override, os.environ.get(ARCH_REPO_ENV), str(REPO_ROOT.parent / "arch-data")]
+    candidates = [override, os.environ.get(ARCH_REPO_ENV), str(Path.cwd().parent / "arch-data")]
     for cand in candidates:
         if not cand:
             continue
@@ -119,7 +120,7 @@ def _arch_repo(override: str | None) -> Path:
             return root
     raise FileNotFoundError(
         "Could not locate the arch-data checkout. Pass --arch-repo or set "
-        f"{ARCH_REPO_ENV}; expected a sibling 'arch-data' next to {REPO_ROOT}."
+        f"{ARCH_REPO_ENV}; expected a sibling 'arch-data' next to {Path.cwd()}."
     )
 
 
@@ -239,7 +240,7 @@ def main() -> None:
         "counts": counts,
         "note": (
             "Complete L0 target bundle: base default-source bundle + off-year "
-            "sources merged by concatenation. Regenerate with experiments/build_targets.py."
+            "sources merged by concatenation. Regenerate with l0 build-targets."
         ),
     }
     (out.parent / "targets_manifest.json").write_text(json.dumps(manifest, indent=2))

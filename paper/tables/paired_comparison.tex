@@ -1,0 +1,22 @@
+\begin{table}[H]
+\centering
+{\tablefont
+\begin{tabular}{rrrrr}
+\toprule
+Budget & Informed $L_0$ (\%) & Random + reweight (\%) & $\Delta$ (pp) & $p$ \\
+\midrule
+2{,}000 & 53.5 & 2{,}292.9 & -2{,}239.3 {\scriptsize[-3{,}508.7, -970.0]} & 0.017 \\
+5{,}000 & 38.2 & 301.9 & -263.7 {\scriptsize[-1{,}412.0, 884.5]} & 0.427 \\
+10{,}000 & 36.0 & 28.1 & 7.9 {\scriptsize[2.6, 13.2]} & 0.023 \\
+20{,}000 & 32.5 & 28.2 & 4.3 {\scriptsize[0.0, 8.5]} & 0.049 \\
+40{,}000 & 31.3 & 28.3 & 3.0 {\scriptsize[-1.1, 7.1]} & 0.086 \\
+\bottomrule
+\end{tabular}
+}
+\caption{Paired out-of-sample comparison of informed $L_0$ against random + reweight at each budget.
+$\Delta$ is the cross-seed mean of the per-seed out-of-sample error difference (negative favours informed
+$L_0$) with a 95\% confidence interval; $p$ is a paired $t$-test across the three paired seeds and should
+be read as descriptive rather than strong inferential evidence. Numbers are the un-penalised
+($\lambda_{L_2}=0$) rows of the \texttt{weighted-loss-3seed} run.}
+\label{tab:paired_comparison}
+\end{table}

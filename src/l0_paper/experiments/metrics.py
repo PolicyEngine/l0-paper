@@ -73,16 +73,29 @@ def absolute_relative_error(target: Target, frame, weights: np.ndarray) -> float
 
 
 def target_diagnostics(
-    frame, weights: np.ndarray, targets: Iterable[Target]
+    frame,
+    weights: np.ndarray,
+    targets: Iterable[Target],
+    *,
+    loss_weights: np.ndarray | None = None,
 ) -> list[dict[str, Any]]:
     """Per-target achieved values and errors for ``weights``.
 
     Relative errors are undefined for zero-valued targets, so those rows carry
     ``None`` for relative fields and still report signed/absolute misses.
+
+    When ``loss_weights`` (the per-target ``omega_j``, aligned to ``targets``) is
+    given, each row carries it as ``loss_weight``. ``scale`` is always emitted as
+    the objective's denominator ``max(|t_j|, 1)`` (Equation 8). Storing the raw
+    ``target_value``/``achieved_value`` together with ``scale`` and ``loss_weight``
+    lets the capped, weighted MAPE be recomputed downstream at any cap (see
+    :mod:`l0_paper.experiments.crunch`).
     """
     weights = np.asarray(weights, dtype=np.float64)
+    targets = list(targets)
+    omega = None if loss_weights is None else np.asarray(loss_weights, dtype=np.float64)
     rows: list[dict[str, Any]] = []
-    for target in targets:
+    for index, target in enumerate(targets):
         value = float(target.value)
         achieved = float(target.achieved_value(frame, weights))
         error = achieved - value
@@ -101,6 +114,8 @@ def target_diagnostics(
                 "absolute_error": abs(error),
                 "relative_error": relative_error,
                 "absolute_relative_error": absolute_relative_error_value,
+                "scale": max(abs(value), 1.0),
+                "loss_weight": (float(omega[index]) if omega is not None else None),
                 "family": target_family(target),
                 "geography_level": geography_level(target),
                 "is_zero_value_target": value == 0.0,

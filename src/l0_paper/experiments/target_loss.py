@@ -18,21 +18,39 @@ from typing import Any
 
 import numpy as np
 
+from l0_paper._populace_driver import _DRIVER_RELPATH, _populace_repo_root
 from populace.calibrate.target import TargetSet
 
 UNIFORM = "uniform"
 PRODUCTION_US_FISCAL = "production_us_fiscal"
 TARGET_LOSS_WEIGHTINGS = (UNIFORM, PRODUCTION_US_FISCAL)
 
+#: Generic solver fallback cap (Populace's ``_DEFAULT_TARGET_LOSS_CAP``); the cap
+#: for the uniform-weighting baseline.
 DEFAULT_TARGET_LOSS_CAP = 10.0
+#: Production US-fiscal cap, mirroring ``US_FISCAL_TARGET_LOSS_CAP`` in Populace's
+#: ``tools/build_us_fiscal_refresh_release.py`` so the production weighting inherits
+#: the production cap rather than the generic 10.0.
+PRODUCTION_US_FISCAL_TARGET_LOSS_CAP = 1.0
+
+#: Default target-loss cap per weighting when none is passed explicitly.
+_DEFAULT_TARGET_LOSS_CAP_BY_WEIGHTING = {
+    UNIFORM: DEFAULT_TARGET_LOSS_CAP,
+    PRODUCTION_US_FISCAL: PRODUCTION_US_FISCAL_TARGET_LOSS_CAP,
+}
 
 
 def resolve_target_loss_cap(weighting: str, cap: float | None) -> float:
-    """Return the effective cap for a target-loss weighting scheme."""
+    """Return the effective cap for a target-loss weighting scheme.
+
+    An explicit ``cap`` always wins. Otherwise the default is per weighting:
+    ``production_us_fiscal`` inherits the production cap (1.0); ``uniform`` keeps the
+    generic solver default (10.0).
+    """
     if cap is not None:
         resolved = float(cap)
-    elif weighting in TARGET_LOSS_WEIGHTINGS:
-        resolved = DEFAULT_TARGET_LOSS_CAP
+    elif weighting in _DEFAULT_TARGET_LOSS_CAP_BY_WEIGHTING:
+        resolved = _DEFAULT_TARGET_LOSS_CAP_BY_WEIGHTING[weighting]
     else:
         raise ValueError(f"Unknown target-loss weighting {weighting!r}.")
     if not np.isfinite(resolved) or resolved <= 0.0:
@@ -92,13 +110,11 @@ def _production_module():
 
 
 def _production_module_path() -> Path:
-    repo_root = Path(__file__).resolve().parents[3]
-    path = repo_root.parent / "populace" / "tools" / "build_us_fiscal_refresh_release.py"
+    path = _populace_repo_root() / _DRIVER_RELPATH
     if not path.is_file():
         raise FileNotFoundError(
             "Populace production target-loss helper not found at "
-            f"{path}. Run from the sibling l0-paper-expanded/populace checkout "
-            "layout or expose the helper from Populace before using "
-            f"{PRODUCTION_US_FISCAL!r}."
+            f"{path}. Set L0_PAPER_POPULACE_REPO or expose the helper from "
+            f"Populace before using {PRODUCTION_US_FISCAL!r}."
         )
     return path

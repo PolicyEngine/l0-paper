@@ -21,8 +21,8 @@ Figures
 
 Run
 ---
-    uv run --extra viz python experiments/figures.py \
-        --sweep experiments/runs/sweep-moderate \
+    uv run --extra viz l0 figures \
+        --sweep runs/sweep-moderate \
         --paper-figures
 """
 
@@ -37,9 +37,11 @@ import pandas as pd
 from l0_paper.experiments import aggregate, tables
 from l0_paper.experiments.tables import SWEEP_METHOD_LABELS, SWEEP_METHOD_ORDER
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-PAPER_FIGURES = REPO_ROOT / "paper" / "figures"
-FONTS_DIR = REPO_ROOT / "experiments" / "assets" / "fonts" / "Inter"
+# Fonts are vendored with the package (found via __file__, so they ship in the
+# wheel). The paper's figure directory is resolved from the working directory --
+# these commands run from the repo checkout.
+FONTS_DIR = Path(__file__).resolve().parent / "assets" / "fonts" / "Inter"
+PAPER_FIGURES = Path.cwd() / "paper" / "figures"
 
 # PolicyEngine palette (theme.css --chart-1/2/5), stable per method across every
 # figure. Each method also gets a distinct marker so the series stay legible in
@@ -210,7 +212,7 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
 
     lines += ["", "## Paired L0 vs random+reweight (out-of-sample)", ""]
     if not paired.empty:
-        lines.append("| Budget | L0 | random | diff (pp) | p | significant |")
+        lines.append("| Budget | L0 | random | diff (pp) | p | CI excludes 0 |")
         lines.append("| --- | --- | --- | --- | --- | --- |")
         for _, r in paired.iterrows():
             budget_label = f"{r['budget_requested']:,.0f}"
@@ -219,7 +221,7 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
             lines.append(
                 f"| {budget_label} | {_fmt_pct(r['informed_l0_mean'])} | "
                 f"{_fmt_pct(r['random_reweight_mean'])} | {r['diff_mean'] * 100:+.2f} | "
-                f"{r['p_value']:.3f} | {'yes' if r['significant'] else 'no'} |"
+                f"{r['p_value']:.3f} | {'yes' if r['ci_excludes_zero'] else 'no'} |"
             )
 
     # Family macro-average (equal weight per family) de-biases the SOI-dominated
@@ -486,7 +488,7 @@ def _setup_style() -> None:
         fm.fontManager.addfont(str(ttf))
     if not ttfs:
         print(
-            "Inter not vendored under experiments/assets/fonts/Inter -- falling "
+            "Inter not vendored under l0_paper/cli/assets/fonts/Inter -- falling "
             "back to a system sans. For brand fidelity: brew install --cask font-inter"
         )
 

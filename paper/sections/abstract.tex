@@ -11,14 +11,30 @@ relaxation of \citet{louizos2018}, the method jointly selects which records to r
 each retained record a positive weight. Selection responds to the calibration targets rather than
 being drawn at random, so the retained sample is informed by the quantities the dataset must
 reproduce. The gates make the retained-record count an explicit optimization variable, so one
-framework can produce a compact national dataset or a larger subnational one, while a separate
-penalty bounds how large individual weights can grow. Because the optimization that selects records
-also calibrates them, the reduced dataset continues to match its targets.
+framework can produce a compact national dataset or a larger subnational one, while soft and hard
+concentration controls bound how large individual weights can grow. Because the optimization that
+selects records also calibrates them, the reduced dataset continues to match its targets.
 
-We implement the calibration step within \populace{}, PolicyEngine's pipeline for microsimulation
-dataset construction, and present a proof of concept on its current target surface, comparing
-informed $L_0$ sampling with random sampling followed by gradient-descent reweighting at matched
-record budgets. \tbc[empirical comparison pending benchmark runs]
+We implement the method within \populace{}, PolicyEngine's pipeline for microsimulation dataset
+construction, and present a proof of concept on its current target surface. The comparison holds the
+candidate universe, the target set, and the record budget fixed, and varies only how records are
+chosen, across three samplers: informed $L_0$ selection, random sampling followed by gradient-descent
+reweighting, and survey-weight sampling, which draws records with probability proportional to a prior
+calibration's weights (the unbiased Hansen--Hurwitz scheme). All three fit weights with the same
+calibrator, so the experiment isolates the selection step rather than the calibration. Informed $L_0$
+selection reaches lower out-of-sample error than random sampling under aggressive compression, where a
+random draw is too small to span the targets: at a 2{,}000-record budget its out-of-sample median
+absolute relative error is 39.8\% against random sampling's 57.0\%. The gap is starker in the
+tail-sensitive mean (53.5\% against 2{,}293\%), which reflects the seed-to-seed instability of a small
+random draw that informed selection avoids. The methods converge as the record budget grows, and above
+roughly 5{,}000 records random sampling becomes the more accurate of the two; survey-weight sampling is
+the least accurate throughout. The method's distinctive value is therefore operational rather than a
+uniform accuracy gain: it sets the dataset size, geographic emphasis, and weight concentration through
+explicit parameters in one optimization, and it avoids the variance of a poor random draw at tight
+budgets. Matching a demanding target system can still load substantial population mass onto a few
+records, a cost we report rather than hide. We report these results as a proof of concept on a national and state target surface,
+and leave the larger build-and-prune and subnational settings the controls are designed for to future
+work.
 \end{abstract}
 
 \noindent\textbf{Keywords:} microsimulation, survey calibration, subsampling, $L_0$ regularization,
