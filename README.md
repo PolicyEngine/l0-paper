@@ -116,6 +116,23 @@ directory. `l0 paper --smoke` uses `runs/real-smoke` by default, sets budget
 2,000, seed 0, 50 epochs, one budget-bisection step, `lambda_L2=0`, disables
 rotation, and skips figure rendering.
 
+Use `--jobs N` to parallelize independent seed/fold/L2 shards. The parent process
+still owns checkpoint writes; with `--jobs 1` checkpoints are written after each
+budget cell, while parallel workers write shard-local checkpoints after each
+budget cell and the parent merges them on resume. Keep PyTorch/BLAS thread
+counts low to avoid CPU oversubscription, for example:
+
+```bash
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+uv run --extra data --extra viz l0 paper \
+    --reuse-precalibration runs/full/precalibration \
+    --out runs/35k-narrow \
+    --budgets 2000 10000 40000 \
+    --seeds 0 1 2 \
+    --jobs 4 \
+    --skip-figures
+```
+
 For exploratory runs, pass `--methods informed_l0 informed_l1 random_reweight
 dense_sample` to include the proximal `informed_l1` baseline, and pass
 `--target-loss-cap 1` to use the current production US-fiscal cap.

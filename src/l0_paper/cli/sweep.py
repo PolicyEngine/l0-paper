@@ -44,6 +44,8 @@ import argparse
 import csv
 import json
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
@@ -65,9 +67,21 @@ from l0_paper.precalibration import MANIFEST_JSON, load_precalibration_dataset
 METRICS_CSV = "metrics_long.csv"
 TARGET_DIAGNOSTICS_CSV = "target_diagnostics_long.csv"
 SWEEP_MANIFEST_JSON = "sweep_manifest.json"
+SHARD_CHECKPOINT_DIR = "shard_checkpoints"
+SHARD_MANIFEST_JSON = "shard_manifest.json"
 
 CellKey = tuple[str, int, int, int, float]
 MethodKey = tuple[str, int, int, int, float, str]
+
+
+@dataclass(frozen=True)
+class SplitShardResult:
+    """Rows emitted by one parallel seed/fold/L2 shard."""
+
+    label: str
+    rows: list[dict]
+    diag_rows: list[dict]
+    dense_runtimes: dict[str, float]
 
 _RESUME_COMPAT_ARG_KEYS = (
     "weight_entity",
@@ -187,13 +201,24 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--run-id", default=None)
     parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="Number of parallel seed/fold/L2 shards to run. The parent process "
+             "owns checkpoint writes. Keep BLAS/PyTorch thread env vars low "
+             "(for example OMP_NUM_THREADS=1) when using jobs > 1.",
+    )
+    parser.add_argument(
         "--resume",
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Resume from existing metrics_long.csv in --out by skipping completed "
         "budget/seed/fold cells (default: yes). Pass --no-resume to overwrite.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.jobs < 1:
+        parser.error("--jobs must be >= 1")
+    return args
 
 
 def _read_csv_rows(path: Path) -> list[dict[str, str]]:
@@ -228,6 +253,96 @@ def _atomic_write_manifest(path: Path, manifest: dict) -> Path:
     write_run_manifest(tmp, manifest)
     tmp.replace(path)
     return path
+
+
+def _row_signature(row: dict) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted((str(key), str(value)) for key, value in row.items()))
+
+
+def _merge_unique_rows(target: list[dict], incoming: list[dict]) -> int:
+    existing = {_row_signature(row) for row in target}
+    added = 0
+    for row in incoming:
+        signature = _row_signature(row)
+        if signature in existing:
+            continue
+        target.append(row)
+        existing.add(signature)
+        added += 1
+    return added
+
+
+def _safe_shard_name(label: str) -> str:
+    return "".join(
+        char if char.isalnum() or char in ("-", "_", ".") else "_"
+        for char in label
+    )
+
+
+def _write_shard_checkpoint(
+    shard_dir: Path,
+    *,
+    label: str,
+    rows: list[dict],
+    diag_rows: list[dict],
+) -> None:
+    """Persist one worker's local rows after a completed budget cell."""
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    if rows:
+        _atomic_write_long_csv(shard_dir / METRICS_CSV, rows)
+    if diag_rows:
+        _atomic_write_target_diagnostics_csv(
+            shard_dir / TARGET_DIAGNOSTICS_CSV, diag_rows
+        )
+    manifest = {
+        "schema_version": 1,
+        "label": label,
+        "updated_at": datetime.now(UTC).isoformat(),
+        "metrics_csv": str(shard_dir / METRICS_CSV),
+        "target_diagnostics_csv": (
+            str(shard_dir / TARGET_DIAGNOSTICS_CSV) if diag_rows else None
+        ),
+        "n_rows": len(rows),
+        "n_target_diagnostic_rows": len(diag_rows),
+    }
+    _atomic_write_manifest(shard_dir / SHARD_MANIFEST_JSON, manifest)
+
+
+def _merge_shard_checkpoints(
+    rows: list[dict],
+    diag_rows: list[dict],
+    shard_root: Path,
+) -> tuple[int, int, int]:
+    """Merge completed worker-local checkpoints into the in-memory run state."""
+    if not shard_root.is_dir():
+        return (0, 0, 0)
+
+    shards = 0
+    added_rows = 0
+    added_diag_rows = 0
+    for manifest_path in sorted(shard_root.glob(f"*/{SHARD_MANIFEST_JSON}")):
+        manifest = _load_existing_manifest(manifest_path)
+        metrics_rows = _read_csv_rows(manifest_path.parent / METRICS_CSV)
+        diagnostic_rows = _read_csv_rows(
+            manifest_path.parent / TARGET_DIAGNOSTICS_CSV
+        )
+        if manifest.get("n_rows") != len(metrics_rows):
+            raise SystemExit(
+                "l0 sweep: shard checkpoint row-count mismatch in "
+                f"{manifest_path.parent} (manifest={manifest.get('n_rows')!r}, "
+                f"loaded={len(metrics_rows)})."
+            )
+        if manifest.get("n_target_diagnostic_rows") != len(diagnostic_rows):
+            raise SystemExit(
+                "l0 sweep: shard diagnostic row-count mismatch in "
+                f"{manifest_path.parent} "
+                f"(manifest={manifest.get('n_target_diagnostic_rows')!r}, "
+                f"loaded={len(diagnostic_rows)})."
+            )
+        shards += 1
+        added_rows += _merge_unique_rows(rows, metrics_rows)
+        added_diag_rows += _merge_unique_rows(diag_rows, diagnostic_rows)
+    return (shards, added_rows, added_diag_rows)
 
 
 def _validate_resume_checkpoint(
@@ -537,6 +652,7 @@ def _build_manifest(
         "target_diagnostics_csv": (
             str(out / TARGET_DIAGNOSTICS_CSV) if diag_rows else None
         ),
+        "shard_checkpoint_dir": str(out / SHARD_CHECKPOINT_DIR),
         "n_rows": len(rows),
         "n_target_diagnostic_rows": len(diag_rows),
         "completed_cells": len(completed_cells),
@@ -650,7 +766,8 @@ def _sweep_split(
     """
     want_survey = "dense_sample" in methods
     completed_methods = completed_methods if completed_methods is not None else set()
-    budget_achieved_by_method = budget_achieved_by_method or {}
+    if budget_achieved_by_method is None:
+        budget_achieved_by_method = {}
 
     # Denominator-degenerate targets are a property of the split (not the run), so
     # compute them once here and reuse across budgets/seeds/methods.
@@ -858,6 +975,182 @@ def _sweep_split(
     return dense_runtimes
 
 
+def _sweep_split_shard(
+    *,
+    label: str,
+    frame,
+    fit_targets,
+    holdout_targets,
+    budgets: list[int],
+    seed: int,
+    l0_optimizer: dict,
+    baseline_optimizer: dict,
+    sample_kwargs: dict,
+    holdout_type: str,
+    fold: int,
+    methods: list[str],
+    l2_lambda: float,
+    target_loss_weighting: str,
+    collect_diagnostics: bool,
+    completed_methods: set[MethodKey],
+    budget_achieved_by_method: dict[MethodKey, int],
+    checkpoint_dir: Path | None = None,
+) -> SplitShardResult:
+    """Run one independent seed/fold/L2 shard with local row buffers."""
+    shard_rows: list[dict] = []
+    shard_diag_rows: list[dict] | None = [] if collect_diagnostics else None
+    checkpoint_callback = None
+    if checkpoint_dir is not None:
+        shard_dir = checkpoint_dir / _safe_shard_name(label)
+
+        def checkpoint_callback(_cell_label: str) -> None:
+            _write_shard_checkpoint(
+                shard_dir,
+                label=label,
+                rows=shard_rows,
+                diag_rows=shard_diag_rows or [],
+            )
+
+    dense_runtimes = _sweep_split(
+        shard_rows,
+        frame=frame,
+        fit_targets=fit_targets,
+        holdout_targets=holdout_targets,
+        budgets=budgets,
+        seeds=[seed],
+        l0_optimizer=l0_optimizer,
+        baseline_optimizer=baseline_optimizer,
+        sample_kwargs=sample_kwargs,
+        holdout_type=holdout_type,
+        fold=fold,
+        methods=methods,
+        l2_lambda=l2_lambda,
+        target_loss_weighting=target_loss_weighting,
+        diag_rows=shard_diag_rows,
+        completed_methods=set(completed_methods),
+        budget_achieved_by_method=dict(budget_achieved_by_method),
+        checkpoint=checkpoint_callback,
+    )
+    if checkpoint_dir is not None and (shard_rows or shard_diag_rows):
+        _write_shard_checkpoint(
+            checkpoint_dir / _safe_shard_name(label),
+            label=label,
+            rows=shard_rows,
+            diag_rows=shard_diag_rows or [],
+        )
+    return SplitShardResult(
+        label=label,
+        rows=shard_rows,
+        diag_rows=shard_diag_rows or [],
+        dense_runtimes=dense_runtimes,
+    )
+
+
+def _run_sweep_split(
+    rows: list[dict],
+    *,
+    frame,
+    fit_targets,
+    holdout_targets,
+    budgets: list[int],
+    seeds: list[int],
+    l0_optimizer: dict,
+    baseline_optimizer: dict,
+    sample_kwargs: dict,
+    holdout_type: str,
+    fold: int,
+    methods: list[str],
+    l2_lambda: float,
+    target_loss_weighting: str,
+    jobs: int,
+    diag_rows: list[dict] | None = None,
+    completed_methods: set[MethodKey] | None = None,
+    budget_achieved_by_method: dict[MethodKey, int] | None = None,
+    checkpoint: Callable[[str], None] | None = None,
+    shard_checkpoint_root: Path | None = None,
+) -> dict[str, float]:
+    """Run a split sequentially or as parallel seed/fold/L2 shards.
+
+    ``_sweep_split`` owns the calibration logic. This wrapper only controls
+    concurrency and keeps all checkpoint writes in the caller thread.
+    """
+    completed_methods = completed_methods if completed_methods is not None else set()
+    if budget_achieved_by_method is None:
+        budget_achieved_by_method = {}
+    if jobs <= 1 or len(seeds) <= 1:
+        return _sweep_split(
+            rows,
+            frame=frame,
+            fit_targets=fit_targets,
+            holdout_targets=holdout_targets,
+            budgets=budgets,
+            seeds=seeds,
+            l0_optimizer=l0_optimizer,
+            baseline_optimizer=baseline_optimizer,
+            sample_kwargs=sample_kwargs,
+            holdout_type=holdout_type,
+            fold=fold,
+            methods=methods,
+            l2_lambda=l2_lambda,
+            target_loss_weighting=target_loss_weighting,
+            diag_rows=diag_rows,
+            completed_methods=completed_methods,
+            budget_achieved_by_method=budget_achieved_by_method,
+            checkpoint=checkpoint,
+        )
+
+    workers = min(jobs, len(seeds))
+    print(
+        f"Parallel sweep: {holdout_type} fold={fold} l2={l2_lambda:g} "
+        f"using {workers} worker(s) across {len(seeds)} seed shard(s).",
+        flush=True,
+    )
+    dense_runtimes: dict[str, float] = {}
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {}
+        for seed in seeds:
+            label = f"{holdout_type} fold={fold} seed={seed} l2={l2_lambda:g}"
+            future = executor.submit(
+                _sweep_split_shard,
+                label=label,
+                frame=frame,
+                fit_targets=fit_targets,
+                holdout_targets=holdout_targets,
+                budgets=budgets,
+                seed=seed,
+                l0_optimizer=l0_optimizer,
+                baseline_optimizer=baseline_optimizer,
+                sample_kwargs=sample_kwargs,
+                holdout_type=holdout_type,
+                fold=fold,
+                methods=methods,
+                l2_lambda=l2_lambda,
+                target_loss_weighting=target_loss_weighting,
+                collect_diagnostics=diag_rows is not None,
+                completed_methods=completed_methods,
+                budget_achieved_by_method=budget_achieved_by_method,
+                checkpoint_dir=shard_checkpoint_root,
+            )
+            futures[future] = label
+
+        for future in as_completed(futures):
+            result = future.result()
+            rows.extend(result.rows)
+            if diag_rows is not None:
+                diag_rows.extend(result.diag_rows)
+            completed_methods.update(_completed_method_keys(result.rows, methods))
+            budget_achieved_by_method.update(_budget_achieved_by_method(result.rows))
+            dense_runtimes.update(result.dense_runtimes)
+            print(
+                f"  [{result.label}] shard merged: {len(result.rows):,} "
+                f"metric rows, {len(result.diag_rows):,} diagnostic rows.",
+                flush=True,
+            )
+            if checkpoint is not None and (result.rows or result.diag_rows):
+                checkpoint(f"{result.label} shard")
+    return dense_runtimes
+
+
 def main() -> None:
     args = _parse_args()
     out = args.out.resolve()
@@ -893,6 +1186,7 @@ def main() -> None:
     metrics_path = out / METRICS_CSV
     diagnostics_path = out / TARGET_DIAGNOSTICS_CSV
     manifest_path = out / SWEEP_MANIFEST_JSON
+    shard_checkpoint_root = out / SHARD_CHECKPOINT_DIR
     existing_manifest = _load_existing_manifest(manifest_path) if args.resume else {}
     rows: list[dict] = _read_csv_rows(metrics_path) if args.resume else []
     # Per-target OOS diagnostics for the headline split.
@@ -905,6 +1199,17 @@ def main() -> None:
         diagnostics_path=diagnostics_path,
         manifest_path=manifest_path,
     )
+    if args.resume:
+        shards, shard_rows, shard_diag_rows = _merge_shard_checkpoints(
+            rows, diag_rows, shard_checkpoint_root
+        )
+        if shards:
+            print(
+                f"Recovered {shard_rows:,} metric rows and "
+                f"{shard_diag_rows:,} diagnostic rows from {shards} "
+                f"parallel shard checkpoint(s) in {shard_checkpoint_root}.",
+                flush=True,
+            )
 
     if rows and existing_manifest:
         mismatches = _resume_manifest_mismatches(
@@ -961,6 +1266,7 @@ def main() -> None:
           f"(families: {holdout_families or 'random'}). "
           f"Candidate records: {frame.n(args.weight_entity):,}.")
     print(f"Methods: {args.methods}")
+    print(f"Jobs: {args.jobs}")
     frontier_target_loss_weights = target_loss.target_loss_weights(
         fit_targets,
         weighting=args.target_loss_weighting,
@@ -1037,15 +1343,17 @@ def main() -> None:
             "budget_iters": args.budget_iters,
             "l2_lambda": l2_lambda,
         }
-        dense_runtimes = _sweep_split(
+        dense_runtimes = _run_sweep_split(
             rows, frame=frame, fit_targets=fit_targets, holdout_targets=holdout_targets,
             budgets=args.budgets, seeds=args.seeds, l0_optimizer=l0_optimizer,
             baseline_optimizer=baseline_optimizer,
             sample_kwargs=sample_kwargs, holdout_type="fixed_family", fold=-1,
             methods=args.methods, l2_lambda=l2_lambda,
-            target_loss_weighting=args.target_loss_weighting, diag_rows=diag_rows,
+            target_loss_weighting=args.target_loss_weighting, jobs=args.jobs,
+            diag_rows=diag_rows,
             completed_methods=completed_methods,
             budget_achieved_by_method=budget_achieved,
+            shard_checkpoint_root=shard_checkpoint_root,
             checkpoint=lambda label: write_checkpoint("running", label),
         )
         frontier_dense_runtimes.setdefault(str(l2_lambda), {}).update(dense_runtimes)
@@ -1082,15 +1390,16 @@ def main() -> None:
                     "budget_iters": args.budget_iters,
                     "l2_lambda": l2_lambda,
                 }
-                _sweep_split(
+                _run_sweep_split(
                     rows, frame=frame, fit_targets=fold_fit, holdout_targets=fold_holdout,
                     budgets=[anchor], seeds=args.seeds, l0_optimizer=l0_optimizer,
                     baseline_optimizer=baseline_optimizer,
                     sample_kwargs=sample_kwargs, holdout_type="rotation", fold=fold_idx,
                     methods=args.methods, l2_lambda=l2_lambda,
-                    target_loss_weighting=args.target_loss_weighting,
+                    target_loss_weighting=args.target_loss_weighting, jobs=args.jobs,
                     completed_methods=completed_methods,
                     budget_achieved_by_method=budget_achieved,
+                    shard_checkpoint_root=shard_checkpoint_root,
                     checkpoint=lambda label: write_checkpoint("running", label),
                 )
 

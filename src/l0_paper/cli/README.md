@@ -201,6 +201,23 @@ uv run --extra data l0 sweep \
     --methods informed_l0 random_reweight dense_sample
 ```
 
+Add `--jobs N` to run independent seed/fold/L2 shards in parallel. The parent
+process owns the shared CSV and manifest, while parallel workers write
+shard-local checkpoints after each completed budget cell. On resume, those shard
+checkpoints are merged before the skip/completion check. Set PyTorch/BLAS thread
+env vars low when using multiple jobs:
+
+```bash
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+uv run --extra data l0 sweep \
+    --reuse-precalibration runs/full-35k/precalibration \
+    --out runs/35k-narrow \
+    --budgets 2000 10000 40000 \
+    --seeds 0 1 2 \
+    --jobs 4 \
+    --methods informed_l0 informed_l1 random_reweight dense_sample
+```
+
 Production US-fiscal weighting defaults to the production target-loss cap
 (`c=1`). The current manuscript's committed real-data runs used the generic
 solver cap (`c=10`), so pass `--target-loss-cap 10` when reproducing those
@@ -225,6 +242,11 @@ Design points:
   budget, so [`conditions.calibrate_dense`](../experiments/conditions.py)
   computes it once per seed and [`conditions.sample_from_dense`](../experiments/conditions.py)
   resamples it at every budget.
+- **Parallel shards**: `--jobs` parallelizes across seed/fold/L2 shards, keeping
+  budgets sequential inside each shard so dense calibration is still reused. With
+  `--jobs 1`, the shared checkpoint is written after every budget cell; with
+  `--jobs >1`, worker-local checkpoints are written after every budget cell and
+  the shared checkpoint is written as each shard finishes.
 - **Leak-free holdout**: the frontier uses one fixed *family-level* split
   (`split_registry_by_family`) so nested cells (a national total and its state
   parts) never straddle the fit/holdout boundary. `--rotation-folds k` adds a
