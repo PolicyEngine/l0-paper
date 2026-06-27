@@ -357,10 +357,9 @@ def test_sweep_method_expansion_reuses_existing_l0_budget(monkeypatch):
     assert any(row["method"] == "random_reweight" for row in rows)
 
 
-def test_parallel_sweep_split_merges_worker_rows_in_parent(monkeypatch):
+def test_parallel_sweep_split_merges_worker_rows_in_parent(monkeypatch, tmp_path):
     def fake_sweep_split(rows, *, seeds, diag_rows, checkpoint, **_kwargs):
         assert len(seeds) == 1
-        assert checkpoint is None
         seed = seeds[0]
         rows.append(
             {
@@ -379,7 +378,26 @@ def test_parallel_sweep_split_merges_worker_rows_in_parent(monkeypatch):
             }
         )
         if diag_rows is not None:
-            diag_rows.append({"seed": seed, "target": f"target-{seed}"})
+            diag_rows.append(
+                {
+                    "method": "informed_l0",
+                    "l2_lambda": 0.0,
+                    "seed": seed,
+                    "budget_requested": 2000,
+                    "split": "out_of_sample",
+                    "target_name": f"target-{seed}",
+                    "family": "demo",
+                    "geography_level": "national",
+                    "target_value": 1.0,
+                    "achieved_value": 1.0,
+                    "scale": 1.0,
+                    "loss_weight": 1.0,
+                    "absolute_relative_error": 0.0,
+                    "is_degenerate": False,
+                }
+            )
+        if checkpoint is not None:
+            checkpoint(f"seed {seed} budget 2000")
         return {str(seed): float(seed + 0.5)}
 
     monkeypatch.setattr(sweep, "_sweep_split", fake_sweep_split)
@@ -388,6 +406,7 @@ def test_parallel_sweep_split_merges_worker_rows_in_parent(monkeypatch):
     completed: set[sweep.MethodKey] = set()
     achieved: dict[sweep.MethodKey, int] = {}
     checkpoints: list[str] = []
+    shard_root = tmp_path / "shards"
 
     dense = sweep._run_sweep_split(
         rows,
@@ -408,15 +427,34 @@ def test_parallel_sweep_split_merges_worker_rows_in_parent(monkeypatch):
         diag_rows=diag_rows,
         completed_methods=completed,
         budget_achieved_by_method=achieved,
+        shard_checkpoint_root=shard_root,
         checkpoint=checkpoints.append,
     )
 
     assert sorted(row["seed"] for row in rows) == [0, 1]
-    assert sorted(row["target"] for row in diag_rows) == ["target-0", "target-1"]
+    assert sorted(row["target_name"] for row in diag_rows) == [
+        "target-0",
+        "target-1",
+    ]
     assert dense == {"0": 0.5, "1": 1.5}
     assert sorted(key[2] for key in completed) == [0, 1]
     assert sorted(achieved.values()) == [1900, 1901]
     assert len(checkpoints) == 2
+
+    recovered_rows: list[dict] = []
+    recovered_diag_rows: list[dict] = []
+    shards, n_rows, n_diag_rows = sweep._merge_shard_checkpoints(
+        recovered_rows, recovered_diag_rows, shard_root
+    )
+
+    assert shards == 2
+    assert n_rows == 2
+    assert n_diag_rows == 2
+    assert sorted(int(row["seed"]) for row in recovered_rows) == [0, 1]
+    assert sorted(row["target_name"] for row in recovered_diag_rows) == [
+        "target-0",
+        "target-1",
+    ]
 
 
 def test_sweep_l0_budget_progress_logger_reports_iteration_results(capsys):

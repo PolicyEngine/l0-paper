@@ -118,8 +118,9 @@ rotation, and skips figure rendering.
 
 Use `--jobs N` to parallelize independent seed/fold/L2 shards. The parent process
 still owns checkpoint writes; with `--jobs 1` checkpoints are written after each
-budget cell, while parallel runs checkpoint as each shard returns. Keep
-PyTorch/BLAS thread counts low to avoid CPU oversubscription, for example:
+budget cell, while parallel workers write shard-local checkpoints after each
+budget cell and the parent merges them on resume. Keep PyTorch/BLAS thread
+counts low to avoid CPU oversubscription, for example:
 
 ```bash
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \

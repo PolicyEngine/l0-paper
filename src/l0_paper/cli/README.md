@@ -202,8 +202,10 @@ uv run --extra data l0 sweep \
 ```
 
 Add `--jobs N` to run independent seed/fold/L2 shards in parallel. The parent
-process owns checkpoint writes, so parallel workers never write the shared CSV or
-manifest directly. Set PyTorch/BLAS thread env vars low when using multiple jobs:
+process owns the shared CSV and manifest, while parallel workers write
+shard-local checkpoints after each completed budget cell. On resume, those shard
+checkpoints are merged before the skip/completion check. Set PyTorch/BLAS thread
+env vars low when using multiple jobs:
 
 ```bash
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
@@ -242,8 +244,9 @@ Design points:
   resamples it at every budget.
 - **Parallel shards**: `--jobs` parallelizes across seed/fold/L2 shards, keeping
   budgets sequential inside each shard so dense calibration is still reused. With
-  `--jobs 1`, checkpoints are written after every budget cell; with `--jobs >1`,
-  checkpoints are written as each shard finishes.
+  `--jobs 1`, the shared checkpoint is written after every budget cell; with
+  `--jobs >1`, worker-local checkpoints are written after every budget cell and
+  the shared checkpoint is written as each shard finishes.
 - **Leak-free holdout**: the frontier uses one fixed *family-level* split
   (`split_registry_by_family`) so nested cells (a national total and its state
   parts) never straddle the fit/holdout boundary. `--rotation-folds k` adds a
