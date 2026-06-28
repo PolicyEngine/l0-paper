@@ -16,10 +16,10 @@ therefore has to satisfy a hierarchical calibration problem rather than a single
 
 One way to meet that demand is to build a dataset that carries as much of the relevant variation as
 possible. A pipeline can combine several surveys and administrative files, impute the variables that
-any single source lacks, and place records across geographies so that local detail is present in the
-candidate data. Each of these steps adds records, or variants of records. The result is a candidate
-dataset rich enough to represent the variation the targets describe, and large enough that it
-becomes expensive to store, calibrate, and simulate. A file with millions of active records supports
+any single source lacks, and attach the geographic detail that local analysis needs. Each of these
+steps enriches the records, and some add records. The result is a candidate dataset rich enough to
+represent the variation the targets describe, and large enough that it becomes expensive to store,
+calibrate, and simulate. A file with millions of active records supports
 detailed subnational work but is slow to run; a much smaller file is easier to ship, but only if the
 loss in fidelity is acceptable.
 
@@ -34,10 +34,10 @@ The method is $L_0$ regularization with the Hard Concrete relaxation \citep{loui
 candidate record receives a gate that the optimizer can drive toward zero or one, and the expected
 number of open gates enters the objective directly. Minimizing calibration error and the gate count
 together selects a subset of records and fits their weights in one optimization. The retained-record
-count becomes a quantity the optimizer controls rather than a fixed draw, and a separate weight
-penalty limits how concentrated the fitted weights can become. In practical terms, one framework can
-target a compact national dataset or a larger subnational dataset, at a chosen record budget, with
-weights kept inside a usable range.
+count becomes a quantity the optimizer controls rather than a fixed draw, and two concentration
+controls (a soft penalty and a hard per-record cap) limit how concentrated the fitted weights can
+become. In practical terms, one framework can target a compact national dataset or a larger subnational
+dataset, at a chosen record budget, with weights kept inside a usable range.
 
 We situate this work in \populace{} \citep{populace2026}, PolicyEngine's pipeline for microsimulation
 dataset construction. \populace{} passes a single weighted data structure through a sequence of
@@ -54,10 +54,15 @@ $L_0$ selection with Hard Concrete gates can produce a sparse, calibrated datase
 the method and a future application of it, rather than results this paper presents.
 
 The empirical question is whether informed selection earns its added complexity. We ask three
-things. First, does $L_0$ selection reproduce the targets more accurately than random sampling,
-survey-weight sampling, and combinatorial optimisation at the same record budget? Second, does the retained sample generalize, in the sense that it also
-matches targets held out of the fit? Third, does the framework give usable control over the size of
-the output, the geographic level it focuses on, and the magnitude of the fitted weights?
+things. First, when does informed $L_0$ selection reproduce the targets more accurately than random
+sampling, survey-weight sampling, and the convex $L_1$ alternative at the same record budget, and how
+does that comparison change as the budget tightens? Second, does the retained sample generalize, in the sense that it also matches
+whole target families held out of the fit? Third, does the framework give usable control over the size
+of the output, the geographic level it focuses on, and the concentration of the fitted weights, and
+what does tightening the concentration control cost in accuracy? The answers are regime-dependent:
+informed selection's accuracy advantage over the baselines concentrates at small budgets, while its
+control over size, geography, and weight concentration is what distinguishes it at the larger budgets at
+which a dataset is shipped.
 
 The rest of the paper follows that structure. Section~\ref{sec:background} places the work in the
 literature on spatial microsimulation, survey calibration, and sparse selection.

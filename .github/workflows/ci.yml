@@ -19,6 +19,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: PolicyEngine/populace
+          # The proximal L1 solver (method="prox", l1_lambda) is on main as of PR #184.
+          ref: main
           path: populace
 
       - name: Set up uv
@@ -30,7 +32,8 @@ jobs:
 
       - name: Run tests
         working-directory: l0-paper
-        run: uv run --locked pytest
+        # --extra viz so the end-to-end test exercises the figure renderers too.
+        run: uv run --locked --extra viz pytest
 
       - name: Run Ruff
         working-directory: l0-paper

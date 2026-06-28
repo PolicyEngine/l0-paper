@@ -22,6 +22,7 @@ condition A's retained count, the two are compared at a matched record budget.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -84,6 +85,7 @@ def run_l0(
     budget_iters: int = 10,
     target_loss_weights: np.ndarray | None = None,
     target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
+    progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> RunResult:
     """Condition A: informed L0 sampling with Hard-Concrete gates at a budget.
 
@@ -107,6 +109,7 @@ def run_l0(
         seed=seed,
         target_loss_weights=target_loss_weights,
         target_loss_cap=target_loss_cap,
+        progress_callback=progress_callback,
     )
     runtime = time.perf_counter() - start
     weights = np.asarray(result.weights, dtype=np.float64)
@@ -138,6 +141,126 @@ def run_l0(
         seed=seed,
         options=options,
         calibration_result=result,
+        sampling=None,
+    )
+
+
+def run_l1(
+    frame,
+    fit_targets: TargetSet,
+    *,
+    weight_entity: str = "household",
+    target_records: int,
+    seed: int = 0,
+    epochs: int = DEFAULT_EPOCHS,
+    learning_rate: float = DEFAULT_LEARNING_RATE,
+    mass: str = "conserve",
+    max_weight_ratio: float | None = None,
+    l1_lambda_bracket: tuple[float, float] = (1e-3, 1e2),
+    budget_iters: int = 10,
+    target_loss_weights: np.ndarray | None = None,
+    target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
+) -> RunResult:
+    """Condition D: informed L1 sampling -- proximal (soft-threshold) selection.
+
+    The convex-sparse analog of :func:`run_l0`: the *same* calibrator with
+    ``method="prox"`` and an L1 penalty drives low-pull records to exact zero,
+    jointly selecting and weighting a sparse subset. An outer bisection on
+    ``log10(l1_lambda)`` hits the requested record count -- a larger ``l1_lambda``
+    retains fewer records (monotone) -- mirroring the L0 budget search so the two
+    sparse methods are compared at a matched budget.
+    """
+    start = time.perf_counter()
+
+    def _fit(l1_lambda: float):
+        try:
+            return calibrate(
+                frame,
+                fit_targets,
+                weight_entity=weight_entity,
+                method="prox",
+                epochs=epochs,
+                learning_rate=learning_rate,
+                mass=mass,
+                max_weight_ratio=max_weight_ratio,
+                l1_lambda=l1_lambda,
+                seed=seed,
+                target_loss_weights=target_loss_weights,
+                target_loss_cap=target_loss_cap,
+            )
+        except ValueError as exc:
+            # l1_lambda large enough to zero every weight: report as zero survivors
+            # so the search backs the penalty off. Other ValueErrors are genuine
+            # input/solver failures and should stop the sweep loudly.
+            if "L1 penalty zeroed every weight" not in str(exc):
+                raise
+            return None
+
+    if len(l1_lambda_bracket) != 2:
+        raise ValueError("l1_lambda_bracket must contain exactly two positive bounds.")
+    bracket = tuple(float(x) for x in l1_lambda_bracket)
+    if bracket[0] <= 0 or bracket[1] <= 0:
+        raise ValueError("l1_lambda_bracket bounds must be positive.")
+    if bracket[0] > bracket[1]:
+        raise ValueError("l1_lambda_bracket lower bound must be <= upper bound.")
+
+    log_lo = float(np.log10(bracket[0]))
+    log_hi = float(np.log10(bracket[1]))
+    best = None
+    best_gap = None
+    chosen_l1 = bracket[0]
+    for _ in range(budget_iters):
+        mid = (log_lo + log_hi) / 2.0
+        l1_lambda = float(10.0**mid)
+        result = _fit(l1_lambda)
+        n_selected = 0 if result is None else int(result.n_nonzero)
+        if result is not None:
+            gap = abs(n_selected - target_records)
+            if best is None or gap < best_gap:
+                best, best_gap, chosen_l1 = result, gap, l1_lambda
+        if n_selected > target_records:
+            log_lo = mid  # too many records retained -> raise the penalty
+        else:
+            log_hi = mid  # too few (or all zeroed) -> lower the penalty
+    if best is None:
+        # Nothing in the bracket fit without zeroing every weight; fall back to the
+        # smallest penalty, which retains the most records.
+        chosen_l1 = bracket[0]
+        best = _fit(chosen_l1)
+        if best is None:
+            raise ValueError(
+                "L1 lambda bracket zeroed every weight even at the lower bound "
+                f"{chosen_l1:g}; widen the bracket downward or lower the learning rate."
+            )
+    runtime = time.perf_counter() - start
+
+    weights = np.asarray(best.weights, dtype=np.float64)
+    options = dict(best.options)
+    options.update(
+        {
+            "l1_lambda": chosen_l1,
+            "l1_lambda_bracket": list(bracket),
+            "budget_iters": budget_iters,
+            "target_loss_cap": target_loss_cap,
+        }
+    )
+    return RunResult(
+        method="informed_l1",
+        weight_entity=weight_entity,
+        weights=weights,
+        initial_weights=np.asarray(best.initial_weights, dtype=np.float64),
+        n_records=weights.size,
+        n_selected=int(best.n_nonzero),
+        l0_lambda=0.0,
+        l2_lambda=0.0,
+        max_weight_ratio=max_weight_ratio,
+        loss_trajectory=np.asarray(best.loss_trajectory, dtype=np.float64),
+        initial_loss=float(best.initial_loss),
+        final_loss=float(best.final_loss),
+        runtime_s=runtime,
+        seed=seed,
+        options=options,
+        calibration_result=best,
         sampling=None,
     )
 

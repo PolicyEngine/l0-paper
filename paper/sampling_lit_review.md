@@ -1,6 +1,6 @@
-# Combinatorial optimization, random sampling, and weighted sampling for microdata reduction and small-area calibration: a focused review
+# Combinatorial optimization, raking, random sampling, weighted sampling, and balanced sampling for microdata reduction and small-area calibration: a focused review
 
-*Prepared for the L0-regularized microsimulation calibration paper. These three methods are the ones with a genuine track record of reducing or constructing a microdata file by selecting records to match known totals, which is why they belong in the empirical comparison. Each section gives the formal definition and grounding work first, then traces how the method has been used for microdata calibration, dataset reduction, and small-area (local) subsampling. A note on scope: "applicable with prior domain use" is not the same as "the only mathematically valid options" — recombination, NNLS, and balanced sampling remain valid imports, and the L0 gates are one too, but none has been applied to microdata-file reduction before, so they sit better as contributions than as established baselines.*
+*Prepared for the L0-regularized microsimulation calibration paper. These methods are the ones with a genuine track record of reducing or constructing a microdata file by selecting records to match known totals, or of calibrating a fixed sample before/after reduction. Each section gives the formal definition and grounding work first, then traces how the method has been used for microdata calibration, dataset reduction, and small-area (local) subsampling. A note on scope: "applicable with prior domain use" is not the same as "directly applicable to the full production target surface" — classical raking is cleanest on categorical margins, balanced sampling is cleanest with linear balancing variables and fixed inclusion probabilities, and combinatorial optimisation is usually too slow at full scale. They still belong in the literature review even when not all belong in the headline empirical comparison.*
 
 ---
 
@@ -66,15 +66,56 @@ On the calibration axis, the important structural point is that weighted samplin
 
 ---
 
-## Synthesis: how the three sit on your axes
+## 4. Raking before or after sampling
 
-All three reduce the file by selecting actual records, and they differ in where the calibration enters:
+### Formal definition
+
+Iterative proportional fitting (IPF), or raking, adjusts weights multiplicatively until a set of categorical margins matches published totals. In the reduction setting it can enter in two orders. **Sampling then raking** first draws a manageable set of records and then rakes only that selected file. **Raking then sampling** first rakes the full file and then integerises the fitted fractional weights through PPS sampling or TRS. Iterative proportional updating extends the same logic to simultaneous household and person margins.
+
+### Use in microdata calibration and reduction
+
+These are the classical analogues to the gradient-based baselines. Sampling then raking is the published-practice version of "random sample, then reweight"; raking then TRS/PPS is the published-practice version of "dense calibrate, then sample." The limitation is scope. Classical raking is built for non-negative categorical margins and can struggle when the target surface mixes counts, dollar totals, overlapping target families, hierarchy, and near-zero denominators. Generalized raking or entropy calibration can extend the idea to arbitrary linear constraints, but at that point the method is no longer simple IPF; it is a broader calibration optimizer.
+
+For this paper, raking-based baselines are strongest as a robustness check on a raking-compatible categorical subset. They should be cited in the main literature review, but the full production target surface is better matched by the gradient calibration baselines unless a generalized calibration implementation is added explicitly.
+
+---
+
+## 5. Balanced sampling
+
+### Formal definition
+
+Balanced sampling chooses a fixed-size sample whose design-weighted auxiliary totals match known totals exactly or nearly exactly. The cube method of Deville and Tillé (2004) is the standard algorithm: it searches over inclusion indicators while preserving balancing equations, then uses the resulting sample and inclusion probabilities for estimation.
+
+### Use in survey sampling and relation to L0
+
+Balanced sampling is important because it moves target preservation into the sample design itself. That makes it conceptually close to L0 selection: both ask the selection step, not only the post-selection weights, to respect targets. The difference is that balanced sampling usually starts from fixed inclusion probabilities and balancing variables, whereas this paper fits positive weights and sparsity gates jointly against a mixed calibration objective. It is therefore a published neighbour and possible future baseline, but not a drop-in replacement for L0 on the full mixed target surface.
+
+---
+
+## 6. Convex sparse calibration
+
+### Formal definition
+
+Convex sparse calibration keeps the weight-fitting formulation but adds a sparsity surrogate such as an L1 penalty on fitted weights. With proximal updates, small weights can be driven exactly to zero, yielding a sparse weighted file without discrete search. In this paper's implementation, the penalty can be tuned by bisection to match the retained-record count achieved by L0.
+
+### Relation to L0
+
+This is the closest tractable ablation to L0 on the full mixed target surface. It uses the same calibration matrix, positivity restrictions, optimizer family, and scoring loss, but swaps the non-convex Hard Concrete gate for a convex sparsity surrogate. It is not a classical spatial-microsimulation baseline in the same sense as IPF/TRS or combinatorial optimisation, but it answers a methodological question a reviewer may ask: whether any sparse joint optimizer would work, or whether the expected-L0 gate is doing something distinct.
+
+---
+
+## Synthesis: how the methods sit on your axes
+
+The methods reduce the file by selecting actual records, and they differ in where the calibration enters:
 
 - **Combinatorial optimisation** targets the totals at the moment of selection — it is calibration-by-selection. It returns integer weights, is stochastic across runs, is the slowest of the three, and reproduces the constrained variables well but the unconstrained distribution less so. It is the discrete, gradient-free sibling of your L0 method, and the most informative non-trivial baseline.
 - **Random sampling** preserves the conditional distribution in expectation but ignores the totals, which it can only recover through a post-hoc calibration. It is the fastest and the floor against which the others must justify themselves; the data-reduction field treats beating it as the genuine test.
 - **Weighted sampling (integerisation)** bridges the two: by sampling proportional to calibration weights it approximately preserves both the calibrated totals and the distribution, and TRS fixes the size exactly. It assumes a prior calibration, so it is "calibrate, then reduce."
+- **Raking before/after sampling** supplies the classical version of the two gradient baselines: sampling then raking, and raking then integerisation. It is most defensible on categorical margins, not on the full mixed production surface.
+- **Balanced sampling** is target-aware sample design. It is conceptually close to L0's selection step but normally assumes fixed inclusion probabilities and balancing variables rather than jointly fitting positive weights and sparsity gates.
+- **Convex sparse calibration** is a tractable full-surface ablation. It can use the same loss as L0, but the sparsity parameter controls shrinkage as well as record count.
 
-For your stated objective — reproduce the totals and, through them, preserve the conditional distribution — the three span the design space cleanly: CO pursues both at selection, weighted sampling pursues both conditional on a calibration step, and random sampling is the distribution-only floor. The experiment that discriminates among them, and that frames your contribution, is to sweep the retained size k and plot calibration error against a held-out distributional fidelity measure computed on cross-tabulations you deliberately did not calibrate to. That second axis is what separates "matched the totals" from "preserved the distribution," and it is the question your paper is really testing — with your L0 gates and CO as the methods that pursue both, and random and weighted sampling as the floor and the calibrate-then-reduce reference respectively.
+The literature review should present the whole option space, then narrow it using the constraints of the Populace problem. Classical IPF/raking and raking-then-TRS are highly relevant for categorical margins, but the full production surface mixes count and dollar targets, overlapping families, hierarchy, and near-zero cells. Balanced sampling is relevant to target-aware sample design, but assumes a cleaner design-based balancing setup than this optimizer uses. Combinatorial optimisation is the closest historical target-informed selection method, but full-scale discrete search is unlikely to be tractable. The empirical comparison can therefore be framed as the tractable full-surface subset: L0, convex L1 ablation, random sample then gradient reweight, and dense gradient calibration then integerisation. The core figure is the retained-record frontier against the unpenalized calibration loss.
 
 ---
 
@@ -109,6 +150,11 @@ For your stated objective — reproduce the totals and, through them, preserve t
 - Lovelace, R. & Ballas, D. (2013). 'Truncate, replicate, sample': a method for creating integer weights for spatial microsimulation. *Computers, Environment and Urban Systems* 41, 1–11. **[verified]** arXiv:1303.5228 ; code https://github.com/Robinlovelace/IPF-performance-testing
 - Barthelemy, J. & Toint, P.L. (2013). Synthetic population generation without a sample. *Transportation Science* 47(2), 266–279.
 - Lovelace, R. & Dumont, M. (2016). *Spatial Microsimulation with R*. CRC Press.
+
+### Raking and balanced sampling
+- Deming, W.E. & Stephan, F.F. (1940). On a least squares adjustment of a sampled frequency table when the expected marginal totals are known. *Annals of Mathematical Statistics* 11(4), 427–444.
+- Ireland, C.T. & Kullback, S. (1968). Contingency tables with given marginals. *Biometrika* 55(1), 179–188.
+- Deville, J.-C. & Tillé, Y. (2004). Efficient balanced sampling: The cube method. *Biometrika* 91(4), 893–912.
 
 ### Software
 - R `simPop` — Templ, Meindl, Kowarik & Dupriez (2017), *J. Statistical Software* 79(10): synthetic populations via IPF, simulated annealing, and model-based methods.

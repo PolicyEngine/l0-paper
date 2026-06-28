@@ -10,8 +10,7 @@ script adds analyst-friendly artifacts next to them:
 
 Example
 -------
-    uv run python experiments/summarize_run.py \
-        experiments/runs/full-20k-cbo-state-tax-holdout
+    uv run l0 summarize runs/full-20k-cbo-state-tax-holdout
 """
 
 from __future__ import annotations

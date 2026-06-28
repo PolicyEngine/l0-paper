@@ -3,26 +3,55 @@
 
 \subsection{What the sampling comparison establishes}
 
-The comparison against random sampling is the core test. If informed $L_0$ selection reaches lower
-out-of-sample error than random selection at the same record budget, then the gates are doing useful
-work, because they spend the budget on records the targets constrain. If the two methods are close,
-the added machinery is harder to justify on accuracy grounds, and the case for the method rests on
-its controls instead. Reporting out-of-sample error keeps that distinction honest, since a method can
-always match the targets it was fit to more tightly than a method that was not.
+The comparison against the matched-budget baselines turns on the record budget, and on which error
+statistic is read. Under aggressive compression, where the budget is too small for a random draw to span
+the target system, informed $L_0$ selection holds the lowest error because the gates spend the budget on
+the records the targets constrain. As the budget grows the methods converge: on the headline median the
+edge passes to random + reweight once almost any subset can be reweighted to fit (near 5{,}000 records
+here), while on the tail-sensitive mean informed $L_0$ stays ahead at every budget, because it removes the
+seed-to-seed instability that swings a small random or survey draw's mean by thousands of per cent
+(Section~\ref{sec:results}). The result is graceful degradation under compression rather than a blanket
+accuracy win, and the budget at which the median crossover happens is itself a finding. Past it the case
+for informed $L_0$ rests on its controls, on its near-zero generalization gap, and on the tail it keeps
+bounded, rather than on a median accuracy gap. It removes the risk of a poor random draw and sets the
+dataset size, the geographic emphasis, and the weight concentration through explicit parameters in one
+optimization. That control matters most in the build-big-then-prune setting the method is designed for,
+where a pipeline assembles a candidate universe far larger than it can ship and must reduce it to a fixed
+budget under subnational calibration targets; this study tests the national and state surface, and the
+subnational case is left to future work. Reporting out-of-sample error on held-out families keeps the
+comparison honest, since any method matches the targets it was fit to more tightly than ones it never saw.
+
+The convex $L_1$ arm sharpens the contrast. $L_1$ pursues the same target-informed sparse selection, but
+through a single penalty that must both decide which records to drop and how much to shrink the survivors. Forcing roughly two thousand of seventy-five thousand records to survive demands a
+large penalty, which soft-thresholds the retained weights toward zero and collapses the calibration fit:
+its out-of-sample median ARE is pinned near 100\% at the tightest budgets and its mean runs to several tens
+of thousands of per cent, recovering toward informed $L_0$ only once the budget is loose enough that little
+shrinkage is needed (Figure~\ref{fig:budget_frontier}). Informed $L_0$ avoids this because the Hard
+Concrete gate and the fitted weight are separate variables: the gate decides membership and the weight is
+free to take whatever positive value the targets require. Decoupling selection from shrinkage is what lets
+$L_0$ degrade gracefully where the convex relaxation does not, and it is the core of the $L_0$-versus-$L_1$
+comparison. $L_1$ is more stable to optimize and can be the better choice where sparsity is not forced
+hard; the case for $L_0$ here rests on the joint selection-and-weighting framing and the explicit control
+over the retained count, not on a claim that it is the most accurate sparse method in every setting.
 
 \subsection{What the controls establish}
 
 The second contribution is operational: the same framework produces datasets of different sizes by
-changing one penalty, focuses on a geographic level by weighting its targets, and bounds weight
-magnitudes by changing another penalty. A random-sampling baseline can also produce a dataset of a
-chosen size, but it cannot make the choice of records respond to the targets, and it controls weight
-magnitudes only through the reweighting step. The value here is that size, geographic focus, and
-weight stability are set through explicit parameters in one optimization rather than through separate
-heuristics.
+changing the $L_0$ penalty, focuses on a geographic level by weighting its targets, and shapes the
+weight distribution through two concentration controls, a soft $L_2$ penalty and a hard per-record cap.
+We treat the last of these as a measured frontier rather than a fixed setting: sweeping the $L_2$ penalty
+traces what tightening concentration (raising the effective sample size and lowering the largest weights)
+costs in calibration accuracy, so an operator can choose a point on that trade-off rather than accept
+whatever concentration the unconstrained fit produces. A random-sampling baseline
+can also produce a dataset of a chosen size, but it cannot make the choice of records respond to the
+targets, and it controls concentration only through the reweighting step. The value here is that size,
+geographic focus, and weight stability are set through explicit parameters in one optimization rather
+than through separate heuristics.
 
 \subsection{Trade-offs and limitations}
 
-The method does not remove modelling judgment, and several choices stay consequential.
+The method does not remove modelling judgment, and several choices stay consequential; the optimizer's
+hyperparameters are one such choice, reported in full in Appendix~\ref{app:hyperparameters}.
 
 \subsubsection{Target selection}
 
@@ -38,25 +67,50 @@ records matters. When the targets are few and broad, a random draw may already c
 needed to match them, and the advantage of informed selection narrows. The paper reports the regimes
 it tests and does not extrapolate beyond them.
 
-\subsubsection{Relation to convex sparse methods}
+\subsubsection{Weight concentration and effective sample size}
 
-$L_0$ with Hard Concrete is one way to obtain a sparse, positively weighted sample. Convex sparse
-penalties such as $L_1$ are another, and they can be more stable to optimize. The case for the $L_0$
-approach here rests on the joint selection-and-weighting framing and the explicit control over the
-retained count, not on a claim that it is the most accurate sparse method in every setting. A
-comparison with convex sparse methods is a natural extension.
+Matching a demanding fiscal target system from a uniform prior can require the optimizer to load a
+large share of the population onto a small number of records, so the effective sample size can fall
+well below the retained-record count even when the calibration fit is good. That concentration is
+acceptable for the aggregates the dataset is calibrated to, but it is a real cost for any downstream
+estimand that is sensitive to the weight distribution. We expose the cost rather than hide it: the
+effective sample size and the largest weights are reported as primary results, and the $L_2$ sweep
+shows how much accuracy raising the effective sample size costs. That cost depends on the budget. At
+40{,}000 records $\lambda_{L_2}=10^{-4}$ raises the effective sample size by about seventy per cent (from
+3{,}803 to 6{,}482) for under two points of median accuracy, while at the tightest budget it inflates the
+error tail instead. The penalty is worth applying at large budgets and not at tight ones, which is why we
+report the un-penalised frontier as the accuracy result and the penalty as a separate operability setting.
 
-\subsubsection{Hyperparameter sensitivity}
+\subsubsection{Generalization across target families}
 
-The method has parameters. The gate temperature, the initialization, and the two penalties all
-affect the path the optimizer takes. The configuration is reported in
-Appendix~\ref{app:hyperparameters} and is part of the method specification rather than a detail.
+Holding out whole families is a deliberately hard test of generalization, harder than holding out a
+random subset of targets, and it need not flatter any method. On the fixed holdout, informed $L_0$
+generalizes with almost no gap between its in-sample and out-of-sample median error, while random +
+reweight fits the in-sample targets far more tightly but pays about a thirty-point gap on families it
+never saw; informed selection trades in-sample fit for a sample that carries over. The stricter family
+rotation is less forgiving. On the target-weighted mean across folds the ranking favours the baselines,
+but the gap is confined to the fold that holds out the dominant \texttt{irs\_soi} family: with 71\% of the
+targets removed, every method's mean is dominated by a few near-zero-denominator targets, and the fold
+medians stay close. We read the rotation as a limitation to be reported per fold rather than as a single
+headline number, and widening the held-out surface further is left to future work.
+
+\subsubsection{Degenerate targets and the choice of error metric}
+
+A handful of targets have denominators small enough that one record's placement swings their relative
+error past 100 per cent, which inflates the mean absolute relative error without reflecting calibration
+quality. Rather than winsorize or trim the distribution by an arbitrary cutoff, we lead with the median,
+name the affected targets in a one-time audit, and report the mean recomputed with exactly those named
+targets removed. This keeps the metric honest and the dropped targets visible and attributable, but it
+does mean the headline accuracy figure depends on a stated, auditable choice rather than on the raw mean
+alone.
 
 \subsubsection{Computational cost}
 
 Building the calibration matrix and running gradient-based optimization cost more than a small
-classical calibration. That cost is justified only when the problem requires it, which is why the
-comparison against a simpler random-sampling baseline matters.
+classical calibration, and informed $L_0$ adds the eight-step budget bisection on top of a single fit;
+Appendix~\ref{app:cost} reports the runtime each method reaches against the accuracy it buys. That cost
+is justified only when the problem requires it, which is why the comparison against a simpler
+random-sampling baseline matters.
 
 \subsection{Generalizability}
 

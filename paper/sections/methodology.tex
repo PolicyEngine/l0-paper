@@ -4,46 +4,94 @@
 This section describes the calibration method that selects and weights records, and then the design
 of the experiment that evaluates the method as a sampler.
 
-\subsection{Selection and weighting as one optimization}
+\subsection{The shared calibrator}
 
-The calibration matrix $\mathbf{M} \in \mathbb{R}^{m \times n}$ maps $n$ candidate records to $m$
-targets. Entry $M_{ji}$ is the contribution of candidate $i$ to target $j$: an indicator or count
-for count targets, and a simulated tax or benefit value for dollar targets. The matrix is built from
+The calibration matrix $\mathbf{M} \in \R^{m \times n}$ maps $n$ candidate records to $m$ targets.
+Entry $M_{ji}$ is the contribution of candidate $i$ to target $j$: an indicator or count for count
+targets, and a simulated tax or benefit value for dollar targets. The matrix is built from
 \policyengine{} simulations evaluated under the policy rules that apply to each record's assigned
-geography, and is stored in sparse form.
-
-Given $\mathbf{M}$, the target vector $\mathbf{t}$, and a weight vector $\mathbf{w} \in \mathbb{R}^n$,
-the optimizer minimizes
+geography, and is stored in sparse form. Given a weight vector $\mathbf{w} \in \R^n$, the estimate of
+target $j$ is
 \begin{equation}
-    \mathcal{L}(\mathbf{w}, \boldsymbol{\alpha}) =
-    \frac{1}{m} \sum_{j=1}^{m}
-    \left(\frac{\hat{t}_j - t_j}{|t_j|}\right)^2 +
-    \lambda_{L_0} \sum_{i=1}^{n} \bar{z}_i +
-    \lambda_{L_2} \|\mathbf{w}\|_2^2,
-    \label{eq:loss}
-\end{equation}
-where
-\begin{equation}
-    \hat{t}_j = \sum_{i=1}^{n} M_{ji} w_i z_i.
+    \hat{t}_j = \sum_{i=1}^{n} M_{ji}\, w_i.
     \label{eq:estimate}
 \end{equation}
-The weights are parameterized in log space so the fitted weights stay positive. The gate $z_i$ is a
-Hard Concrete random variable with expected activation $\bar{z}_i$ \citep{louizos2018}. This is the
-production optimizer that jointly fits positive log-weights and gates, rather than a configuration
-that applies a gate on top of a separately fitted weight.
 
-Read as a sampler, the three terms have distinct jobs. The first is a relative calibration loss, so
-a one per cent error on a small target and on a large target count the same; it keeps the retained
-sample faithful to the targets. The second penalizes the expected number of open gates, which is the
-size of the retained sample, so $\lambda_{L_0}$ sets how aggressively the optimizer prunes records.
-The third penalizes the squared weights, so $\lambda_{L_2}$ bounds how much population mass any
-single retained record can carry. The last two terms matter separately, because an $L_0$ penalty on
-its own can reach a sparse solution that is still unusable: the optimizer could match the targets by
-placing large weights on a few retained records. The two penalties therefore act on different
-properties of the solution, $\lambda_{L_0}$ on how many records remain and $\lambda_{L_2}$ on how
-concentrated their weights become, and having both as separate knobs lets the pipeline trade off
-calibration fit, sample size, and weight stability. Appendix~\ref{app:hyperparameters} lists the full
-configuration, and Algorithm~\ref{alg:l0} gives the optimization loop.
+The four methods compared in this study fit weights with the same calibrator, the \texttt{calibrate}
+routine in \populace{}. It minimizes a capped, weighted mean absolute percentage error (capped weighted
+MAPE) of the estimates against the targets,
+\begin{equation}
+    \mathcal{L}_{\mathrm{cal}}(\mathbf{w}) =
+    \frac{\sum_{j=1}^{m} \omega_j \min\!\left(\left|\dfrac{\hat{t}_j - t_j}{s_j}\right|,\, c\right)}
+         {\sum_{j=1}^{m} \omega_j},
+    \label{eq:loss_cal}
+\end{equation}
+where $s_j = \max(|t_j|, 1)$ scales each target by its own magnitude, with a floor of one unit so a
+zero-valued target stays well defined; $c$ caps the contribution of any single hard-to-fit target, so
+one badly conditioned target cannot dominate the gradient, and is set to the production value $c = 1$ in
+the runs reported here (Appendix~\ref{app:loss_cap} contrasts the looser $c = 10$); and $\omega_j$ are
+per-target weights, normalised by their sum so only their relative magnitudes matter. The error is
+relative, so a one per cent miss on a small target and on a large one count the same. The weights are
+parameterized in log space, $w_i = \exp(\theta_i)$, so the fitted weights stay positive; an Adam
+optimizer \citep{kingma2015} implemented in PyTorch \citep{pytorch2019} minimizes the loss, and the
+total weight is held to the input population. On a fixed set of
+records this calibrator answers a calibration question: it finds weights that match the targets. The
+random and survey-weight baselines use it unchanged; informed $L_0$ and informed $L_1$ extend it with a
+selection term.
+
+The per-target weights $\omega_j$ in the runs reported here follow \populace{}'s production US-fiscal
+weighting, computed through the same code path the production US build uses rather than a separate
+reimplementation. The weighting is built in four steps. Each target is first assigned to one of two
+value bases from its measure metadata: a count basis (indicator, enrollment, recipient, and
+return-count measures) or an amount basis (dollar measures). Within a basis, a target's raw
+weight is proportional to $\max(|t_j|, 1)^{1/2}$, the square root of its own magnitude, so a larger
+aggregate carries more weight but sublinearly (a target a hundred times larger receives about ten times
+the weight), and these raw weights are normalised to mean one inside each basis. The two bases are then
+rescaled to contribute equal total weight, so the far more numerous dollar cells do not swamp the count
+targets. A final step sets the mean weight to one. Because the loss divides by $\sum_j \omega_j$, only
+the relative weights enter the objective and their absolute scale does not.
+
+\subsection{Selection and weighting as one optimization in our proposed method}
+
+Informed $L_0$ sampling adds two terms to the shared calibrator that turn weight fitting into record
+selection. Each candidate $i$ carries a Hard Concrete gate $z_i \in [0, 1]$ \citep{louizos2018}, the
+gated estimate becomes $\hat{t}_j = \sum_i M_{ji} w_i z_i$, and the optimizer minimizes
+\begin{equation}
+    \mathcal{L}(\mathbf{w}, \boldsymbol{\alpha}) =
+    \mathcal{L}_{\mathrm{cal}}(\mathbf{w}, \mathbf{z}) +
+    \lambda_{L_0} \sum_{i=1}^{n} \bar{z}_i +
+    \lambda_{L_2} \frac{1}{n} \sum_{i=1}^{n} \left(\frac{w_i}{w_{0,i}}\right)^2.
+    \label{eq:loss}
+\end{equation}
+The first term is the capped weighted MAPE of Equation~\ref{eq:loss_cal}, now evaluated on the gated
+weights $w_i z_i$. The second term is the $L_0$ penalty and sets the sample size: $\bar{z}_i = \Pr(z_i \neq 0)$ is the
+expected activation of gate $i$ (Equation~\ref{eq:l0penalty}), so $\sum_i \bar{z}_i$ is the expected number of open gates, the
+expected retained-record count, and $\lambda_{L_0}$ sets how aggressively the optimizer prunes. Rather
+than set $\lambda_{L_0}$ by hand, each build tunes it by an outer bisection to a requested record count
+(Appendix~\ref{app:presets}). The third term is a soft concentration penalty: $\lambda_{L_2}$ multiplies the mean squared ratio of each
+fitted weight to its initial weight $w_{0,i}$, which discourages the optimizer from carrying the fit on
+a few heavily inflated records. It applies to informed $L_0$ only; the random and survey-weight baselines
+run the shared calibrator without any selection or concentration term.
+
+Read as a sampler, the calibration term keeps the retained sample faithful to the targets, the $L_0$
+penalty sets the sample size, and the $L_2$ penalty governs weight concentration. The concentration
+term matters because an $L_0$ penalty on its own can reach a sparse solution that is still unusable: the
+optimizer can match the targets by placing very large weights on a few retained records. Both
+concentration controls act on the ratio of each fitted weight to its initial weight, $w_i / w_{0,i}$.
+The $L_2$ term is a soft penalty on the mean square of that ratio that discourages large inflations
+smoothly, and it is the control we sweep to trace the accuracy-concentration trade-off.
+\texttt{max\_weight\_ratio} is a hard per-record cap on the same ratio: no fitted weight may exceed a
+fixed multiple of that record's initial weight, clamped after every optimizer step. The soft penalty
+shapes the whole weight distribution during optimization; the cap bounds the single largest weight.
+Size and concentration are therefore set by separate controls: $\lambda_{L_0}$ fixes how many records
+remain, and the $L_2$ penalty and \texttt{max\_weight\_ratio} fix how concentrated their weights may
+become. The headline runs leave the cap off and set $\lambda_{L_2}=0$, so the reported accuracy frontier
+is the pure-calibration result; Section~\ref{sec:results-controls} reports $\lambda_{L_2}=10^{-4}$ beside
+it as an operability contrast, tracing what the penalty buys in effective sample size against what it
+costs in fit. Tightening either control bounds how much population a single record can carry, at some
+cost to calibration fit. Appendix~\ref{app:hyperparameters} lists the
+full configuration, and Appendix~\ref{app:algorithm} gives the optimization loop as
+Algorithm~\ref{alg:l0}.
 
 The gates and the weights are learned together: the gate decides whether a record is in the sample,
 and the weight decides how much it counts. Because both are fit against the same calibration loss,
@@ -62,47 +110,138 @@ step, which matters operationally but is not the object of the experiment.
 \label{sec:experiment_design}
 
 The experiment evaluates whether informed selection produces a better dataset than the alternative
-samplers at the same record budget. From one candidate universe and one target set, we compare four
-methods, which span where calibration enters the reduction (Section~\ref{sec:reduction_methods}):
+samplers at the same record budget. The literature offers more possible comparators than can be run
+cleanly on the full mixed target surface: raking-based workflows are natural on categorical margins,
+balanced sampling is designed for fixed balancing variables, and combinatorial optimisation is
+discrete and costly at production scale. The headline comparison therefore keeps the candidate
+universe, target surface, positivity restriction, and calibration loss fixed, and varies only the way
+records are selected. From one candidate universe and one target set, we compare four samplers at a
+matched record budget: informed $L_0$ selection, its convex $L_1$ analog, and two classical reduction
+baselines that bracket where calibration enters (Section~\ref{sec:reduction_methods}):
 
 \begin{itemize}
-    \item \textbf{Informed $L_0$ sampling with Hard Concrete gates.} The method above selects records
-    and fits weights jointly at a chosen budget, set through $\lambda_{L_0}$.
+    \item \textbf{Informed $L_0$ sampling with Hard Concrete gates.} The shared calibrator with the
+    gate and concentration terms above selects records and fits their weights jointly at a chosen
+    budget, set through $\lambda_{L_0}$.
+    \item \textbf{Informed $L_1$ selection.} The same shared calibrator with the Hard Concrete $L_0$ term
+    replaced by a convex $L_1$ penalty on the weights, solved by a proximal (iterative soft-thresholding)
+    step that drives unneeded weights to exact zeros (Section~\ref{sec:l1_background}). As with informed
+    $L_0$, an outer bisection tunes the penalty $\lambda_{L_1}$ to the requested record count. It is the
+    joint analog of informed $L_0$---selection and weighting share one objective with no post-selection
+    reweighting---so a single penalty must serve both, which is the property the comparison isolates.
     \item \textbf{Random sampling with gradient-descent reweighting.} A random subset of the candidate
-    universe of the same size is drawn, and its weights are fit to the same targets by gradient
-    descent, using the same calibration loss without the gate term. This is the reduce-first,
-    calibrate-after baseline.
-    \item \textbf{Survey-weight sampling.} The full universe is first reweighted to the targets by
-    gradient descent, and records are then sampled with probability proportional to those weights
-    (integerisation) down to the budget. This is the calibrate-then-reduce baseline.
-    \item \textbf{Combinatorial optimisation.} Records are selected by simulated annealing to minimize
-    aggregate target error directly, without gradients. This is the discrete, gradient-free
-    counterpart to informed $L_0$ selection. \tbc[search configuration and cooling schedule]
+    universe of the same size is drawn, then the shared calibrator fits its weights to the same targets
+    without the gate or concentration terms. This is the reduce-first, calibrate-after baseline.
+    \item \textbf{Survey-weight sampling (Hansen--Hurwitz).} The shared calibrator first reweights the
+    full universe to the targets, and records are then drawn with probability proportional to those
+    weights, with replacement; each of the $n$ draws receives an equal share $W/n$ of the total
+    weight $W$, and repeated draws accumulate on the same record. This is the unbiased Hansen--Hurwitz
+    integerisation \citep{hansen1943} of the dense weights, which preserves their expectation at every
+    budget, and is the calibrate-then-reduce baseline.
 \end{itemize}
 
+This design does not claim that raking, GREG, balanced sampling, or combinatorial optimisation are
+irrelevant in general. They remain the reference methods for simpler margin surfaces, classical
+calibration, target-balanced survey designs, and discrete synthetic-population construction. The
+empirical comparison below focuses on the methods that can be applied to the full Populace target
+surface under the same scoring loss and that were run in the real-data sweep.
+
 Holding the candidate universe and the target set fixed isolates the effect of how records are
-chosen. \tbc[the record budgets compared, for example a target of 100{,}000 retained records]
+chosen. Every method starts from the same candidate frame with its weights reset to a uniform prior, so
+each record's initial weight $w_{0,i}$ is one shared constant. We sweep the retained-record budget across
+2{,}000, 5{,}000, 10{,}000, 20{,}000, and 40{,}000 records,
+from aggressive compression of the candidate universe up to a large fraction of it, and run each budget
+over three calibration seeds (seeds $0$--$2$). Informed $L_0$ sets the achieved budget
+at each grid point through its $\lambda_{L_0}$ bisection, and the baselines are matched to the same
+retained count.
 
 \subsection{Out-of-sample target evaluation}
 \label{sec:oos}
 
-A sampler can match the targets it is fit to and still generalize poorly. To test generalization,
-the design separates the targets used to fit the weights from the targets used to score the result.
-\tbc[the in-sample, out-of-sample, and fully held-out target split, pending a review of the
-evaluation and scoring tools that \populace{} exposes] At a minimum, the comparison reports error
-on a set of targets held out of every method's fit, so the methods are compared on quantities none
-of them optimized.
+A sampler can match the targets it is fit to and still generalize poorly. To test generalization, the
+design separates the targets used to fit the weights from the targets used to score the result, and
+holds out whole target families rather than a random subset of targets. The reason is structural:
+targets within a family nest (a national total is the sum of its state cells), so a random target split
+leaks: a held-out cell is nearly determined by its retained siblings, which would overstate
+generalization. Holding out a whole family removes that leakage.
+
+The fixed holdout comprises the \texttt{cms\_medicaid}, \texttt{usda\_snap}, and \texttt{state\_income\_tax}
+families, 201 targets spanning three domains (Medicaid enrollment and spending, SNAP, and state income
+tax). These families are held out of every method's fit and scored only out-of-sample. Each held-out
+family keeps a related family in the fit, so the test asks each method to reproduce a held-out family
+while a structurally similar family remains in the fit, rather than orphaning a domain entirely
+(Table~\ref{tab:holdout_siblings}). The \texttt{cbo} family is additionally held out as a \populace{}
+validation-only family (forecast and aging projections used as diagnostics rather than contemporaneous
+targets), so it is never fit. Of the 4{,}393 targets in the system, 4{,}187 are used to fit the weights
+and 206 are held out (the 201 contemporaneous targets plus the 5 \texttt{cbo} validation-only targets).
+
+\begin{table}[H]
+\centering
+{\tablefont
+\begin{tabular}{p{0.26\textwidth}p{0.30\textwidth}p{0.30\textwidth}}
+\toprule
+Held-out family & Domain & Related family kept in the fit \\
+\midrule
+\texttt{cms\_medicaid} & Medicaid enrollment and spending & \texttt{cms\_aca}, \texttt{cms\_medicare} (other health-program enrollment) \\
+\texttt{state\_income\_tax} & State income tax & \texttt{irs\_soi} (federal income-tax aggregates) \\
+\texttt{usda\_snap} & SNAP enrollment and spending & \texttt{hhs\_acf\_tanf} (a related means-tested transfer) \\
+\texttt{cbo} & CBO revenue and aging projections & none; validation-only, never fit \\
+\bottomrule
+\end{tabular}
+}
+\caption{The fixed family-level holdout. Each contemporaneous held-out family keeps a structurally
+related family in the fit, so generalization is tested against a similar but unseen family rather than
+an orphaned domain. The \texttt{cbo} family is held out as a validation-only diagnostic.}
+\label{tab:holdout_siblings}
+\tablenote{Family counts are read from the run manifest. The related-family pairing is a property of the
+target system, not of any method.}
+\end{table}
+
+As a stricter robustness check we also rotate whole families through the holdout in a family-grouped
+five-fold design: the families are dealt into five folds balanced by target count, and each fold is held
+out in turn. Because the folds hold out structurally different families rather than independent draws, we
+report them per fold rather than as a single inferential test (Section~\ref{sec:results-generalization});
+the rotation surfaces in particular the fold that holds out the dominant \texttt{irs\_soi} family.
 
 \subsection{Evaluation metrics}
 \label{sec:metrics}
 
-Each run reports:
-\begin{itemize}
-    \item mean, median, and maximum absolute relative error across the scored targets, reported
-    in-sample and out-of-sample;
-    \item the retained-record count and the effective sample size;
-    \item the distribution of fitted weights, including the largest weights;
-    \item runtime.
-\end{itemize}
-Errors are reported by geographic level as well as in aggregate, because a sampler can match national
-totals while missing local ones. Target counts are read from each run's manifest.
+Each run reports the metrics in Table~\ref{tab:metrics} for the scored targets, both in-sample and
+out-of-sample. They fall into two groups: accuracy measures, which ask how closely the weighted
+estimates reproduce the targets, and representativeness measures, which ask at what cost in weight
+concentration and compute that accuracy is bought.
+
+\begin{table}[H]
+\centering
+{\tablefont
+\begin{tabular}{p{0.24\textwidth}p{0.34\textwidth}p{0.30\textwidth}}
+\toprule
+Metric & Definition & Why reported \\
+\midrule
+Median ARE & Median absolute relative error $|\hat{t}_j - t_j| / |t_j|$ over scored targets & Headline accuracy; robust to the near-zero-denominator tail \\
+Mean and max ARE & Mean and maximum of the same per-target errors & Reported alongside the median, flagged as tail-sensitive \\
+Micro vs.\ macro average & Mean over all targets vs.\ mean of the per-family means & The micro mean is dominated by \texttt{irs\_soi} (71\% of targets); the macro mean weights each family equally \\
+Effective sample size & $\mathrm{ESS} = (\sum_i w_i)^2 / \sum_i w_i^2$ and the implied design effect & A sampler can fit the targets while concentrating population mass on a few records, so ESS is a primary result, not a footnote \\
+Retained count & Non-zero record count & Sample size \\
+Max weight & Largest fitted weight & Weight concentration \\
+Runtime & Wall-clock time & Compute cost \\
+\bottomrule
+\end{tabular}
+}
+\caption{Metrics reported for each run, in-sample and out-of-sample. Accuracy is led by the median ARE;
+the effective sample size measures the weight concentration that accuracy is achieved at.}
+\label{tab:metrics}
+\end{table}
+
+Errors are reported by geographic level and by target family as well as in aggregate, because a sampler
+can match national totals while missing local ones, or match one source while missing another.
+
+A small number of targets have denominators so small that a single record can swing their relative error
+past 100 per cent. We identify these structurally rather than by an arbitrary cutoff: target $j$ is
+denominator-degenerate when its value is smaller than its identifiability floor
+$\max_i |M_{ji}|\, w_{0,i}$, the largest contribution any single record makes at its initial weight. For
+such a target the absolute relative error reflects integer placement noise rather than calibration
+quality. Rather than winsorize or trim the error distribution, we name these targets in a one-time
+audit and report a targeted-removal sensitivity (the mean recomputed with exactly those named targets
+dropped) beside the full mean, so the effect of the degenerate targets is visible and attributable.
+Target counts are read from each run's manifest.

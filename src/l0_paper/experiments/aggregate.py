@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Tidy long-format results schema + cross-seed aggregation for the budget sweep.
 
-The sweep (``experiments/run_sweep.py``) writes one **long** CSV -- the single
+The sweep (``l0 sweep``) writes one **long** CSV -- the single
 source of truth -- with one row per atomic measurement:
 
     method, seed, budget_requested, budget_achieved, l2_lambda, holdout_type,
@@ -18,7 +18,7 @@ source of truth -- with one row per atomic measurement:
 
 Keeping everything in one tidy frame means every figure and table is a
 ``filter -> pivot -> aggregate`` away, and the cross-seed statistics
-(confidence intervals, paired tests) live here rather than in plotting code.
+(confidence intervals, paired diagnostics) live here rather than in plotting code.
 
 This module is pure ``numpy`` / ``pandas`` / ``scipy`` -- no plotting deps -- so
 it is import-safe for tests and the sweep.
@@ -226,6 +226,8 @@ TARGET_DIAG_COLUMNS = (
     "geography_level",
     "target_value",
     "achieved_value",
+    "scale",
+    "loss_weight",
     "absolute_relative_error",
     "is_degenerate",
 )
@@ -255,6 +257,8 @@ def target_diagnostic_rows(
             "geography_level": row["geography_level"],
             "target_value": row["target_value"],
             "achieved_value": row["achieved_value"],
+            "scale": row.get("scale"),
+            "loss_weight": row.get("loss_weight"),
             "absolute_relative_error": row["absolute_relative_error"],
             "is_degenerate": bool(row["name"] in degenerate),
         }
@@ -279,8 +283,9 @@ def load_target_diagnostics(path: str | Path) -> pd.DataFrame:
     if "l2_lambda" not in df.columns:
         df["l2_lambda"] = 0.0
     df["l2_lambda"] = pd.to_numeric(df["l2_lambda"], errors="coerce").fillna(0.0)
-    for col in ("target_value", "achieved_value", "absolute_relative_error"):
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+    for col in ("target_value", "achieved_value", "scale", "loss_weight", "absolute_relative_error"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
     df["is_degenerate"] = df["is_degenerate"].astype(bool)
     return df
 
@@ -622,15 +627,17 @@ def paired_method_diff(
     metric: str = "mean_are",
     holdout_type: str = "fixed_family",
     confidence: float = 0.95,
-    min_significance_seeds: int = 3,
+    min_ci_seeds: int = 3,
 ) -> pd.DataFrame:
     """Per budget: paired (same-seed) ``challenger - baseline`` difference + test.
 
     Both methods see the *same* held-out targets at the same seed, so the
     comparison is paired: we difference within seed, then summarise across seeds.
-    ``significant`` is whether the CI of the mean difference excludes zero (and,
-    at least ``min_significance_seeds`` paired seeds are present). A negative
-    ``diff_mean`` means the challenger has the lower error (better).
+    ``ci_excludes_zero`` records whether the CI of the mean difference excludes
+    zero and at least ``min_ci_seeds`` paired seeds are present. It is a
+    descriptive diagnostic of the paired seed differences, not a standalone
+    inferential claim. A negative ``diff_mean`` means the challenger has the lower
+    error (better).
     """
     sub = _overall(df, holdout_type=holdout_type, split=split, metric=metric)
     records: list[dict[str, Any]] = []
@@ -649,7 +656,7 @@ def paired_method_diff(
 
             p_value = float(ttest_rel(paired[challenger], paired[baseline]).pvalue)
         ci_excludes_zero = bool(np.isfinite(lo) and np.isfinite(hi) and (lo > 0 or hi < 0))
-        enough_seeds = paired.shape[0] >= min_significance_seeds
+        enough_seeds = paired.shape[0] >= min_ci_seeds
         records.append(
             {
                 "budget_requested": int(budget),
@@ -662,7 +669,7 @@ def paired_method_diff(
                 "diff_hi": hi,
                 "p_value": p_value,
                 "challenger_better": bool(mean < 0),
-                "significant": bool(enough_seeds and ci_excludes_zero),
+                "ci_excludes_zero": bool(enough_seeds and ci_excludes_zero),
             }
         )
     out = pd.DataFrame(records)

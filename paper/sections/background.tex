@@ -52,9 +52,17 @@ population mass.
 
 Iterative proportional fitting \citep[IPF, or raking;][]{deming1940, ireland1968} adjusts weights
 multiplicatively so that selected margins match published totals. It preserves non-negativity and
-avoids matrix inversion, which makes it a natural choice for count-style margins, but classical IPF
-is built for categorical margins rather than arbitrary linear dollar targets and does not encode a
-large mixed hierarchical system in one pass.
+avoids matrix inversion, which makes it a natural choice for count-style margins. In spatial
+microsimulation and population synthesis, raking is commonly paired with a sampling step in one of two
+orders: draw a sample first and rake that fixed sample, or rake the full file first and integerise the
+fractional weights into a finite population. Iterative proportional updating and related extensions
+handle household and person margins simultaneously \citep{pritchard2012}. These raking-based workflows
+are natural comparators for pruning methods on categorical margin surfaces. They are not direct
+full-surface baselines here: classical IPF is built for non-negative categorical margins, whereas the
+production target surface mixes counts, dollar totals, overlapping families, near-zero targets, and
+hierarchical constraints. Generalized raking or entropy calibration can extend the idea to broader
+linear constraints, but then the method becomes a general calibration optimizer rather than the
+classical IPF workflow.
 
 A third approach treats calibration as an optimization problem to be solved numerically. The two
 methods above are special cases of one problem: \citet{deville1992} define the calibrated weights as
@@ -74,19 +82,29 @@ calibrate PolicyEngine's enhanced CPS in exactly this way.
 These estimators answer a calibration question rather than a sampling one: given a fixed set of
 records, they find weights that match the targets. The method studied here selects records and fits
 weights at the same time, extending the gradient-based calibration just described with explicit
-record selection. A direct head-to-head benchmark of the sampling method against GREG and IPF is left
-to future work; here they serve as the calibration context the sampler is expected to respect.
+record selection. Classical calibration still matters for the comparison set, because it can be
+combined with selection: sampling followed by raking is the classical reduce-then-calibrate analogue
+to random sampling followed by gradient reweighting, while raking followed by integerisation is the
+classical calibrate-then-reduce analogue to sampling from dense calibrated weights.
 
 \subsection{Reducing microdata by selecting records}
 \label{sec:reduction_methods}
 
 Reducing a large candidate dataset to a fixed budget is a sampling problem with a long statistical
 history, and several established methods reduce a microdata file by selecting actual records to match
-known totals. They differ mainly in where calibration enters. We review the three with the clearest
-track record in microdata construction, since they form the comparison set in
-Section~\ref{sec:methodology}, alongside the coreset view from machine learning, where a weighted
-subset is chosen so that a model fit on the subset approximates the fit on the full data
-\citep{feldman2020coresets, bachem2017coresets}.
+known totals. They differ mainly in where calibration enters: before selection, after selection, or
+inside the selection step itself. We review the broad option space because it defines what a reasonable
+analyst might try: random sampling followed by calibration, calibration followed by integerisation,
+raking-based variants of both, balanced sampling, combinatorial optimisation, and sparse optimization
+relaxations. Not all of these are equally applicable to the production problem. The target surface here
+is large, mixed, and hierarchical, so methods built for categorical margins or discrete area-by-area
+searches are reference points rather than direct full-surface baselines. The matched-budget comparison
+in Section~\ref{sec:methodology} therefore focuses on the tractable full-surface set: informed $L_0$,
+its convex $L_1$ analog, random sampling with reweighting, and survey-weight sampling. Raking-based
+reductions, balanced sampling, and combinatorial optimisation remain published comparators that
+motivate robustness checks where their assumptions fit cleanly. We also note the coreset view from
+machine learning, where a weighted subset is chosen so that a model fit on the subset approximates the
+fit on the full data \citep{feldman2020coresets, bachem2017coresets}.
 
 \subsubsection{Random sampling}
 
@@ -99,49 +117,67 @@ the reference that the data-reduction literature treats as the genuine test: inf
 schemes are measured against it \citep{ma2015leveraging}, and pruning methods in deep learning often
 fail to beat it at high reduction ratios \citep{guo2022deepcore}. In our setting it is the
 reduce-first, calibrate-after baseline, a random draw followed by gradient-descent reweighting to the
-targets.
+targets. Replacing the gradient reweighting step with raking gives the classical sampling-then-raking
+workflow; it is directly comparable on a raking-compatible categorical margin subset, but not on the
+full mixed count-and-dollar target surface without changing the problem into generalized calibration.
 
-\subsubsection{Survey-weight sampling}
+\subsubsection{Raking, survey-weight sampling, and integerisation}
 
 A second approach calibrates first and reduces second. Given fractional weights from a calibration
 step, survey-weight sampling selects records with probability proportional to those weights, which
 turns a reweighted file into a finite, integer-weighted population that approximately preserves both
-the calibrated totals and the distribution. This is unequal-probability, probability-proportional-to-size
-sampling in the survey tradition \citep{hansen1943, horvitz1952}, applied to microsimulation as
-integerisation. \citet{lovelace2013trs} catalogue the common integerisation methods and show that
+the calibrated totals and the distribution. This is unequal-probability,
+probability-proportional-to-size sampling in the survey tradition \citep{hansen1943, horvitz1952},
+applied to microsimulation as integerisation. The upstream calibration can be IPF/raking, GREG, or a
+numerical optimizer; the downstream question is how to convert fractional weights into a finite file.
+\citet{lovelace2013trs} catalogue the common integerisation methods and show that
 truncate-replicate-sample reproduces the targets most accurately while fixing the reduced population
 to an exact size; earlier top-up schemes are due to \citet{ballas2005}. Because the selection
 probabilities are the calibration weights, survey-weight sampling presupposes a calibration step, so
 in our comparison it is the calibrate-then-reduce baseline, with gradient descent supplying the
-weights.
+weights. A raking-then-TRS variant is the corresponding classical baseline on a categorical margin
+surface, but it does not naturally extend to the full mixed production target surface without replacing
+IPF with a broader calibration solver.
 
-\subsubsection{Combinatorial optimisation}
+\subsubsection{Balanced sampling}
 
-A third approach makes selection itself the calibration. Combinatorial optimisation chooses a
-combination of records, generally with integer multiplicities, that reproduces the benchmark totals
-as closely as possible, with fit measured by an aggregate error such as the total absolute error
-\citep{williamson1998}. The search space is the set of possible subsets, so the problem is solved
-with metaheuristics; simulated annealing, which accepts a worsening swap with a probability that
-falls as a temperature parameter cools \citep{kirkpatrick1983}, is the search the literature finds
-most reliable \citep{voas2000}. Combinatorial optimisation has been the workhorse of small-area
-microsimulation, and where it has been compared with regression reweighting it has been found
-slightly more accurate and able to return a solution for areas where the regression failed to
-converge \citep{tanton2014co, harland2012}. Two findings carry over to our comparison: the method
-reproduces the variables it is constrained on but not necessarily the cross-tabulations it is not
-constrained on, and the stochastic search is computationally heavy and can become intractable for
-large populations. It is the discrete, gradient-free sibling of the method we study, and it makes
-selection target-informed in the same sense, which is why it is the most informative non-trivial
-baseline.
+Balanced sampling selects a fixed-size sample whose Horvitz--Thompson estimates reproduce auxiliary
+totals exactly or nearly exactly. The cube method of \citet{deville2004cube} is the standard
+construction: it chooses inclusion indicators while preserving prescribed balancing equations, then
+uses the resulting sample weights for estimation. This makes balanced sampling a target-aware
+selection method rather than a post-sampling calibration method, and therefore a relevant published
+neighbour of $L_0$ selection. Its fit to the present problem is not exact. Classical balanced sampling
+usually treats the auxiliary totals as design constraints with predetermined inclusion probabilities,
+whereas the production calibration surface here mixes categorical counts, dollar totals, and
+hierarchical relationships and then fits positive weights after selection. Still, it is an important
+reference point for the idea that the sample itself, not only its weights, can be chosen to preserve
+known totals.
+
+\subsubsection{Convex sparse calibration}
+
+A final family keeps the continuous optimization setup but replaces the direct retained-record count
+with a convex sparsity surrogate. An $L_1$ penalty on fitted weights, implemented with proximal
+soft-thresholding, can drive weights exactly to zero while preserving the same calibration loss. This
+is tractable on the full target surface and gives a useful ablation: it asks whether the value comes
+from sparse joint selection in general or from the Hard Concrete $L_0$ relaxation specifically. Its
+drawback is interpretive. The $L_1$ penalty shrinks weight magnitudes as well as encouraging zeros, so
+its tuning parameter is not a direct retained-record-count control in the way the expected $L_0$ norm
+is. We therefore treat it as a convex sparse analogue rather than as the primary sampling method.
 
 \subsubsection{Informed selection}
 
 These methods share the idea that a carefully chosen weighted subset can stand in for a larger
 dataset, but they reach it differently: random sampling ignores the targets and repairs the gap
-afterwards, survey-weight sampling inherits the targets from a prior calibration, and combinatorial
-optimisation pursues the targets at the moment of selection through a discrete search. The method
-studied here pursues the targets at selection, as combinatorial optimisation does, but it does so
-with a continuous, gradient-based relaxation that fits the selection and the weights jointly. The
-next subsection sets out that relaxation.
+afterwards, survey-weight sampling inherits the targets from a prior calibration, balanced sampling
+tries to preserve auxiliary totals through the sample design, and convex sparse calibration remains in
+the same optimizer but changes the penalty. A fourth tradition makes selection itself the calibration:
+combinatorial optimisation chooses a combination of records, with integer multiplicities, to match the
+benchmark totals directly, searched with metaheuristics such as simulated annealing
+\citep{kirkpatrick1983, williamson1998, voas2000}. It is the closest precedent for target-informed
+selection, but it is discrete and gradient-free; we note it as related work rather than include it in
+the matched-budget comparison. The method studied here also pursues the targets at selection, but with
+a continuous, gradient-based relaxation that fits the selection and the weights jointly. The next
+subsection sets out that relaxation.
 
 \subsection{\texorpdfstring{$L_0$}{L0} regularization and the Hard Concrete distribution}
 
@@ -175,8 +211,21 @@ differentiable. The probability that gate $i$ is active is
 and the $L_0$ penalty is the sum of these probabilities over all records,
 $\sum_i \Pr(z_i \neq 0)$, which is the expected number of retained records; minimizing it pushes
 gates toward zero. At test time the noise is removed and the gate is evaluated deterministically,
-$\hat{z}_i = \min\!\big(1, \max(0, \sigma(\log \alpha_i)(\zeta - \gamma) + \gamma)\big)$, which
-returns exact zeros and ones and therefore an exactly sparse weight vector.
+\begin{equation}
+    \hat{z}_i
+    =
+    \min\!\left(
+        1,
+        \max\!\left(
+            0,\,
+            \sigma(\log \alpha_i)(\zeta - \gamma) + \gamma
+        \right)
+    \right),
+    \label{eq:deterministic_gate}
+\end{equation}
+which returns an exact zero for any record driven far enough off and an exact one for any record driven
+far enough on, with intermediate values in between. The exact zeros make the weight vector exactly
+sparse; a record left with an intermediate gate is retained with its fitted weight scaled by the gate.
 
 The two pieces depend on each other, which is the point worth stressing for readers new to this
 construction. The $L_0$ penalty states the objective, that fewer active records are preferred, but
@@ -185,6 +234,30 @@ differentiable, but on its own, without the penalty, it carries no pressure towa
 leaves every gate open. Used together they turn record selection into a term the optimizer can
 minimize alongside calibration error. This is what makes the retained-record count a control
 variable rather than the result of a separate thresholding step.
+
+\subsection{\texorpdfstring{Convex sparse selection ($L_1$)}{Convex sparse selection (L1)}}
+\label{sec:l1_background}
+
+The $L_0$ count is the natural sparsity objective but a hard one. The standard convex surrogate replaces
+it with the $L_1$ norm of the weights, $\lVert \mathbf{w} \rVert_1 = \sum_i |w_i|$, which is the LASSO of
+\citet{tibshirani1996}. Adding the penalty to the calibration loss gives the convex program
+\begin{equation}
+    \min_{\mathbf{w} \ge 0}\; \mathcal{L}_{\mathrm{cal}}(\mathbf{w}) + \lambda_{L_1} \sum_{i=1}^{n} w_i,
+    \label{eq:l1}
+\end{equation}
+where $\lambda_{L_1}$ sets the strength of the penalty and the weights are non-negative here, so
+$|w_i| = w_i$. The $L_1$ norm is the standard tool for sparse regression and feature selection: unlike the
+smooth $L_2$ (ridge) penalty, which shrinks coefficients but rarely sets them to zero, its corner at the
+origin drives small coefficients to exact zeros. The program is convex and is minimized by proximal
+gradient descent, each gradient step followed by a soft-thresholding step
+$w_i \leftarrow \max(w_i - \tau,\, 0)$ that subtracts a fixed amount $\tau \propto \lambda_{L_1}$ from every
+weight and clips at zero \citep{beck2009fista}, so a record whose pull on the targets does not clear the
+threshold is dropped while the rest are kept and shrunk. The trade-off is structural: the single penalty
+$\lambda_{L_1}$ controls both how many records survive and how much their weights shrink, because the same
+norm that zeroes small weights also pulls the surviving ones toward zero, so forcing a small sample forces
+heavy shrinkage on the records that remain. We include this convex arm as the direct comparison to $L_0$:
+it pursues the same target-informed sparse selection by a more stable route, and contrasting the two
+isolates what the $L_0$ gates buy by separating selection from weighting.
 
 \subsection{Microsimulation dataset engines}
 

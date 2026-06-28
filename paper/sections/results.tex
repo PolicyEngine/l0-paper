@@ -1,69 +1,198 @@
 \section{Results}
 \label{sec:results}
 
-The results address the three questions from the introduction: whether informed $L_0$ selection
-beats the random, survey-weight, and combinatorial-optimisation baselines at a fixed budget, whether
-the retained sample generalizes to held-out targets, and whether the size, geography, and weight
-controls behave as intended. All numerical
-entries are placeholders pending completed runs.
+The results address the questions from the introduction: when informed $L_0$ selection reproduces the
+targets more accurately than the matched-budget baselines, whether the retained sample generalizes to
+held-out target families, and
+whether the size, geography, and concentration controls behave as intended. The reported runs share one
+frozen candidate universe and a fixed target system. The \texttt{cms\_medicaid}, \texttt{usda\_snap}, and
+\texttt{state\_income\_tax} families (and the \texttt{cbo} validation-only family) are held out of
+every method's fit and scored only out-of-sample (Section~\ref{sec:oos}). Each budget is run over three
+seeds; cells report the cross-seed median or mean as noted, with a 95\% confidence interval where shown.
+Accuracy is led by the median absolute relative error, with the mean reported alongside but treated as
+tail-sensitive (Section~\ref{sec:metrics}).
 
 \subsection{Informed versus uninformed sampling}
 
-Table~\ref{tab:sampling_comparison} compares informed $L_0$ sampling with the three baseline
-samplers, random sampling with reweighting, survey-weight sampling, and combinatorial optimisation,
-at a matched record budget. The methods share the candidate universe and the target set and differ
-only in how records are selected. The comparison reports in-sample and out-of-sample error,
-the effective sample size, the spread of fitted weights, and runtime.
+Figure~\ref{fig:budget_frontier} is the central result: out-of-sample calibration error against the
+requested record budget, swept from aggressive compression up to the largest budget, for informed $L_0$
+selection, informed $L_1$ selection, random sampling with reweighting, and the Hansen--Hurwitz
+survey-weight baseline. We plot against the requested budget because each method prunes to its own achieved
+count near that request---within three per cent for informed $L_0$ and $L_1$
+(Section~\ref{sec:results-controls}).
+The regimes are distinct, and the median and the mean tell different stories. Under aggressive compression
+informed $L_0$ holds out-of-sample error bounded while random + reweight cannot fit the target system from
+so small a draw, with survey-weight sampling between them; the contrast is starkest on the tail-sensitive
+mean, where at the 2{,}000-record budget informed $L_0$'s 225\% sits against random + reweight's 1{,}798\%
+(Table~\ref{tab:paired_comparison}). On the headline median the methods converge quickly: the edge passes
+to random + reweight from about 5{,}000 records up, so informed selection leads on the median only under
+the most aggressive compression. Informed $L_0$ keeps the lower mean at every budget, because the inflated
+mean tracks the seed-to-seed instability of a small random or survey draw that informed selection avoids.
+Informed $L_1$ is the weakest arm throughout: forcing sparsity through a single penalty collapses its fit,
+with its median pinned near 100\% at the tightest budgets, and it converges toward informed $L_0$ only at
+the largest budget (Section~\ref{sec:discussion}). The frontier reads as graceful degradation under
+compression: informed $L_0$ is decisive where the budget is too small for a random draw to span the
+targets, and once the budget is large enough that almost any subset can be reweighted the median edge
+passes to random + reweight while informed $L_0$ keeps the lower tail. A looser loss cap sharpens that
+small-budget edge, making informed $L_0$ the most accurate on the median too at the most drastic budgets
+(Appendix~\ref{app:loss_cap}).
+
+Table~\ref{tab:sampling_comparison} reports the four methods at the anchor budget with the operational
+diagnostics, in particular the effective sample size that the matched accuracy is achieved at.
 
 \input{tables/sampling_comparison}
 
-The central hypothesis is that informed selection lowers calibration error at a fixed budget,
-because the gates retain records the targets actually constrain. The out-of-sample columns test
-whether that advantage reflects generalization rather than a tighter fit to the in-sample targets.
-
-\begin{figure}[ht]
+\begin{figure}[H]
     \centering
-    \fbox{\parbox{0.9\textwidth}{\centering\textit{[Accuracy-versus-budget frontier to be
-    generated]}}}
-    \caption{Out-of-sample calibration error against the retained-record budget, for informed $L_0$
-    sampling and for random sampling with reweighting.}
+    \includegraphics[width=\textwidth]{figures/f1_frontier}
+    \caption{Out-of-sample calibration error against the requested record budget, for informed $L_0$
+    selection, informed $L_1$ selection, random sampling with reweighting, and the Hansen--Hurwitz
+    survey-weight baseline. The mean and median panels are reported together because a few
+    near-zero-denominator targets inflate the mean (Section~\ref{sec:results-degenerate}); the median is
+    less sensitive to that tail, and both panels are on a logarithmic scale. Lines are the mean over three
+    seeds and bands the 95\% confidence interval.}
     \label{fig:budget_frontier}
 \end{figure}
 
-\subsection{The size, geography, and weight controls}
+The hypothesis behind informed selection is that it lowers calibration error at a fixed budget, because
+the gates retain the records the targets constrain. Table~\ref{tab:paired_comparison} reports the same-seed
+difference against random + reweight at each budget, on the headline median and the tail-sensitive mean;
+with only three seeds, the paired $t$-statistics are descriptive diagnostics rather than strong inferential
+evidence. The two metrics split. On the median informed $L_0$ leads only under aggressive compression, and
+random + reweight takes over from about 5{,}000 records up ($p=0.016$ at 5{,}000), the same crossover the
+frontier shows. On the mean informed $L_0$ leads at every budget, significantly so under aggressive
+compression ($p=0.017$ at 2{,}000 and $p=0.026$ at 5{,}000) and narrowing as the draws stabilise, because
+the tail is what random + reweight cannot control while on the typical (median) target the two draw level
+once the budget spans the system.
 
-A second question is whether the framework gives usable control over the output. Increasing
-$\lambda_{L_0}$ should reduce the retained-record count, and increasing $\lambda_{L_2}$ should reduce
-the largest fitted weights, without either change destroying the calibration fit.
-Figure~\ref{fig:operability} shows those sweeps.
+\input{tables/paired_comparison}
 
-\begin{figure}[ht]
+\subsection{Generalization to held-out target families}
+\label{sec:results-generalization}
+
+The out-of-sample columns above test generalization against the fixed family-level holdout: the
+\texttt{cms\_medicaid}, \texttt{usda\_snap}, and \texttt{state\_income\_tax} families are scored but never
+fit, so no method can have tuned to them, and each keeps a sibling family in the fit
+(Section~\ref{sec:oos}). Figure~\ref{fig:generalization_gap} plots the gap between out-of-sample and
+in-sample error across the budget sweep, and Figure~\ref{fig:by_family} breaks the out-of-sample error
+down by held-out family at the representative budget.
+
+In-sample, informed $L_0$ fits the targets it sees no more tightly than it reproduces unseen ones: its
+in-sample and out-of-sample median ARE are essentially level (Table~\ref{tab:sampling_comparison}). Random
++ reweight instead fits the in-sample targets far more tightly---a median of 0.6\% at 10{,}000 records---but
+that fit does not survive on families it never saw, where its median rises to about 31\%, while informed
+$L_0$ carries almost no such gap. Informed $L_0$ spends the tight budget on records that generalize across
+families rather than on driving the in-sample fit down. Figure~\ref{fig:generalization_gap} shows the same
+ordering on the mean, where the near-zero-denominator tail (Section~\ref{sec:results-degenerate}) enlarges
+every gap: informed $L_0$'s mean gap stays near zero, random + reweight's runs to several hundred points,
+and informed $L_1$'s swings widest. The held-out families differ in difficulty
+(Figure~\ref{fig:by_family}): on the two well-conditioned families, \texttt{cms\_medicaid} and
+\texttt{usda\_snap}, the methods are close, while the state income-tax (\texttt{census\_stc}) and
+validation-only \texttt{cbo} families are dominated by near-zero-denominator targets---44 of the held-out
+targets are degenerate state income-tax cells (Section~\ref{sec:results-degenerate})---so every method's
+mean there runs into the thousands of per cent and the family comparison is uninformative. Informed $L_1$
+is the worst arm on every family.
+
+\begin{figure}[H]
     \centering
-    \fbox{\parbox{0.9\textwidth}{\centering\textit{[Control sweeps to be generated]}}}
-    \caption{Effect of the two penalties. Increasing $\lambda_{L_0}$ reduces the retained-record
-    count; increasing $\lambda_{L_2}$ reduces the largest fitted weights. Each panel also reports the
-    calibration error along the sweep.}
+    \includegraphics[width=0.75\textwidth]{figures/f3_generalization_gap}
+    \caption{Generalization gap: out-of-sample minus in-sample mean ARE against the requested record
+    budget, for the four methods, on a symmetric-log scale. A gap near zero means the retained sample
+    reproduces the held-out families about as well as the families it was fit to; a positive gap measures
+    the cost of generalization, and a negative gap marks a case where the in-sample mean is as inflated as
+    the out-of-sample mean. Each line is the mean over three seeds.}
+    \label{fig:generalization_gap}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/f4_by_family}
+    \caption{Out-of-sample mean ARE by held-out family at the $\sim$10{,}000-record budget, for the four
+    methods (fixed family-level holdout, $\lambda_{L_2}=0$), on a logarithmic scale. \texttt{census\_stc}
+    is the state income-tax family and \texttt{cbo} is the validation-only family (Section~\ref{sec:oos}).
+    The per-family view shows which held-out families each method reproduces, beneath the aggregate frontier
+    of Figure~\ref{fig:budget_frontier}.}
+    \label{fig:by_family}
+\end{figure}
+
+As a stricter, descriptive robustness check we rotate whole families through the holdout in a
+family-grouped five-fold design and report each fold separately rather than as a single inferential test.
+Informed $L_0$ has the lowest median out-of-sample ARE in two of the five folds, and random + reweight
+leads on the other three. On the target-weighted mean across folds the ranking favours the baselines:
+informed $L_0$ and informed $L_1$ average 2{,}635\% and 2{,}650\% against 1{,}299\% for random + reweight
+and 1{,}440\% for survey-weight. The gap comes from the fold that holds out \texttt{irs\_soi}, the family
+supplying 71\% of the targets. Removing it leaves a thin, badly conditioned fit surface on which every
+method's mean is dominated by a few near-zero-denominator targets, and informed $L_0$'s mean is highest
+there (3{,}658\% against 1{,}745\% for random + reweight). The medians on that same fold are close (89\%
+for informed $L_0$, 79\% for random + reweight, 83\% for survey-weight), which places the gap in the tail
+rather than the typical target. We report the rotation per fold and treat the \texttt{irs\_soi} fold as a
+limitation rather than a headline comparison.
+
+\subsection{The size and concentration controls}
+\label{sec:results-controls}
+
+A second question is whether the framework gives usable control over the output. The size control works
+as designed: $\lambda_{L_0}$ sets the retained-record count, and the eight-step bisection over
+$\lambda_{L_0}$ hits each requested budget to within about three per cent (Appendix~\ref{app:presets}).
+Because the sparsity penalty produces exact zeros, the dataset size is an output of the optimisation rather
+than a post-processing cutoff.
+
+Weight concentration is a measured trade-off rather than a fixed setting. The two concentration controls
+act on the ratio of each fitted weight to its initial weight (Section~\ref{sec:methodology}): the soft
+$L_2$ penalty shapes the whole distribution, and the hard \texttt{max\_weight\_ratio} caps the largest
+weight. Figure~\ref{fig:usability} reports the effective sample size and the largest fitted weight
+across methods and budgets, and Figure~\ref{fig:operability} compares informed $L_0$ with and without
+the $L_2$ penalty ($\lambda_{L_2}=0$ against $\lambda_{L_2}=10^{-4}$) across the budget sweep, tracing
+what raising the effective sample size costs in out-of-sample accuracy.
+The operability picture is budget-dependent (Figure~\ref{fig:operability}). At the larger budgets the
+$L_2$ penalty buys effective sample size cheaply: at 40{,}000 records $\lambda_{L_2}=10^{-4}$ raises the
+effective sample size by about 70\% (from 3{,}803 to 6{,}482) for under two points of median out-of-sample
+ARE. At the smallest budget the same penalty is costly on the tail, inflating the 2{,}000-record
+out-of-sample mean ARE because there the fit already depends on concentrating weight onto a few records. We
+report the un-penalised frontier ($\lambda_{L_2}=0$) as the accuracy result and treat
+$\lambda_{L_2}=10^{-4}$ as an operability setting: it earns its accuracy cost where the budget is large, not
+where it is tight.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/f2_usability}
+    \caption{Effective sample size (left) and the largest fitted weight (right) against the requested
+    record budget, for the four methods at $\lambda_{L_2}=0$. An effective sample size well below the
+    retained-record count signals weight concentration: a sampler can fit the targets while loading
+    population mass onto a few records. Lines are the mean over three seeds, bands the 95\% confidence
+    interval.}
+    \label{fig:usability}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/f6_operability}
+    \caption{Operability of the $\lambda_{L_2}$ penalty for informed $L_0$, across the budget sweep:
+    the effective sample size it buys (left) against the out-of-sample mean ARE it costs (right), with
+    $\lambda_{L_2}=0$ (solid) and $\lambda_{L_2}=10^{-4}$ (dashed). Lines are the mean over three seeds,
+    bands the 95\% confidence interval.}
     \label{fig:operability}
 \end{figure}
 
 \subsection{Accuracy by geography}
 
 Table~\ref{tab:calibration_accuracy} reports absolute relative error by geographic level for the
-informed $L_0$ run, since a sampler can match national totals while leaving local totals off.
+informed $L_0$ run, since a sampler can match national totals while leaving local totals off. The current
+target surface is national and state only; no congressional-district targets are in the prioritized
+subset, so that level is not scored.
 
 \input{tables/calibration_accuracy}
 
-\subsection{Sparsity and convergence}
+\subsection{Degenerate targets and metric robustness}
+\label{sec:results-degenerate}
 
-The sparsity penalty produces exact zeros, so the dataset size is an output of the optimization
-rather than a post-processing choice. Figure~\ref{fig:convergence} plots calibration error over
-training epochs for the reported $L_0$ runs.
-
-\begin{figure}[ht]
-    \centering
-    \fbox{\parbox{0.9\textwidth}{\centering\textit{[Convergence curves to be generated from
-    calibration logs]}}}
-    \caption{Convergence diagnostics for representative $L_0$ runs, reporting calibration loss over
-    epochs.}
-    \label{fig:convergence}
-\end{figure}
+A small number of targets are denominator-degenerate: their value falls below their identifiability floor,
+so a single record's placement swings their relative error past 100 per cent (Section~\ref{sec:metrics}).
+In the fit set, 741 of the 4{,}187 scored targets are degenerate by this test, and 735 of them are
+\texttt{irs\_soi} cells (chiefly the state EITC-by-number-of-children counts); the remaining six fall in
+\texttt{hhs\_acf\_tanf} and \texttt{cms\_aca}. The 44 degenerate targets in the held-out set are state
+income tax cells (\texttt{census\_stc}) and one \texttt{cbo} target. We name these targets in a one-time
+audit rather than winsorize or trim, and report the mean recomputed with exactly them dropped beside the
+full mean. At the 10{,}000-record budget this targeted removal lowers informed $L_0$'s in-sample mean ARE
+from 589\% to 64\%, against a median of 35\%; the degenerate targets barely move the median, which
+is why we lead with it.

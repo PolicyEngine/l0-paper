@@ -1519,7 +1519,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", specifier = ">=2" },
     { name = "policyengine-uk", marker = "extra == 'uk'", specifier = ">=2.88" },
-    { name = "policyengine-us", marker = "extra == 'us'", specifier = ">=1.729,<2" },
+    { name = "policyengine-us", marker = "extra == 'us'", specifier = ">=1.745.0,<2" },
     { name = "populace-calibrate", editable = "../populace/packages/populace-calibrate" },
     { name = "populace-fit", editable = "../populace/packages/populace-fit" },
     { name = "populace-frame", editable = "../populace/packages/populace-frame" },
@@ -1572,7 +1572,7 @@ requires-dist = [
     { name = "huggingface-hub", specifier = ">=0.20" },
     { name = "packaging", specifier = ">=24" },
     { name = "policyengine-uk", marker = "extra == 'uk'", specifier = ">=2.88" },
-    { name = "policyengine-us", marker = "extra == 'us'", specifier = ">=1.729,<2" },
+    { name = "policyengine-us", marker = "extra == 'us'", specifier = ">=1.745.0,<2" },
 ]
 provides-extras = ["us", "uk"]
 
@@ -1618,7 +1618,7 @@ requires-dist = [
     { name = "microunit", marker = "extra == 'us'", specifier = ">=0.1.0" },
     { name = "numpy", specifier = ">=2" },
     { name = "pandas", specifier = ">=2.3" },
-    { name = "policyengine-us", marker = "extra == 'policyengine'", specifier = ">=1.729,<2" },
+    { name = "policyengine-us", marker = "extra == 'policyengine'", specifier = ">=1.745.0,<2" },
 ]
 provides-extras = ["us", "policyengine"]
 

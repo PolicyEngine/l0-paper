@@ -1,24 +1,33 @@
 \begin{abstract}
-Subnational microsimulation needs survey microdata that reproduce administrative totals across
-nested geographies while staying usable inside a policy model. A pipeline built for fidelity can
-combine many data sources and add record-level variation, which produces a candidate dataset that
-is rich enough to represent the variation the targets describe and also large enough to be expensive
-to store, calibrate, and simulate. That dataset has to be reduced to a workable size, and the
-question is which records to keep.
+Subnational microsimulation needs survey microdata that reproduce administrative totals across nested
+geographies while staying usable inside a policy model. A fidelity-oriented pipeline can combine many
+sources and add record-level variation, producing a candidate dataset rich enough to represent the
+targets but too large to simulate. That dataset has to be reduced, and the question
+is which records to keep.
 
 We study this reduction as a sampling problem. Using $L_0$ regularization with the Hard Concrete
-relaxation of \citet{louizos2018}, the method jointly selects which records to retain and assigns
-each retained record a positive weight. Selection responds to the calibration targets rather than
-being drawn at random, so the retained sample is informed by the quantities the dataset must
-reproduce. The gates make the retained-record count an explicit optimization variable, so one
-framework can produce a compact national dataset or a larger subnational one, while a separate
-penalty bounds how large individual weights can grow. Because the optimization that selects records
-also calibrates them, the reduced dataset continues to match its targets.
+relaxation of \citet{louizos2018}, the method jointly selects which records to retain and assigns each a
+positive weight, with selection driven by the calibration targets rather than drawn at random. The gates
+make the retained-record count an explicit optimization variable, and soft and hard concentration controls
+bound how large individual weights can grow. Because the optimization that selects records also calibrates
+them, the reduced dataset continues to match its targets.
 
-We implement the calibration step within \populace{}, PolicyEngine's pipeline for microsimulation
-dataset construction, and present a proof of concept on its current target surface, comparing
-informed $L_0$ sampling with random sampling followed by gradient-descent reweighting at matched
-record budgets. \tbc[empirical comparison pending benchmark runs]
+We implement the method within \populace{}, PolicyEngine's microsimulation data pipeline, and present a
+proof of concept on its national and state target surface. Holding the candidate universe, the target set,
+and the record budget fixed, we vary only how records are chosen across four samplers: informed $L_0$
+selection, its convex $L_1$ analog, random sampling followed by reweighting, and survey-weight
+(Hansen--Hurwitz) sampling. All fit weights with the same calibrator, so the experiment isolates selection.
+Under aggressive compression informed $L_0$ keeps out-of-sample error bounded where a small random draw
+cannot: at a 2{,}000-record budget its out-of-sample median absolute relative error is 47.3\% against random
+sampling's 50.1\%, and on the tail-sensitive mean the gap is far wider (225\% against 1{,}798\%). As the
+budget grows the median edge passes to random sampling, but informed $L_0$ keeps the lower mean throughout,
+avoiding the seed-to-seed instability of a small draw. The convex $L_1$ arm collapses under forced
+sparsity---one penalty cannot both select records and keep their weights---and recovers toward $L_0$ only
+at large budgets. The informed $L_0$ method's distinctive value is operational rather than a uniform accuracy 
+gain: it sets dataset size, geographic emphasis, and weight concentration through explicit parameters in one
+optimization, and removes the variance of a poor random draw at tight budgets. Matching a demanding target
+system can still concentrate population mass on a few records, a cost we report rather than hide. We leave
+the larger build-and-prune and subnational settings the controls are designed for to future work.
 \end{abstract}
 
 \noindent\textbf{Keywords:} microsimulation, survey calibration, subsampling, $L_0$ regularization,

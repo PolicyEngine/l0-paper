@@ -3,27 +3,28 @@
 
 Builds (or reuses) the frozen pre-calibration dataset, runs both calibration
 conditions at a matched record budget, scores them in- and out-of-sample, and
-writes paper-ready artifacts and tables.
+writes run artifacts and draft tables into the run directory. The manuscript's
+result tables come from the multi-seed sweep instead (``l0 figures --sweep <run>
+--paper-figures``), so this single-budget driver no longer writes ``paper/tables``.
 
 Example
 -------
-    uv run python experiments/run_poc.py \
+    uv run --extra data l0 poc \
         --ledger-facts /path/to/consumer_facts.jsonl \
-        --out experiments/runs/poc \
+        --out runs/poc \
         --subsample 20000 --target-records 5000 --seed 0
 
 Reuse a previously frozen pre-calibration dataset (skips the heavy build):
 
-    uv run python experiments/run_poc.py \
-        --reuse-precalibration experiments/runs/poc/precalibration \
-        --out experiments/runs/poc2 --target-records 5000 --seed 0
+    uv run --extra data l0 poc \
+        --reuse-precalibration runs/poc/precalibration \
+        --out runs/poc2 --target-records 5000 --seed 0
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -39,9 +40,6 @@ from l0_paper.precalibration import (
     build_precalibration_dataset,
     load_precalibration_dataset,
 )
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-PAPER_TABLES = REPO_ROOT / "paper" / "tables"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -97,7 +95,9 @@ def _parse_args() -> argparse.Namespace:
                         help="Target-row weights used inside Populace's calibration "
                              "loss. Default matches the production US fiscal weighting.")
     parser.add_argument("--target-loss-cap", type=float, default=None,
-                        help="Per-target cap in the calibration loss. Defaults to 10.0.")
+                        help="Per-target cap in the calibration loss. Defaults by "
+                             "weighting: production_us_fiscal -> 1.0, uniform -> "
+                             "10.0. Pass 10.0 to reproduce the current paper runs.")
 
     # Out-of-sample split.
     parser.add_argument("--holdout-frac", type=float, default=0.2)
@@ -120,7 +120,6 @@ def _parse_args() -> argparse.Namespace:
                              "--no-sample-replace for distinct-record draws.")
 
     parser.add_argument("--run-id", default=None)
-    parser.add_argument("--write-paper-tables", action="store_true", help="Also overwrite paper/tables.")
     args = parser.parse_args()
     if args.reuse_precalibration is None and args.ledger_facts is None:
         parser.error("one of --ledger-facts or --reuse-precalibration is required.")
@@ -256,13 +255,11 @@ def main() -> None:
     # 6. L0 accuracy by geography, scored across all targets (Table 2).
     l0_geo = metrics.score(frame, l0.weights, all_targets, label="all")
 
-    # 7. Paper tables.
+    # 7. Draft tables into the run directory (inspection only; the manuscript's
+    #    result tables are regenerated from the multi-seed sweep by ``l0 figures``).
     table_paths = tables.write_tables(
         out / "tables", summaries=summaries, l0_geo_score=l0_geo, budget=budget
     )
-    if args.write_paper_tables:
-        for path in table_paths.values():
-            shutil.copy(path, PAPER_TABLES / path.name)
 
     # 8. Reproducibility manifest.
     run_id = args.run_id or f"poc-{datetime.now(UTC):%Y%m%dT%H%M%SZ}"
