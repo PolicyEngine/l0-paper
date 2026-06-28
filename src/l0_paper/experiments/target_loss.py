@@ -65,11 +65,11 @@ def target_loss_weights(targets: TargetSet, *, weighting: str) -> np.ndarray | N
     if weighting != PRODUCTION_US_FISCAL:
         raise ValueError(f"Unknown target-loss weighting {weighting!r}.")
 
-    # Populace's private helper only reads ``registry.specs`` and, for each spec,
-    # ``value`` and ``metadata``. A TargetSet carries those fields in the same
-    # order passed to calibrate, so this shim preserves exact row alignment while
-    # avoiding a lossy TargetSet -> TargetRegistry reconstruction.
-    registry_like = SimpleNamespace(specs=tuple(targets))
+    # Populace's private helper reads ``registry.specs`` and a small spec-like
+    # surface for each row. A TargetSet carries those fields in the same order
+    # passed to calibrate; this shim preserves row alignment while avoiding a
+    # lossy TargetSet -> TargetRegistry reconstruction.
+    registry_like = SimpleNamespace(specs=tuple(_spec_like_targets(targets)))
     return np.asarray(
         _production_module()._fiscal_target_loss_weights(registry_like),
         dtype=np.float64,
@@ -118,3 +118,41 @@ def _production_module_path() -> Path:
             f"Populace before using {PRODUCTION_US_FISCAL!r}."
         )
     return path
+
+
+def _spec_like_targets(targets: TargetSet) -> tuple[SimpleNamespace, ...]:
+    return tuple(_spec_like_target(target) for target in targets)
+
+
+def _spec_like_target(target) -> SimpleNamespace:
+    metadata = dict(target.metadata or {})
+    return SimpleNamespace(
+        name=target.name,
+        entity=target.entity,
+        measure=target.measure,
+        value=target.value,
+        period=target.period,
+        tolerance=target.tolerance,
+        filter=target.filter,
+        source=target.source,
+        metadata=metadata,
+        family=_target_family(target, metadata),
+    )
+
+
+def _target_family(target, metadata: dict[str, str]) -> str:
+    explicit = getattr(target, "family", None) or metadata.get("family")
+    if explicit:
+        return str(explicit)
+    source_record_id = metadata.get("ledger_source_record_id")
+    if source_record_id:
+        source_record_id = str(source_record_id)
+        for separator in (".", "/"):
+            if separator in source_record_id:
+                return source_record_id.split(separator, 1)[0]
+        return source_record_id
+    name = str(target.name)
+    for separator in ("/", "."):
+        if separator in name:
+            return name.split(separator, 1)[0]
+    return "unspecified"

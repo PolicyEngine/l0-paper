@@ -25,6 +25,7 @@ that takes a registry.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from dataclasses import replace
 
 import numpy as np
 
@@ -57,8 +58,8 @@ def split_registry_by_family(
 ) -> tuple[TargetSet, TargetSet]:
     """Hold out whole families, optionally plus a random fraction of the rest."""
     families = set(holdout_families)
-    targets = list(registry.to_target_set())
     specs = registry.specs
+    targets = _targets_with_registry_family(registry)
     available = {spec.family for spec in specs}
     unknown = sorted(families - available)
     if unknown:
@@ -158,7 +159,7 @@ def family_grouped_folds(
     into the fit (they are Populace diagnostics, not contemporaneous targets).
     """
     specs = registry.specs
-    targets = list(registry.to_target_set())
+    targets = _targets_with_registry_family(registry)
     families = [spec.family for spec in specs]
 
     validation_only = (
@@ -181,6 +182,20 @@ def family_grouped_folds(
         held = [targets[i] for i in sorted(holdout_positions)]
         result.append((TargetSet(fit), TargetSet(held)))
     return result
+
+
+def _targets_with_registry_family(registry: TargetRegistry) -> list[Target]:
+    """Return registry targets with their source family preserved in metadata."""
+    return [
+        _target_with_family_metadata(target, spec.family)
+        for spec, target in zip(registry.specs, registry.to_target_set(), strict=True)
+    ]
+
+
+def _target_with_family_metadata(target: Target, family: str) -> Target:
+    metadata = dict(target.metadata or {})
+    metadata.setdefault("family", str(family))
+    return replace(target, metadata=metadata)
 
 
 # Populace marks sources "validation-only" in ``source_coverage.US_SOURCE_COVERAGE``
