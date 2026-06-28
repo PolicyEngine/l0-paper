@@ -3,24 +3,36 @@
 
 \subsection{What the sampling comparison establishes}
 
-The comparison against random sampling is the core test, and it turns on the record budget. Under
-aggressive compression, where the budget is too small for a random draw to span the target system,
-informed $L_0$ selection reaches much lower out-of-sample error, because the gates spend the budget on
-the records the targets constrain: at 2{,}000 records its out-of-sample mean ARE is 53.5\% against
-2{,}293\% for random + reweight. Where the budget is generous enough that almost any subset can be
-reweighted to fit, the two converge and the accuracy edge passes to random + reweight, by 7.9~pp at
-10{,}000 records and 3.0~pp at 40{,}000. The result is graceful degradation under compression rather than
-a blanket accuracy win, and the budget at which the methods cross, near 5{,}000 records here, is itself a
-finding. Past the crossover the case for informed $L_0$ rests on its controls and on robustness rather
-than on an accuracy gap. It removes the risk of a poor random draw, the seed-to-seed variation that
-swings random + reweight's small-budget mean by thousands of percent, and it sets the dataset size, the
-geographic emphasis, and the weight concentration through explicit parameters in one optimization. That
-control matters most in the build-big-then-prune setting the method is designed for, where a pipeline
-assembles a candidate universe far larger than it can ship and must reduce it to a fixed budget under
-subnational calibration targets; this study tests the national and state surface, and the subnational
-case is left to future work. Reporting out-of-sample error on held-out families keeps the comparison
-honest, since a method can always match the targets it was fit to more tightly than a method that was
-not.
+The comparison against the matched-budget baselines turns on the record budget, and on which error
+statistic is read. Under aggressive compression, where the budget is too small for a random draw to span
+the target system, informed $L_0$ selection holds the lowest error because the gates spend the budget on
+the records the targets constrain. As the budget grows the methods converge: on the headline median the
+edge passes to random + reweight once almost any subset can be reweighted to fit (near 5{,}000 records
+here), while on the tail-sensitive mean informed $L_0$ stays ahead at every budget, because it removes the
+seed-to-seed instability that swings a small random or survey draw's mean by thousands of per cent
+(Section~\ref{sec:results}). The result is graceful degradation under compression rather than a blanket
+accuracy win, and the budget at which the median crossover happens is itself a finding. Past it the case
+for informed $L_0$ rests on its controls, on its near-zero generalization gap, and on the tail it keeps
+bounded, rather than on a median accuracy gap. It removes the risk of a poor random draw and sets the
+dataset size, the geographic emphasis, and the weight concentration through explicit parameters in one
+optimization. That control matters most in the build-big-then-prune setting the method is designed for,
+where a pipeline assembles a candidate universe far larger than it can ship and must reduce it to a fixed
+budget under subnational calibration targets; this study tests the national and state surface, and the
+subnational case is left to future work. Reporting out-of-sample error on held-out families keeps the
+comparison honest, since any method matches the targets it was fit to more tightly than ones it never saw.
+
+The convex $L_1$ arm sharpens the contrast. $L_1$ pursues the same target-informed sparse selection, but
+through a single penalty that must both decide which records to drop and how much to shrink the survivors. Forcing roughly two thousand of seventy-five thousand records to survive demands a
+large penalty, which soft-thresholds the retained weights toward zero and collapses the calibration fit:
+its out-of-sample median ARE is pinned near 100\% at the tightest budgets and its mean runs to several tens
+of thousands of per cent, recovering toward informed $L_0$ only once the budget is loose enough that little
+shrinkage is needed (Figure~\ref{fig:budget_frontier}). Informed $L_0$ avoids this because the Hard
+Concrete gate and the fitted weight are separate variables: the gate decides membership and the weight is
+free to take whatever positive value the targets require. Decoupling selection from shrinkage is what lets
+$L_0$ degrade gracefully where the convex relaxation does not, and it is the core of the $L_0$-versus-$L_1$
+comparison. $L_1$ is more stable to optimize and can be the better choice where sparsity is not forced
+hard; the case for $L_0$ here rests on the joint selection-and-weighting framing and the explicit control
+over the retained count, not on a claim that it is the most accurate sparse method in every setting.
 
 \subsection{What the controls establish}
 
@@ -38,7 +50,8 @@ than through separate heuristics.
 
 \subsection{Trade-offs and limitations}
 
-The method does not remove modelling judgment, and several choices stay consequential.
+The method does not remove modelling judgment, and several choices stay consequential; the optimizer's
+hyperparameters are one such choice, reported in full in Appendix~\ref{app:hyperparameters}.
 
 \subsubsection{Target selection}
 
@@ -63,25 +76,23 @@ acceptable for the aggregates the dataset is calibrated to, but it is a real cos
 estimand that is sensitive to the weight distribution. We expose the cost rather than hide it: the
 effective sample size and the largest weights are reported as primary results, and the $L_2$ sweep
 shows how much accuracy raising the effective sample size costs. That cost depends on the budget. At
-40{,}000 records $\lambda_{L_2}=10^{-4}$ raises the effective sample size by about half (from 2{,}094 to
-3{,}186) for roughly a percentage point of median accuracy, while at 10{,}000 records it costs about ten
-points of median accuracy for a smaller gain. The penalty is worth applying at large budgets and not at
-tight ones, which is why we report the un-penalised frontier as the accuracy result and the penalty as a
-separate operability setting.
+40{,}000 records $\lambda_{L_2}=10^{-4}$ raises the effective sample size by about seventy per cent (from
+3{,}803 to 6{,}482) for under two points of median accuracy, while at the tightest budget it inflates the
+error tail instead. The penalty is worth applying at large budgets and not at tight ones, which is why we
+report the un-penalised frontier as the accuracy result and the penalty as a separate operability setting.
 
 \subsubsection{Generalization across target families}
 
 Holding out whole families is a deliberately hard test of generalization, harder than holding out a
 random subset of targets, and it need not flatter any method. On the fixed holdout, informed $L_0$
-generalizes with a smaller gap between in-sample and out-of-sample error than random + reweight (about
-12.6~pp against 17.6~pp at 10{,}000 records), even though random + reweight fits the in-sample targets
-more tightly; informed selection trades some in-sample fit for a sample that carries over better to
-unseen families. The stricter family rotation is less forgiving. On the target-weighted mean across folds
-the ranking reverses, with informed $L_0$ worst, but the reversal is confined to the fold that holds out
-the dominant \texttt{irs\_soi} family: with 71\% of the targets removed, every method's mean is dominated
-by a few near-zero-denominator targets, and the fold medians stay close (51\% to 55\% across methods).
-We read the rotation as a limitation to be reported per fold rather than as a single headline number, and
-widening the held-out surface further is left to future work.
+generalizes with almost no gap between its in-sample and out-of-sample median error, while random +
+reweight fits the in-sample targets far more tightly but pays about a thirty-point gap on families it
+never saw; informed selection trades in-sample fit for a sample that carries over. The stricter family
+rotation is less forgiving. On the target-weighted mean across folds the ranking favours the baselines,
+but the gap is confined to the fold that holds out the dominant \texttt{irs\_soi} family: with 71\% of the
+targets removed, every method's mean is dominated by a few near-zero-denominator targets, and the fold
+medians stay close. We read the rotation as a limitation to be reported per fold rather than as a single
+headline number, and widening the held-out surface further is left to future work.
 
 \subsubsection{Degenerate targets and the choice of error metric}
 
@@ -92,21 +103,6 @@ name the affected targets in a one-time audit, and report the mean recomputed wi
 targets removed. This keeps the metric honest and the dropped targets visible and attributable, but it
 does mean the headline accuracy figure depends on a stated, auditable choice rather than on the raw mean
 alone.
-
-\subsubsection{Relation to convex sparse methods}
-
-$L_0$ with Hard Concrete is one way to obtain a sparse, positively weighted sample. Convex sparse
-penalties such as $L_1$ are another, and they can be more stable to optimize. The case for the $L_0$
-approach here rests on the joint selection-and-weighting framing and the explicit control over the
-retained count, not on a claim that it is the most accurate sparse method in every setting. A
-comparison with convex sparse methods is a natural extension. The accompanying experiment package now
-includes a proximal $L_1$ arm to support that rerun, but the real-data results reported here predate it.
-
-\subsubsection{Hyperparameter sensitivity}
-
-The method has parameters. The gate temperature, the initialization, and the two penalties all
-affect the path the optimizer takes. The configuration is reported in
-Appendix~\ref{app:hyperparameters} and is part of the method specification rather than a detail.
 
 \subsubsection{Computational cost}
 

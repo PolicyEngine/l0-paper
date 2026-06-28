@@ -17,7 +17,7 @@ target $j$ is
     \label{eq:estimate}
 \end{equation}
 
-The three methods compared in this study fit weights with the same calibrator, the \texttt{calibrate}
+The four methods compared in this study fit weights with the same calibrator, the \texttt{calibrate}
 routine in \populace{}. It minimizes a capped, weighted mean absolute percentage error (capped weighted
 MAPE) of the estimates against the targets,
 \begin{equation}
@@ -28,21 +28,22 @@ MAPE) of the estimates against the targets,
 \end{equation}
 where $s_j = \max(|t_j|, 1)$ scales each target by its own magnitude, with a floor of one unit so a
 zero-valued target stays well defined; $c$ caps the contribution of any single hard-to-fit target, so
-one badly conditioned target cannot dominate the gradient, and is set to $c = 10$ in the runs reported
-here; and $\omega_j$ are per-target weights, normalised by their sum so only their relative magnitudes
-matter. The error is
+one badly conditioned target cannot dominate the gradient, and is set to the production value $c = 1$ in
+the runs reported here (Appendix~\ref{app:loss_cap} contrasts the looser $c = 10$); and $\omega_j$ are
+per-target weights, normalised by their sum so only their relative magnitudes matter. The error is
 relative, so a one per cent miss on a small target and on a large one count the same. The weights are
 parameterized in log space, $w_i = \exp(\theta_i)$, so the fitted weights stay positive; an Adam
 optimizer \citep{kingma2015} implemented in PyTorch \citep{pytorch2019} minimizes the loss, and the
 total weight is held to the input population. On a fixed set of
 records this calibrator answers a calibration question: it finds weights that match the targets. The
-two baselines use it unchanged; informed $L_0$ extends it.
+random and survey-weight baselines use it unchanged; informed $L_0$ and informed $L_1$ extend it with a
+selection term.
 
 The per-target weights $\omega_j$ in the runs reported here follow \populace{}'s production US-fiscal
 weighting, computed through the same code path the production US build uses rather than a separate
 reimplementation. The weighting is built in four steps. Each target is first assigned to one of two
-value bases from its measure metadata: a \emph{count} basis (indicator, enrollment, recipient, and
-return-count measures) or an \emph{amount} basis (dollar measures). Within a basis, a target's raw
+value bases from its measure metadata: a count basis (indicator, enrollment, recipient, and
+return-count measures) or an amount basis (dollar measures). Within a basis, a target's raw
 weight is proportional to $\max(|t_j|, 1)^{1/2}$, the square root of its own magnitude, so a larger
 aggregate carries more weight but sublinearly (a target a hundred times larger receives about ten times
 the weight), and these raw weights are normalised to mean one inside each basis. The two bases are then
@@ -50,7 +51,7 @@ rescaled to contribute equal total weight, so the far more numerous dollar cells
 targets. A final step sets the mean weight to one. Because the loss divides by $\sum_j \omega_j$, only
 the relative weights enter the objective and their absolute scale does not.
 
-\subsection{Selection and weighting as one optimization}
+\subsection{Selection and weighting as one optimization in our proposed method}
 
 Informed $L_0$ sampling adds two terms to the shared calibrator that turn weight fitting into record
 selection. Each candidate $i$ carries a Hard Concrete gate $z_i \in [0, 1]$ \citep{louizos2018}, the
@@ -69,8 +70,8 @@ expected retained-record count, and $\lambda_{L_0}$ sets how aggressively the op
 than set $\lambda_{L_0}$ by hand, each build tunes it by an outer bisection to a requested record count
 (Appendix~\ref{app:presets}). The third term is a soft concentration penalty: $\lambda_{L_2}$ multiplies the mean squared ratio of each
 fitted weight to its initial weight $w_{0,i}$, which discourages the optimizer from carrying the fit on
-a few heavily inflated records. It applies to informed $L_0$ and is zero for the two baselines, which
-run the shared calibrator without the gate and concentration terms.
+a few heavily inflated records. It applies to informed $L_0$ only; the random and survey-weight baselines
+run the shared calibrator without any selection or concentration term.
 
 Read as a sampler, the calibration term keeps the retained sample faithful to the targets, the $L_0$
 penalty sets the sample size, and the $L_2$ penalty governs weight concentration. The concentration
@@ -109,20 +110,26 @@ step, which matters operationally but is not the object of the experiment.
 \label{sec:experiment_design}
 
 The experiment evaluates whether informed selection produces a better dataset than the alternative
-samplers at the same record budget. From one candidate universe and one target set, we compare informed
-$L_0$ selection against two matched-budget baselines, which span where calibration enters the reduction
-(Section~\ref{sec:reduction_methods}):
+samplers at the same record budget. From one candidate universe and one target set, we compare four
+samplers at a matched record budget: informed $L_0$ selection, its convex $L_1$ analog, and two classical
+reduction baselines that bracket where calibration enters (Section~\ref{sec:reduction_methods}):
 
 \begin{itemize}
     \item \textbf{Informed $L_0$ sampling with Hard Concrete gates.} The shared calibrator with the
     gate and concentration terms above selects records and fits their weights jointly at a chosen
     budget, set through $\lambda_{L_0}$.
+    \item \textbf{Informed $L_1$ selection.} The same shared calibrator with the Hard Concrete $L_0$ term
+    replaced by a convex $L_1$ penalty on the weights, solved by a proximal (iterative soft-thresholding)
+    step that drives unneeded weights to exact zeros (Section~\ref{sec:l1_background}). As with informed
+    $L_0$, an outer bisection tunes the penalty $\lambda_{L_1}$ to the requested record count. It is the
+    joint analog of informed $L_0$---selection and weighting share one objective with no post-selection
+    reweighting---so a single penalty must serve both, which is the property the comparison isolates.
     \item \textbf{Random sampling with gradient-descent reweighting.} A random subset of the candidate
     universe of the same size is drawn, then the shared calibrator fits its weights to the same targets
     without the gate or concentration terms. This is the reduce-first, calibrate-after baseline.
     \item \textbf{Survey-weight sampling (Hansen--Hurwitz).} The shared calibrator first reweights the
     full universe to the targets, and records are then drawn with probability proportional to those
-    weights, \emph{with replacement}; each of the $n$ draws receives an equal share $W/n$ of the total
+    weights, with replacement; each of the $n$ draws receives an equal share $W/n$ of the total
     weight $W$, and repeated draws accumulate on the same record. This is the unbiased Hansen--Hurwitz
     integerisation \citep{hansen1943} of the dense weights, which preserves their expectation at every
     budget, and is the calibrate-then-reduce baseline.
@@ -140,7 +147,7 @@ retained count.
 
 A sampler can match the targets it is fit to and still generalize poorly. To test generalization, the
 design separates the targets used to fit the weights from the targets used to score the result, and
-holds out \emph{whole target families} rather than a random subset of targets. The reason is structural:
+holds out whole target families rather than a random subset of targets. The reason is structural:
 targets within a family nest (a national total is the sum of its state cells), so a random target split
 leaks: a held-out cell is nearly determined by its retained siblings, which would overstate
 generalization. Holding out a whole family removes that leakage.
@@ -202,7 +209,9 @@ Median ARE & Median absolute relative error $|\hat{t}_j - t_j| / |t_j|$ over sco
 Mean and max ARE & Mean and maximum of the same per-target errors & Reported alongside the median, flagged as tail-sensitive \\
 Micro vs.\ macro average & Mean over all targets vs.\ mean of the per-family means & The micro mean is dominated by \texttt{irs\_soi} (71\% of targets); the macro mean weights each family equally \\
 Effective sample size & $\mathrm{ESS} = (\sum_i w_i)^2 / \sum_i w_i^2$ and the implied design effect & A sampler can fit the targets while concentrating population mass on a few records, so ESS is a primary result, not a footnote \\
-Retained count, max weight, runtime & Non-zero record count, largest fitted weights, wall-clock time & Sample size, weight concentration, and compute cost \\
+Retained count & Non-zero record count & Sample size \\
+Max weight & Largest fitted weight & Weight concentration \\
+Runtime & Wall-clock time & Compute cost \\
 \bottomrule
 \end{tabular}
 }

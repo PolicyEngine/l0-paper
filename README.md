@@ -37,7 +37,7 @@ l0-paper/
 ├── tests/                   # offline tests (toy frame); no network, no PolicyEngine-US
 ├── pyproject.toml           # package metadata, the `l0` entry point, extras, Populace paths
 ├── uv.lock                  # locked Python environment
-└── .github/workflows/ci.yml # pytest + ruff against a pinned Populace commit
+└── .github/workflows/ci.yml # pytest + ruff against PolicyEngine/populace main
 ```
 
 ## The `l0` command line
@@ -83,7 +83,7 @@ Extras: `--extra data` installs the heavy real-data path (`populace-data`,
 `policyengine-us`, Hugging Face, H5 I/O); `--extra viz` installs the plotting
 dependencies the figure renderers need.
 
-CI checks out `l0-paper` and a pinned `PolicyEngine/populace` commit, then runs
+CI checks out `l0-paper` and `PolicyEngine/populace` (`main`), then runs
 `uv run --locked --extra viz pytest` and `uv run --locked ruff check .`.
 
 ## Experiment workflow

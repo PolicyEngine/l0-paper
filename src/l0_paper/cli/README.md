@@ -149,8 +149,12 @@ uv run --extra data l0 poc \
 Outputs per run: `run_manifest.json` (Populace commit, registry version, base-H5
 and facts SHA-256, solver options, seeds, retained count, in/out-of-sample fit
 metrics, runtime, output paths), `<method>.npz` (weights + loss trajectory +
-diagnostics), and `tables/` (paper-ready LaTeX). Pass `--write-paper-tables` to
-also overwrite `paper/tables/`.
+diagnostics), and `tables/` (single-budget draft LaTeX, for inspection only).
+The manuscript's result tables (`paper/tables/{sampling_comparison,
+calibration_accuracy,presets,paired_comparison}.tex`) are regenerated from the
+multi-seed sweep instead: `l0 figures --sweep <run> --anchor-budget 10000
+--paper-figures` writes them (alongside the figures) so they stay in sync with the
+data — `l0 poc` no longer touches `paper/tables/`.
 
 Metrics (aligned with PR #5's stats list): mean/median/max absolute relative
 error in- and out-of-sample, ESS, retained count, weight distribution incl. the

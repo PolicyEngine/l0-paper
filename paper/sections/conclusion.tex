@@ -12,7 +12,7 @@ and keeps the reduced dataset calibrated to its targets. We compare the method a
 matched-budget baselines that share its calibrator, random sampling with reweighting and survey-weight
 (Hansen--Hurwitz) sampling, and report how the size, geography, and weight controls behave.
 
-Across the budget sweep, informed selection reaches much lower out-of-sample error than random sampling
+Across the budget sweep, informed selection reaches lower out-of-sample error than random sampling
 under aggressive compression, the two converge as the budget grows and random sampling becomes the more
 accurate of them, and survey-weight sampling is the least accurate throughout. Informed selection's
 distinctive value is therefore operational: it sets the dataset size, the geographic emphasis, and the
@@ -20,7 +20,6 @@ weight concentration through explicit parameters in one optimization, and it avo
 random draw at tight budgets.
 
 The contribution is therefore twofold: a target-informed sampling method, and an open pipeline,
-\populace{}, that makes the method a configuration choice other projects can reuse. Future work
-can benchmark the sampler against classical calibration estimators and convex sparse methods,
-formalize the out-of-sample target evaluation, and extend the geographic detail of the candidate
-universe.
+\populace{}, that makes the method a configuration choice other projects can reuse.
+Section~\ref{sec:future_work} sets out the subnational and build-large-then-prune extensions the method is
+designed for.

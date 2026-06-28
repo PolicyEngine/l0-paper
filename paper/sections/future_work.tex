@@ -1,0 +1,22 @@
+\section{Future work}
+\label{sec:future_work}
+
+This study is a proof of concept on \populace{}'s national and state target surface. The production
+motivation for informed selection is subnational: calibrating one dataset to congressional-district totals
+while keeping district sums consistent with state and national totals. Reaching that surface means pairing
+a much larger candidate universe---records replicated across the geographic placements district targets
+require---with the finer target system the pipeline can already construct (Appendix~\ref{app:targets}), and
+testing whether informed $L_0$ holds its small-budget edge when the targets are local and numerous. That
+setting also invites the head-to-head benchmark this paper sets up but does not run: against generalized
+regression and iterative proportional fitting (Section~\ref{sec:background}), the classical calibrators the
+sampler is expected to respect. \citet{tanton2014co} compare generalized regression with combinatorial
+optimisation for small-area reweighting, and a subnational build would place informed $L_0$ on the same
+footing.
+
+A second thread is the build-large-then-prune regime the controls are designed for, in which a pipeline
+assembles a candidate universe far larger than it can ship---millions of records rather than the 75{,}112
+used here---and prunes it to a deployable budget under the calibration targets. The compression ratios
+would be far more aggressive than the range tested here, which is where informed selection is expected to
+help most: a random draw from a tight budget is least likely to span a demanding target system, so the
+gates have the most to add. Whether their small-budget edge scales to that regime, and at what compute
+cost (Appendix~\ref{app:cost}), is what that setting tests.

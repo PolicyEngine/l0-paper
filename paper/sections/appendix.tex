@@ -51,6 +51,53 @@ validation-only diagnostic and is never fit (Section~\ref{sec:oos}).}
 \label{tab:target_sources}
 \end{table}
 
+\section{Calibration loss cap: \texorpdfstring{$c=1$}{c=1} versus \texorpdfstring{$c=10$}{c=10}}
+\label{app:loss_cap}
+
+The calibration loss caps each target's contribution at $c$ (Equation~\ref{eq:loss_cal}), and above the
+cap the target's gradient is zero. The cap is therefore more than a reporting choice: it shapes the fit, as
+a target already missed by more than $c$ contributes a constant and stops pulling the optimizer. The runs in
+the main text use Populace's production value $c=1$. Relaxing it to the generic solver default $c=10$ keeps
+targets active until they are missed by an order of magnitude, which changes informed $L_0$'s behaviour
+most where the budget is tightest and most targets start far from their value.
+
+Table~\ref{tab:loss_cap} compares informed $L_0$ (out-of-sample, $\lambda_{L_2}=0$) at the two caps. Under
+the looser cap informed $L_0$ is uniformly more accurate, and the gain is largest under aggressive
+compression: at the 2{,}000-record budget its out-of-sample median ARE falls from 47.3\% to 39.8\% and its
+mean from 225\% to 54\%. The median improvement is enough to change the ranking at the most drastic
+budgets: at $c=10$ informed $L_0$'s 2{,}000-record median of 39.8\% is the best of any method (random +
+reweight is 57.0\% and survey-weight 46.8\% at that cap), whereas at the production $c=1$ the three are
+level there (Section~\ref{sec:results}). The mechanism is the starved gradient: at a tight budget most
+targets sit far above $c=1$, so the optimizer fits only the already-near targets and the tail inflates,
+while $c=10$ leaves a richer gradient and a better-conditioned fit. We report the production $c=1$ as the
+headline because it is what the deployed build uses; the $c=10$ contrast shows that informed $L_0$'s
+advantage at drastic pruning widens, not narrows, under an easier loss.
+
+\begin{table}[H]
+\centering
+{\tablefont
+\begin{tabular}{rrrrr}
+\toprule
+ & \multicolumn{2}{c}{Median ARE (\%)} & \multicolumn{2}{c}{Mean ARE (\%)} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Requested records & $c=1$ & $c=10$ & $c=1$ & $c=10$ \\
+\midrule
+2{,}000  & 47.3 & 39.8 & 225.0 & 53.5 \\
+5{,}000  & 41.7 & 26.3 & 481.9 & 38.2 \\
+10{,}000 & 35.0 & 23.6 & 584.0 & 36.0 \\
+20{,}000 & 29.0 & 20.7 & 757.7 & 32.5 \\
+40{,}000 & 23.3 & 18.0 & 884.3 & 31.3 \\
+\bottomrule
+\end{tabular}
+}
+\caption{Informed $L_0$ out-of-sample ARE at the production loss cap $c=1$ (main text) versus the looser
+generic default $c=10$, at $\lambda_{L_2}=0$, as cross-seed means over three seeds. The two runs are
+identical in every other respect---candidate universe, target weighting, optimizer settings, and seeds---so
+the cap is the only difference. The looser cap keeps more targets contributing gradient and improves
+informed $L_0$ most under aggressive compression.}
+\label{tab:loss_cap}
+\end{table}
+
 \section{From a record budget to the sparsity penalty}
 \label{app:presets}
 
@@ -59,11 +106,55 @@ count is monotone and problem-dependent rather than closed-form: a larger $\lamb
 records, and how many depends on the candidate universe and the targets. Each build therefore specifies
 a requested record count, and an outer bisection adjusts $\lambda_{L_0}$ over eight steps (each a full
 optimization) until the achieved count matches. Table~\ref{tab:presets} reports the $\lambda_{L_0}$ that
-each requested count converged to in the \texttt{weighted-loss-3seed} run (informed $L_0$,
-$\lambda_{L_2}=0$), with the achieved count. The penalty spans about an order of magnitude across the
-budget range, and the achieved count lands within three per cent of the request at every point.
+each requested count converged to (informed $L_0$, $\lambda_{L_2}=0$), with the achieved count. The penalty
+spans about an order of magnitude across the budget range, and the achieved count lands within three per
+cent of the request at every point.
 
 \input{tables/presets}
+
+The two informed methods reach a record budget by the same outer bisection but through different penalties,
+and that difference is what the $L_0$-versus-$L_1$ comparison turns on
+(Table~\ref{tab:budget_penalty_methods}). Informed $L_1$ replaces the Hard Concrete term with a convex
+penalty on the fitted weights, implemented as $\lambda_{L_1}\frac{1}{n}\sum_i w_i/w_{0,i}$, the mean weight
+ratio; this is the $L_1$ analog of the $L_2$ concentration penalty in Equation~\ref{eq:loss}, and the bound
+on non-negative weights makes it the $L_1$ norm of Equation~\ref{eq:l1} up to the per-record scaling. Each
+proximal step takes a gradient step and then soft-thresholds the ratios,
+$r_i \leftarrow \max(r_i - \eta\,\lambda_{L_1}/n,\, 0)$ with $r_i = w_i/w_{0,i}$, so a record whose weight
+ratio falls below the threshold is set to exactly zero. The outer bisection moves $\lambda_{L_1}$ over the
+same eight steps used for $\lambda_{L_0}$, and the achieved counts land near the request (1{,}859, 4{,}923,
+9{,}956, 20{,}094, and 38{,}805 records for the 2{,}000- to 40{,}000-record budgets). The structural
+difference is that the single penalty $\lambda_{L_1}$ controls both selection and shrinkage: the same
+threshold that zeroes a record's weight also pulls every surviving weight toward zero, so a tight budget
+forces a large $\lambda_{L_1}$ that collapses the fit (Section~\ref{sec:results}). Informed $L_0$ keeps the
+two separate---the Hard Concrete gate decides membership while the fitted weight is free to take whatever
+positive value the targets require---so the bisection over $\lambda_{L_0}$ moves the count without shrinking
+the survivors.
+
+\begin{table}[H]
+\centering
+{\tablefont
+\begin{tabular}{@{}p{0.26\textwidth}p{0.33\textwidth}p{0.33\textwidth}@{}}
+\toprule
+ & Informed $L_0$ & Informed $L_1$ \\
+\midrule
+Penalty added to $\mathcal{L}_{\mathrm{cal}}$ & $\lambda_{L_0}\sum_i \bar{z}_i$ (expected open gates) & $\lambda_{L_1}\,\frac{1}{n}\sum_i w_i/w_{0,i}$ (mean weight ratio) \\
+Quantity penalized & Gate activation probabilities $\bar{z}_i$ & Fitted weight ratios $w_i/w_{0,i}$ \\
+Optimizer & Adam on weights and gates & Proximal gradient: Adam step, then soft-threshold \\
+Route to an exact zero & Deterministic gate closes (Equation~\ref{eq:deterministic_gate}) & Soft-threshold $r_i \leftarrow \max(r_i - \eta\,\lambda_{L_1}/n,\, 0)$ \\
+Budget $\rightarrow$ penalty & Eight-step bisection on $\log_{10}\lambda_{L_0}$ & Eight-step bisection on $\log_{10}\lambda_{L_1}$ \\
+Bisection bracket & $[10^{-7},\, 10^{1}]$ & $[10^{-3},\, 10^{2}]$ \\
+Selection vs.\ shrinkage & Separate: the gate selects, the weight is free & Coupled: one penalty does both \\
+\bottomrule
+\end{tabular}
+}
+\caption{How the two informed methods map a requested record budget to a sparsity penalty. Both wrap the
+shared calibrator in the same eight-step outer bisection (Table~\ref{tab:presets}) and differ in the
+penalty that the bisection tunes. The coupling in the last row---one $\lambda_{L_1}$ setting both the
+retained count and the shrinkage of the survivors---is the property the $L_0$-versus-$L_1$ comparison
+isolates (Section~\ref{sec:discussion}). Source: the \populace{} proximal ($L_1$) and Hard Concrete
+($L_0$) solvers.}
+\label{tab:budget_penalty_methods}
+\end{table}
 
 \section{Optimization hyperparameters}
 \label{app:hyperparameters}
@@ -88,7 +179,7 @@ Weight jitter SD & 0.05 & Log-space noise on weights at initialization \\
 Logit jitter SD & 0.01 & Log-space noise on gate logits at initialization \\
 Learning rate & 0.02 & Adam optimizer step size \\
 Epochs & 1{,}500 & Training iterations \\
-Target loss cap $c$ & 10 & Caps a single target's contribution to $\mathcal{L}_{\text{cal}}$; the runs reported here used the generic solver default $c=10$, while Populace's production US-fiscal build caps at $c=1$ \\
+Target loss cap $c$ & 1 & Caps a single target's contribution to $\mathcal{L}_{\text{cal}}$; the runs reported here use Populace's production US-fiscal value $c=1$ (Appendix~\ref{app:loss_cap} contrasts the generic default $c=10$) \\
 $\lambda_{L_0}$ & $2\times10^{-6}$ to $5\times10^{-5}$ & Sparsity penalty, set per build by bisection to the target size (Appendix~\ref{app:presets}) \\
 $\lambda_{L_2}$ & $0$ (headline), $10^{-4}$ (operability) & Soft concentration penalty on $(w_i/w_{0,i})^2$ (mean over records); informed $L_0$ only \\
 Budget bisection steps & 8 & Re-runs of the optimization that tune $\lambda_{L_0}$ to the target size \\
@@ -162,15 +253,15 @@ assembled dataset.
 \label{app:cost}
 
 Figure~\ref{fig:cost_accuracy} reports the wall-clock runtime of each method against the out-of-sample
-mean ARE it reaches, across the budget sweep, so the accuracy comparison can be read alongside its
+median ARE it reaches, across the budget sweep, so the accuracy comparison can be read alongside its
 compute cost.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.8\textwidth]{figures/f5_cost_accuracy}
-    \caption{Cost against accuracy: wall-clock runtime (log scale) against out-of-sample mean ARE (log
-    scale) for the three methods, each point labelled by its retained-record budget. Informed $L_0$
-    runtime includes the eight-step $\lambda_{L_0}$ budget bisection; the baselines run once at the
-    matched budget. Points are the mean over three seeds.}
+    \caption{Cost against accuracy: wall-clock runtime (log scale) against out-of-sample median ARE (log
+    scale) for the four methods, each point labelled by its requested record budget. Informed $L_0$ and
+    informed $L_1$ runtimes include the eight-step budget bisection that sets their penalty; the matched
+    baselines run once at the budget. Points are the mean over three seeds.}
     \label{fig:cost_accuracy}
 \end{figure}

@@ -5,19 +5,19 @@
 \toprule
 Requested records & $\lambda_{L_0}$ (converged) & Achieved records \\
 \midrule
-2{,}000  & $4.9\times10^{-5}$ & 1{,}962 \\
-5{,}000  & $2.3\times10^{-5}$ & 4{,}935 \\
-10{,}000 & $1.2\times10^{-5}$ & 9{,}770 \\
-20{,}000 & $5.0\times10^{-6}$ & 20{,}406 \\
-40{,}000 & $2.1\times10^{-6}$ & 39{,}586 \\
+2{,}000 & $2.8\times10^{-5}$ & 2{,}032 \\
+5{,}000 & $1.3\times10^{-5}$ & 4{,}973 \\
+10{,}000 & $7.5\times10^{-6}$ & 9{,}763 \\
+20{,}000 & $3.9\times10^{-6}$ & 20{,}237 \\
+40{,}000 & $1.9\times10^{-6}$ & 40{,}109 \\
 \bottomrule
 \end{tabular}
 }
 \caption{The sparsity penalty $\lambda_{L_0}$ that each requested record count converged to under the
-eight-step budget bisection (\texttt{weighted-loss-3seed}, informed $L_0$, $\lambda_{L_2}=0$), with the
-achieved retained-record count. Values are means over three seeds. A larger $\lambda_{L_0}$ prunes more
-records; the bisection sets it per build rather than by hand.}
+eight-step budget bisection (informed $L_0$, $\lambda_{L_2}=0$), with the achieved retained-record
+count. Values are means over 3 seeds. A larger $\lambda_{L_0}$ prunes more records; the
+bisection sets it per build rather than by hand.}
 \label{tab:presets}
-\tablenote{$\lambda_{L_0}$ and the achieved count are read from each run's metrics; the achieved count is
-within three per cent of the requested count at every budget.}
+\tablenote{$\lambda_{L_0}$ and the achieved count are read from each run's metrics; the achieved count
+is within three per cent of the requested count at every budget.}
 \end{table}

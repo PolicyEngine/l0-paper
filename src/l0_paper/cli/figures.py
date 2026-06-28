@@ -42,6 +42,7 @@ from l0_paper.experiments.tables import SWEEP_METHOD_LABELS, SWEEP_METHOD_ORDER
 # these commands run from the repo checkout.
 FONTS_DIR = Path(__file__).resolve().parent / "assets" / "fonts" / "Inter"
 PAPER_FIGURES = Path.cwd() / "paper" / "figures"
+PAPER_TABLES = Path.cwd() / "paper" / "tables"
 
 # PolicyEngine palette (theme.css --chart-1/2/5), stable per method across every
 # figure. Each method also gets a distinct marker so the series stay legible in
@@ -155,6 +156,12 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
         frontier_in=frontier,
         paired=paired,
         rotation_oos=rotation_front,
+    )
+    # Curated paper result tables (median-led, all methods, l2=0), regenerated from
+    # the same sweep so paper/tables/ stays in sync. Kept in a separate directory so
+    # they do not clobber the report's frontier-style tables above.
+    paper_table_paths = tables.write_paper_tables(
+        out_dir / "paper_tables", df, budget=anchor_budget
     )
     frontier_oos = frontier
 
@@ -461,6 +468,7 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
         "has_rotation": has_rotation,
         "validation_only_families": validation_only,
         "table_paths": table_paths,
+        "paper_table_paths": paper_table_paths,
         "summary": summary_path,
         "anchor_budget": anchor_budget,
     }
@@ -859,14 +867,20 @@ def main() -> None:
     for path in written:
         print(f"  figure: {path}")
 
-    if args.paper_figures and written:
-        PAPER_FIGURES.mkdir(parents=True, exist_ok=True)
+    if args.paper_figures:
         import shutil
 
-        for path in written:
-            if path.suffix == ".png":
-                shutil.copy(path, PAPER_FIGURES / path.name)
-        print(f"Copied static figures into {PAPER_FIGURES}")
+        if written:
+            PAPER_FIGURES.mkdir(parents=True, exist_ok=True)
+            for path in written:
+                if path.suffix == ".png":
+                    shutil.copy(path, PAPER_FIGURES / path.name)
+            print(f"Copied static figures into {PAPER_FIGURES}")
+
+        PAPER_TABLES.mkdir(parents=True, exist_ok=True)
+        for path in report["paper_table_paths"].values():
+            shutil.copy(path, PAPER_TABLES / path.name)
+        print(f"Copied paper result tables into {PAPER_TABLES}")
 
 
 if __name__ == "__main__":

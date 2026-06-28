@@ -19,9 +19,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: PolicyEngine/populace
-          # Commit carrying the proximal L1 solver (method="prox", l1_lambda).
-          # Repoint to the merged commit/tag once the L1 + L2 solver lands on main.
-          ref: 258e7eb453baa8e1d154e35b0522c3b3c88fed7e
+          # The proximal L1 solver (method="prox", l1_lambda) is on main as of PR #184.
+          ref: main
           path: populace
 
       - name: Set up uv

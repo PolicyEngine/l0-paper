@@ -5,10 +5,10 @@
 \toprule
 Geographic level & Targets & Median ARE (\%) & Mean ARE (\%) & Max ARE (\%) \\
 \midrule
-National & 129 & 7.6 & 39.2 & 680.9 \\
-State & 4{,}058 & 11.2 & 16.8 & 14{,}543.7 \\
+National & 129 & 31.3 & 458.6 & 9{,}777.2 \\
+State & 4{,}058 & 35.3 & 593.6 & 81{,}987.9 \\
 \midrule
-\textbf{All scored targets} & 4{,}187 & 11.0 & 17.5 & 14{,}543.7 \\
+\textbf{All scored targets} & 4{,}187 & 35.3 & 589.5 & 81{,}987.9 \\
 \bottomrule
 \end{tabular}
 }
@@ -16,8 +16,7 @@ State & 4{,}058 & 11.2 & 16.8 & 14{,}543.7 \\
 $\sim$10{,}000-record budget, measured as absolute relative error (ARE) across the in-sample targets.
 The median reports the typical target's error; the mean and maximum are inflated by a handful of
 near-zero-denominator targets whose relative error is large despite small absolute misses
-(Section~\ref{sec:results-degenerate}).
-Numbers are filled from the \texttt{weighted-loss-3seed} run.}
+(Section~\ref{sec:results-degenerate}).}
 \label{tab:calibration_accuracy}
 \tablenote{Target counts are read from the run manifest. No congressional-district targets are in the
 prioritized subset, so that level is not scored. Out-of-sample geographic accuracy is not broken out
