@@ -861,9 +861,12 @@ def _sweep_split(
                 continue
 
             cell_start = perf_counter()
+            cell_label = (
+                f"{holdout_type} fold={fold} seed={seed} budget={budget} "
+                f"l2={l2_lambda:g}"
+            )
             print(
-                f"  [{holdout_type} fold={fold} seed={seed} budget={budget} "
-                f"l2={l2_lambda:g}] starting {', '.join(pending_methods)}.",
+                f"  [{cell_label}] starting {', '.join(pending_methods)}.",
                 flush=True,
             )
             runs = []
@@ -905,43 +908,81 @@ def _sweep_split(
                 )
                 matched = l0.n_selected
                 runs.append(l0)
-                print(f"  [{holdout_type} fold={fold} seed={seed} budget={budget} "
-                      f"l2={l2_lambda:g}] "
-                      f"L0 retained {matched:,} (l0_lambda={l0.l0_lambda:.3e})",
-                      flush=True)
+                print(
+                    f"  [{cell_label}] L0 retained {matched:,} "
+                    f"(l0_lambda={l0.l0_lambda:.3e})",
+                    flush=True,
+                )
             elif l0_key in budget_achieved_by_method:
                 print(
-                    f"  [{holdout_type} fold={fold} seed={seed} budget={budget} "
-                    f"l2={l2_lambda:g}] reusing completed L0 matched budget "
-                    f"{matched:,}.",
+                    f"  [{cell_label}] reusing completed L0 matched budget {matched:,}.",
                     flush=True,
                 )
             else:
                 # No L0 to set the budget; match the requested budget directly.
-                print(f"  [{holdout_type} fold={fold} seed={seed} budget={budget} "
-                      f"l2={l2_lambda:g}] "
-                      f"baselines at requested budget {matched:,} (no L0).",
-                      flush=True)
+                print(
+                    f"  [{cell_label}] baselines at requested budget {matched:,} "
+                    "(no L0).",
+                    flush=True,
+                )
             if "dense_sample" in pending_methods:
+                step_start = perf_counter()
+                print(
+                    f"  [{cell_label}] running dense_sample baseline at matched "
+                    f"budget {matched:,}...",
+                    flush=True,
+                )
                 runs.append(sample_from_dense(
                     dense, n_sample=matched, seed=seed, dense_runtime=dense_runtime,
                     max_weight_ratio=split_baseline_optimizer.get("max_weight_ratio"),
                     target_loss_cap=split_baseline_optimizer["target_loss_cap"],
                     **sample_kwargs,
                 ))
+                print(
+                    f"  [{cell_label}] dense_sample baseline finished in "
+                    f"{perf_counter() - step_start:.1f}s.",
+                    flush=True,
+                )
             if "informed_l1" in pending_methods:
                 # Convex-sparse selector: proximal L1 at the matched budget, its own
                 # bisection on l1_lambda hitting the same retained count as L0.
+                step_start = perf_counter()
+                print(
+                    f"  [{cell_label}] running informed_l1 baseline at matched "
+                    f"budget {matched:,}...",
+                    flush=True,
+                )
                 runs.append(run_l1(
                     frame, fit_targets, target_records=matched, seed=seed,
                     **split_baseline_optimizer,
                 ))
+                print(
+                    f"  [{cell_label}] informed_l1 baseline finished in "
+                    f"{perf_counter() - step_start:.1f}s.",
+                    flush=True,
+                )
             if "random_reweight" in pending_methods:
+                step_start = perf_counter()
+                print(
+                    f"  [{cell_label}] running random_reweight baseline at matched "
+                    f"budget {matched:,}...",
+                    flush=True,
+                )
                 runs.append(run_random_then_reweight(
                     frame, fit_targets, n_sample=matched, seed=seed,
                     **split_baseline_optimizer,
                 ))
+                print(
+                    f"  [{cell_label}] random_reweight baseline finished in "
+                    f"{perf_counter() - step_start:.1f}s.",
+                    flush=True,
+                )
             for run in runs:
+                step_start = perf_counter()
+                print(
+                    f"  [{cell_label}] scoring {run.method}...",
+                    flush=True,
+                )
                 _score_and_emit(
                     rows, run=run, frame=frame, fit_targets=fit_targets,
                     holdout_targets=holdout_targets, method=run.method, seed=seed,
@@ -962,14 +1003,22 @@ def _sweep_split(
                 )
                 completed_methods.add(run_key)
                 budget_achieved_by_method[run_key] = int(run.n_selected)
+                print(
+                    f"  [{cell_label}] scored {run.method} in "
+                    f"{perf_counter() - step_start:.1f}s.",
+                    flush=True,
+                )
             if checkpoint is not None:
-                checkpoint(
-                    f"{holdout_type} fold={fold} seed={seed} budget={budget} "
-                    f"l2={l2_lambda:g}"
+                step_start = perf_counter()
+                print(f"  [{cell_label}] writing checkpoint...", flush=True)
+                checkpoint(cell_label)
+                print(
+                    f"  [{cell_label}] checkpoint written in "
+                    f"{perf_counter() - step_start:.1f}s.",
+                    flush=True,
                 )
             print(
-                f"  [{holdout_type} fold={fold} seed={seed} budget={budget} "
-                f"l2={l2_lambda:g}] completed in {perf_counter() - cell_start:.1f}s.",
+                f"  [{cell_label}] completed in {perf_counter() - cell_start:.1f}s.",
                 flush=True,
             )
     return dense_runtimes

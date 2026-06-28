@@ -357,6 +357,116 @@ def test_sweep_method_expansion_reuses_existing_l0_budget(monkeypatch):
     assert any(row["method"] == "random_reweight" for row in rows)
 
 
+def test_sweep_logs_cell_substeps(monkeypatch, capsys):
+    monkeypatch.setattr(
+        sweep.metrics,
+        "degenerate_target_names",
+        lambda *_args, **_kwargs: set(),
+    )
+    monkeypatch.setattr(
+        sweep.target_loss,
+        "target_loss_weights",
+        lambda *_args, **_kwargs: np.asarray([1.0]),
+    )
+
+    def fake_run_l0(*_args, **_kwargs):
+        return SimpleNamespace(
+            method="informed_l0",
+            n_selected=5,
+            l0_lambda=1e-4,
+            weights=np.ones(2),
+        )
+
+    def fake_sample_from_dense(*_args, n_sample, **_kwargs):
+        return SimpleNamespace(
+            method="dense_sample",
+            n_selected=n_sample,
+            weights=np.ones(2),
+        )
+
+    def fake_run_l1(*_args, target_records, **_kwargs):
+        return SimpleNamespace(
+            method="informed_l1",
+            n_selected=target_records,
+            weights=np.ones(2),
+        )
+
+    def fake_random(*_args, n_sample, **_kwargs):
+        return SimpleNamespace(
+            method="random_reweight",
+            n_selected=n_sample,
+            weights=np.ones(2),
+        )
+
+    def fake_score_and_emit(rows, *, run, method, seed, budget_requested, **_kwargs):
+        rows.append(
+            {
+                "method": method,
+                "seed": seed,
+                "budget_requested": budget_requested,
+                "budget_achieved": run.n_selected,
+                "l2_lambda": 0.0,
+                "holdout_type": "fixed_family",
+                "fold": -1,
+                "split": "na",
+                "scope": "run",
+                "scope_value": "",
+                "metric": "budget_achieved",
+                "value": float(run.n_selected),
+            }
+        )
+
+    monkeypatch.setattr(
+        sweep, "calibrate_dense", lambda *_args, **_kwargs: ("dense", 0.5)
+    )
+    monkeypatch.setattr(sweep, "run_l0", fake_run_l0)
+    monkeypatch.setattr(sweep, "sample_from_dense", fake_sample_from_dense)
+    monkeypatch.setattr(sweep, "run_l1", fake_run_l1)
+    monkeypatch.setattr(sweep, "run_random_then_reweight", fake_random)
+    monkeypatch.setattr(sweep, "_score_and_emit", fake_score_and_emit)
+
+    rows: list[dict] = []
+    checkpoints: list[str] = []
+
+    sweep._sweep_split(
+        rows,
+        frame=SimpleNamespace(),
+        fit_targets=(),
+        holdout_targets=(),
+        budgets=[10],
+        seeds=[0],
+        l0_optimizer={
+            "weight_entity": "household",
+            "budget_iters": 8,
+            "epochs": 100,
+        },
+        baseline_optimizer={
+            "weight_entity": "household",
+            "target_loss_cap": 10.0,
+        },
+        sample_kwargs={},
+        holdout_type="fixed_family",
+        fold=-1,
+        methods=["informed_l0", "dense_sample", "informed_l1", "random_reweight"],
+        l2_lambda=0.0,
+        target_loss_weighting="uniform",
+        checkpoint=checkpoints.append,
+    )
+
+    out = capsys.readouterr().out
+    assert "running dense_sample baseline at matched budget 5" in out
+    assert "dense_sample baseline finished" in out
+    assert "running informed_l1 baseline at matched budget 5" in out
+    assert "informed_l1 baseline finished" in out
+    assert "running random_reweight baseline at matched budget 5" in out
+    assert "random_reweight baseline finished" in out
+    assert "scoring informed_l0" in out
+    assert "scored random_reweight" in out
+    assert "writing checkpoint" in out
+    assert "checkpoint written" in out
+    assert checkpoints == ["fixed_family fold=-1 seed=0 budget=10 l2=0"]
+
+
 def test_parallel_sweep_split_merges_worker_rows_in_parent(monkeypatch, tmp_path):
     def fake_sweep_split(rows, *, seeds, diag_rows, checkpoint, **_kwargs):
         assert len(seeds) == 1
