@@ -1,9 +1,10 @@
 """Render paper-ready LaTeX tables from run summaries.
 
 The generated tables drop into ``paper/tables/`` in place of the ``\\tbc``
-placeholders. Only the rows this experiment produces are filled (informed L0 and
-the dense + weighted-sampling baseline, which the paper labels "Survey-weight
-sampling"); the other two paper-method rows stay ``\\tbc`` until implemented.
+placeholders. Rows for the methods this experiment produces are filled (informed
+L0, informed L1, random + reweight, and the dense + weighted-sampling baseline,
+which the paper labels "Survey-weight sampling"); any remaining paper-method rows
+stay ``\\tbc`` until implemented.
 """
 
 from __future__ import annotations
@@ -17,10 +18,11 @@ if TYPE_CHECKING:
 
 SWEEP_METHOD_LABELS = {
     "informed_l0": r"Informed $L_0$",
+    "informed_l1": r"Informed $L_1$",
     "random_reweight": "Random + reweight",
     "dense_sample": "Survey-weight sampling",
 }
-SWEEP_METHOD_ORDER = ("informed_l0", "random_reweight", "dense_sample")
+SWEEP_METHOD_ORDER = ("informed_l0", "informed_l1", "random_reweight", "dense_sample")
 
 
 def _pct(stats: dict[str, Any], key: str = "mean_are") -> str:
@@ -67,6 +69,7 @@ def render_sampling_comparison(summaries: dict[str, dict[str, Any]], budget: int
     rows = "\n".join(
         [
             row("Informed $L_0$", "informed_l0"),
+            row("Informed $L_1$", "informed_l1"),
             row("Random + reweight", "random_reweight"),
             row("Survey-weight sampling", "dense_sample"),
             row("Combinatorial optim.", None),
