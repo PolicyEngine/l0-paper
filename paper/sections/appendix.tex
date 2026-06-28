@@ -116,13 +116,16 @@ The two informed methods reach a record budget by the same outer bisection but t
 and that difference is what the $L_0$-versus-$L_1$ comparison turns on
 (Table~\ref{tab:budget_penalty_methods}). Informed $L_1$ replaces the Hard Concrete term with a convex
 penalty on the fitted weights, implemented as $\lambda_{L_1}\frac{1}{n}\sum_i w_i/w_{0,i}$, the mean weight
-ratio; this is the $L_1$ analog of the $L_2$ concentration penalty in Equation~\ref{eq:loss}, and the bound
-on non-negative weights makes it the $L_1$ norm of Equation~\ref{eq:l1} up to the per-record scaling. Each
+ratio; this is the $L_1$ analog of the $L_2$ concentration penalty in Equation~\ref{eq:loss}. Because the
+candidate weights are reset to a uniform prior (Section~\ref{sec:experiment_design}), the denominator
+$w_{0,i}$ is one shared constant, so the penalty is proportional to the plain $L_1$ norm $\sum_i w_i$ of
+Equation~\ref{eq:l1}---the constant folds into $\lambda_{L_1}$---and soft-thresholding the ratio is
+soft-thresholding the weight, as in Section~\ref{sec:l1_background}. Each
 proximal step takes a gradient step and then soft-thresholds the ratios,
 $r_i \leftarrow \max(r_i - \eta\,\lambda_{L_1}/n,\, 0)$ with $r_i = w_i/w_{0,i}$, so a record whose weight
 ratio falls below the threshold is set to exactly zero. The outer bisection moves $\lambda_{L_1}$ over the
-same eight steps used for $\lambda_{L_0}$, and the achieved counts land near the request (1{,}859, 4{,}923,
-9{,}956, 20{,}094, and 38{,}805 records for the 2{,}000- to 40{,}000-record budgets). The structural
+same eight steps used for $\lambda_{L_0}$, and the achieved counts land near the request (1{,}859, 4{,}951,
+9{,}709, 20{,}378, and 40{,}156 records for the 2{,}000- to 40{,}000-record budgets). The structural
 difference is that the single penalty $\lambda_{L_1}$ controls both selection and shrinkage: the same
 threshold that zeroes a record's weight also pulls every surviving weight toward zero, so a tight budget
 forces a large $\lambda_{L_1}$ that collapses the fit (Section~\ref{sec:results}). Informed $L_0$ keeps the

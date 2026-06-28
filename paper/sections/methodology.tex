@@ -147,7 +147,9 @@ empirical comparison below focuses on the methods that can be applied to the ful
 surface under the same scoring loss and that were run in the real-data sweep.
 
 Holding the candidate universe and the target set fixed isolates the effect of how records are
-chosen. We sweep the retained-record budget across 2{,}000, 5{,}000, 10{,}000, 20{,}000, and 40{,}000 records,
+chosen. Every method starts from the same candidate frame with its weights reset to a uniform prior, so
+each record's initial weight $w_{0,i}$ is one shared constant. We sweep the retained-record budget across
+2{,}000, 5{,}000, 10{,}000, 20{,}000, and 40{,}000 records,
 from aggressive compression of the candidate universe up to a large fraction of it, and run each budget
 over three calibration seeds (seeds $0$--$2$). Informed $L_0$ sets the achieved budget
 at each grid point through its $\lambda_{L_0}$ bisection, and the baselines are matched to the same
