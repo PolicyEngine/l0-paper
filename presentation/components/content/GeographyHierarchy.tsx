@@ -1,17 +1,20 @@
 interface GeographyHierarchyProps {
   /** Show the "district totals -> state totals -> national totals" summation note. */
   showSummation?: boolean;
+  /** Optional muted caption under the hierarchy (e.g. the generalization note). */
+  subnote?: string;
   className?: string;
 }
 
 const levels = [
-  { label: "National", count: "1", note: "one country total" },
+  { label: "National", count: "1", note: "United States, one country total" },
   { label: "State", count: "51", note: "50 states + DC" },
   { label: "Congressional district", count: "435", note: "local-area detail" },
 ];
 
 export default function GeographyHierarchy({
   showSummation = false,
+  subnote,
   className = "",
 }: GeographyHierarchyProps) {
   return (
@@ -35,6 +38,8 @@ export default function GeographyHierarchy({
           </span>
         </div>
       )}
+
+      {subnote && <p className="mt-5 text-base leading-snug text-slate-500">{subnote}</p>}
     </div>
   );
 }

@@ -6,7 +6,7 @@ import ContentCard from "@/components/content/ContentCard";
 import DonorFusion from "@/components/content/DonorFusion";
 import EquationCard from "@/components/content/EquationCard";
 import FactAnatomy from "@/components/content/FactAnatomy";
-import FigurePlaceholder from "@/components/content/FigurePlaceholder";
+import Figure from "@/components/content/Figure";
 import FrameAnatomy from "@/components/content/FrameAnatomy";
 import GeographyHierarchy from "@/components/content/GeographyHierarchy";
 import HardConcreteGate from "@/components/content/HardConcreteGate";
@@ -87,7 +87,7 @@ export function PolicyGoalSlide() {
             stretched to fit.
           </p>
         </div>
-        <GeographyHierarchy />
+        <GeographyHierarchy subnote="Levels shown are the United States; the same nesting applies to any country with its own subnational divisions." />
       </div>
     </Slide>
   );
@@ -359,45 +359,32 @@ export function BaselinesSlide() {
   return (
     <Slide>
       <div className="flex h-full flex-col justify-center">
-        <SlideTitle kicker="Four methods, two families">Where does selection enter the workflow?</SlideTitle>
+        <SlideTitle kicker="Four methods">Where does selection enter the workflow?</SlideTitle>
 
-        <div className="mt-8">
-          <div className="mb-2 text-base font-bold uppercase tracking-[0.16em] text-pe-teal">
-            Target-informed sparse selection
-          </div>
-          <div className="grid grid-cols-2 gap-5">
-            <ContentCard title="Informed L0" accent="teal">
-              <p className="text-lg leading-snug text-slate-600">
-                Hard-concrete gates select records and fit weights jointly; the L0 penalty sets an exact
-                retained count.
-              </p>
-            </ContentCard>
-            <ContentCard title="L1 (convex sparse)" accent="teal">
-              <p className="text-lg leading-snug text-slate-600">
-                A convex sparse penalty with a proximal solver; soft-thresholding drives weights to exact
-                zeros.
-              </p>
-            </ContentCard>
-          </div>
-        </div>
-
-        <div className="mt-6">
-          <div className="mb-2 text-base font-bold uppercase tracking-[0.16em] text-slate-400">
-            Sample, then fit
-          </div>
-          <div className="grid grid-cols-2 gap-5">
-            <ContentCard title="Random + reweight" accent="slate">
-              <p className="text-lg leading-snug text-slate-600">
-                Draw a random subset first, then fit weights on that fixed subset.
-              </p>
-            </ContentCard>
-            <ContentCard title="Survey-weight sampling" accent="amber">
-              <p className="text-lg leading-snug text-slate-600">
-                Calibrate the full universe, then draw records with probability proportional to fitted
-                weights.
-              </p>
-            </ContentCard>
-          </div>
+        <div className="mt-9 grid grid-cols-2 gap-5">
+          <ContentCard title="Informed L0" accent="teal">
+            <p className="text-lg leading-snug text-slate-600">
+              Hard-concrete gates select records and fit weights jointly; the L0 penalty sets an exact
+              retained count.
+            </p>
+          </ContentCard>
+          <ContentCard title="L1 (convex sparse)" accent="teal">
+            <p className="text-lg leading-snug text-slate-600">
+              A convex sparse penalty with a proximal solver; soft-thresholding drives weights to exact
+              zeros.
+            </p>
+          </ContentCard>
+          <ContentCard title="Random + reweight" accent="slate">
+            <p className="text-lg leading-snug text-slate-600">
+              Draw a random subset first, then fit weights on that fixed subset.
+            </p>
+          </ContentCard>
+          <ContentCard title="Survey-weight sampling" accent="amber">
+            <p className="text-lg leading-snug text-slate-600">
+              Calibrate the full universe first, then draw records with probability proportional to fitted
+              weights.
+            </p>
+          </ContentCard>
         </div>
 
         <p className="mt-7 max-w-5xl text-xl leading-snug text-slate-500">
@@ -549,7 +536,7 @@ export function ExperimentDesignSlide() {
           </p>
         </ContentCard>
         <p className="mt-4 text-base text-slate-400">
-          Counts from the pinned run manifests; the final four-way sweep is still pending.
+          Counts from the pinned run manifests for the final four-way sweep.
         </p>
       </div>
     </Slide>
@@ -567,7 +554,7 @@ export function CalibrationObjectiveSlide() {
           <EquationCard
             title="The calibration loss: capped weighted MAPE"
             equation="\mathcal{L}_{\mathrm{cal}}(w)=\frac{\sum_j \omega_j\,\min\!\left(\left|\frac{\hat{t}_j-t_j}{s_j}\right|,\,c\right)}{\sum_j \omega_j}"
-            note="Relative error puts count and dollar targets on one scale; the cap c limits any single hard-to-fit target. Production uses c = 1; the reported runs used c = 10."
+            note="Relative error puts count and dollar targets on one scale; the cap c limits any single hard-to-fit target. The reported runs use the production value c = 1."
           />
           <div>
             <div className="mb-3 text-base font-bold uppercase tracking-[0.16em] text-pe-teal">
@@ -599,7 +586,7 @@ export function CalibrationObjectiveSlide() {
 export function MainFrontierSlide() {
   return (
     <Slide>
-      <div className="grid h-full grid-cols-[0.9fr_1.1fr] items-center gap-10">
+      <div className="grid h-full grid-cols-[0.78fr_1.22fr] items-center gap-10">
         <div>
           <SlideTitle kicker="Main result">Graceful degradation under compression</SlideTitle>
           <p className="mt-8 text-2xl leading-snug text-slate-600">
@@ -610,9 +597,11 @@ export function MainFrontierSlide() {
             The crossover region is itself the finding. L1 anchors the convex point of comparison.
           </p>
         </div>
-        <FigurePlaceholder
-          title="Out-of-sample error vs retained records"
-          subtitle="Informed L0, L1, random + reweight, survey-weight"
+        <Figure
+          src="/figures/f1_frontier.png"
+          width={2168}
+          height={886}
+          alt="Out-of-sample median and mean ARE versus retained records for the four samplers"
         />
       </div>
     </Slide>
@@ -623,10 +612,11 @@ export function GeneralizationSlide() {
   return (
     <Slide>
       <div className="grid h-full grid-cols-[1.1fr_0.9fr] items-center gap-10">
-        <FigurePlaceholder
-          kind="bars"
-          title="Held-out-family generalization"
-          subtitle="Gap between fit-target and held-out-target accuracy"
+        <Figure
+          src="/figures/f3_generalization_gap.png"
+          width={1367}
+          height={868}
+          alt="Out-of-sample minus in-sample error across the budget sweep for the four methods"
         />
         <div>
           <SlideTitle kicker="Generalization">Hold out whole families, not random cells</SlideTitle>
@@ -647,35 +637,40 @@ export function GeneralizationSlide() {
 export function OperabilitySlide() {
   return (
     <Slide>
-      <div className="flex h-full flex-col justify-center">
-        <SlideTitle kicker="Reading the results honestly">Accuracy is not the whole story</SlideTitle>
-        <p className="mt-7 max-w-6xl text-2xl leading-snug text-slate-600">
-          We lead with the median, because a few near-zero-denominator targets inflate the mean. And we
-          report effective sample size as a primary result: matching a demanding target system can
-          concentrate weight on a few records.
-        </p>
-        <div className="mt-8 grid grid-cols-3 gap-6">
-          <ContentCard title="L0 penalty" accent="teal">
-            <p className="text-lg leading-snug text-slate-600">
-              Sets the retained-record budget by pricing open gates.
+      <div className="grid h-full grid-cols-[0.78fr_1.22fr] items-center gap-10">
+        <div>
+          <SlideTitle kicker="Reading the results honestly">Accuracy is not the whole story</SlideTitle>
+          <p className="mt-7 text-xl leading-snug text-slate-600">
+            We lead with the median, because a few near-zero-denominator targets inflate the mean. And we
+            report effective sample size as a primary result: matching a demanding target system can
+            concentrate weight on a few records.
+          </p>
+          <div className="mt-6 space-y-2.5">
+            <p className="border-l-[3px] border-pe-teal pl-4 text-lg leading-snug text-slate-600">
+              <span className="font-bold text-pe-dark">L0 penalty:</span> sets the retained-record budget
+              by pricing open gates.
             </p>
-          </ContentCard>
-          <ContentCard title="L2 penalty" accent="slate">
-            <p className="text-lg leading-snug text-slate-600">
-              Softly discourages high fitted-weight ratios across the retained records.
+            <p className="border-l-[3px] border-slate-400 pl-4 text-lg leading-snug text-slate-600">
+              <span className="font-bold text-pe-dark">L2 penalty:</span> softly discourages high
+              fitted-weight ratios across the retained records.
             </p>
-          </ContentCard>
-          <ContentCard title="Max weight ratio" accent="amber">
-            <p className="text-lg leading-snug text-slate-600">
-              Hard cap on how much any one record can inflate relative to its starting weight.
+            <p className="border-l-[3px] border-pe-amber pl-4 text-lg leading-snug text-slate-600">
+              <span className="font-bold text-pe-dark">Max weight ratio:</span> hard cap on how much any
+              one record can inflate relative to its starting weight.
             </p>
-          </ContentCard>
+          </div>
+          <p className="mt-5 text-lg leading-snug text-slate-500">
+            Sweeping the L2 penalty traces an effective-sample-size against accuracy frontier: cheap to buy
+            at large budgets, costly at tight ones. Value shifts from accuracy toward operability and
+            robustness.
+          </p>
         </div>
-        <p className="mt-6 max-w-6xl text-xl leading-snug text-slate-500">
-          Sweeping the L2 penalty traces an effective-sample-size against accuracy frontier: cheap to buy
-          at large budgets, costly at tight ones. Value shifts from accuracy toward operability and
-          robustness.
-        </p>
+        <Figure
+          src="/figures/f6_operability.png"
+          width={2175}
+          height={886}
+          alt="Effective sample size bought against out-of-sample accuracy cost as the L2 penalty varies, across budgets"
+        />
       </div>
     </Slide>
   );
