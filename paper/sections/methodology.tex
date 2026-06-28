@@ -110,9 +110,14 @@ step, which matters operationally but is not the object of the experiment.
 \label{sec:experiment_design}
 
 The experiment evaluates whether informed selection produces a better dataset than the alternative
-samplers at the same record budget. From one candidate universe and one target set, we compare four
-samplers at a matched record budget: informed $L_0$ selection, its convex $L_1$ analog, and two classical
-reduction baselines that bracket where calibration enters (Section~\ref{sec:reduction_methods}):
+samplers at the same record budget. The literature offers more possible comparators than can be run
+cleanly on the full mixed target surface: raking-based workflows are natural on categorical margins,
+balanced sampling is designed for fixed balancing variables, and combinatorial optimisation is
+discrete and costly at production scale. The headline comparison therefore keeps the candidate
+universe, target surface, positivity restriction, and calibration loss fixed, and varies only the way
+records are selected. From one candidate universe and one target set, we compare four samplers at a
+matched record budget: informed $L_0$ selection, its convex $L_1$ analog, and two classical reduction
+baselines that bracket where calibration enters (Section~\ref{sec:reduction_methods}):
 
 \begin{itemize}
     \item \textbf{Informed $L_0$ sampling with Hard Concrete gates.} The shared calibrator with the
@@ -134,6 +139,12 @@ reduction baselines that bracket where calibration enters (Section~\ref{sec:redu
     integerisation \citep{hansen1943} of the dense weights, which preserves their expectation at every
     budget, and is the calibrate-then-reduce baseline.
 \end{itemize}
+
+This design does not claim that raking, GREG, balanced sampling, or combinatorial optimisation are
+irrelevant in general. They remain the reference methods for simpler margin surfaces, classical
+calibration, target-balanced survey designs, and discrete synthetic-population construction. The
+empirical comparison below focuses on the methods that can be applied to the full Populace target
+surface under the same scoring loss and that were run in the real-data sweep.
 
 Holding the candidate universe and the target set fixed isolates the effect of how records are
 chosen. We sweep the retained-record budget across 2{,}000, 5{,}000, 10{,}000, 20{,}000, and 40{,}000 records,
