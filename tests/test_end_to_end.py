@@ -62,6 +62,7 @@ def test_paper_command_is_registered_with_manuscript_defaults():
     assert args.methods == ["informed_l0", "random_reweight", "dense_sample"]
     assert args.l2_lambdas == [0.0, 1e-4]
     assert args.holdout_families == ["cms_medicaid", "usda_snap", "state_income_tax"]
+    assert args.jobs == 1
     assert args.pdf_builder == "quarto"
     assert args.resume is True
     assert args.smoke is False
@@ -119,6 +120,7 @@ def test_paper_sweep_args_forward_entity_and_manuscript_defaults(monkeypatch, tm
     assert sweep_args[sweep_args.index("--weight-entity") + 1] == "tax_unit"
     assert sweep_args[sweep_args.index("--rotation-budget") + 1] == "10000"
     assert sweep_args[sweep_args.index("--target-loss-cap") + 1] == "10.0"
+    assert sweep_args[sweep_args.index("--jobs") + 1] == "1"
     assert "--resume" in sweep_args
     assert sweep_args[sweep_args.index("--methods") + 1:] == [
         "informed_l0",
@@ -140,6 +142,21 @@ def test_paper_sweep_args_can_disable_resume(monkeypatch, tmp_path):
 
     assert "--no-resume" in captured["l0 sweep"]
     assert "--resume" not in captured["l0 sweep"]
+
+
+def test_paper_sweep_args_forward_jobs(monkeypatch, tmp_path):
+    captured: dict[str, list[str]] = {}
+
+    def fake_call_cli(label, _main, args):
+        captured[label] = [str(arg) for arg in args]
+
+    monkeypatch.setattr(paper, "_call_cli", fake_call_cli)
+    args = paper._parse_args(["--out", str(tmp_path / "run"), "--jobs", "4"])
+
+    paper._run_sweep(args, tmp_path / "precalibration")
+
+    sweep_args = captured["l0 sweep"]
+    assert sweep_args[sweep_args.index("--jobs") + 1] == "4"
 
 
 def test_sweep_completed_cell_keys_require_all_requested_methods():
@@ -338,6 +355,106 @@ def test_sweep_method_expansion_reuses_existing_l0_budget(monkeypatch):
     assert random_calls == [1928]
     assert [row["method"] for row in rows].count("informed_l0") == 1
     assert any(row["method"] == "random_reweight" for row in rows)
+
+
+def test_parallel_sweep_split_merges_worker_rows_in_parent(monkeypatch, tmp_path):
+    def fake_sweep_split(rows, *, seeds, diag_rows, checkpoint, **_kwargs):
+        assert len(seeds) == 1
+        seed = seeds[0]
+        rows.append(
+            {
+                "method": "informed_l0",
+                "seed": seed,
+                "budget_requested": 2000,
+                "budget_achieved": 1900 + seed,
+                "l2_lambda": 0.0,
+                "holdout_type": "fixed_family",
+                "fold": -1,
+                "split": "na",
+                "scope": "run",
+                "scope_value": "",
+                "metric": "budget_achieved",
+                "value": float(1900 + seed),
+            }
+        )
+        if diag_rows is not None:
+            diag_rows.append(
+                {
+                    "method": "informed_l0",
+                    "l2_lambda": 0.0,
+                    "seed": seed,
+                    "budget_requested": 2000,
+                    "split": "out_of_sample",
+                    "target_name": f"target-{seed}",
+                    "family": "demo",
+                    "geography_level": "national",
+                    "target_value": 1.0,
+                    "achieved_value": 1.0,
+                    "scale": 1.0,
+                    "loss_weight": 1.0,
+                    "absolute_relative_error": 0.0,
+                    "is_degenerate": False,
+                }
+            )
+        if checkpoint is not None:
+            checkpoint(f"seed {seed} budget 2000")
+        return {str(seed): float(seed + 0.5)}
+
+    monkeypatch.setattr(sweep, "_sweep_split", fake_sweep_split)
+    rows: list[dict] = []
+    diag_rows: list[dict] = []
+    completed: set[sweep.MethodKey] = set()
+    achieved: dict[sweep.MethodKey, int] = {}
+    checkpoints: list[str] = []
+    shard_root = tmp_path / "shards"
+
+    dense = sweep._run_sweep_split(
+        rows,
+        frame=SimpleNamespace(),
+        fit_targets=(),
+        holdout_targets=(),
+        budgets=[2000],
+        seeds=[0, 1],
+        l0_optimizer={},
+        baseline_optimizer={},
+        sample_kwargs={},
+        holdout_type="fixed_family",
+        fold=-1,
+        methods=["informed_l0"],
+        l2_lambda=0.0,
+        target_loss_weighting="uniform",
+        jobs=2,
+        diag_rows=diag_rows,
+        completed_methods=completed,
+        budget_achieved_by_method=achieved,
+        shard_checkpoint_root=shard_root,
+        checkpoint=checkpoints.append,
+    )
+
+    assert sorted(row["seed"] for row in rows) == [0, 1]
+    assert sorted(row["target_name"] for row in diag_rows) == [
+        "target-0",
+        "target-1",
+    ]
+    assert dense == {"0": 0.5, "1": 1.5}
+    assert sorted(key[2] for key in completed) == [0, 1]
+    assert sorted(achieved.values()) == [1900, 1901]
+    assert len(checkpoints) == 2
+
+    recovered_rows: list[dict] = []
+    recovered_diag_rows: list[dict] = []
+    shards, n_rows, n_diag_rows = sweep._merge_shard_checkpoints(
+        recovered_rows, recovered_diag_rows, shard_root
+    )
+
+    assert shards == 2
+    assert n_rows == 2
+    assert n_diag_rows == 2
+    assert sorted(int(row["seed"]) for row in recovered_rows) == [0, 1]
+    assert sorted(row["target_name"] for row in recovered_diag_rows) == [
+        "target-0",
+        "target-1",
+    ]
 
 
 def test_sweep_l0_budget_progress_logger_reports_iteration_results(capsys):

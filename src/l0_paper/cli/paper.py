@@ -161,6 +161,10 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--methods", nargs="+",
                         choices=["informed_l0", "informed_l1", "random_reweight", "dense_sample"],
                         default=list(PAPER_METHODS))
+    parser.add_argument("--jobs", type=int, default=1,
+                        help="Parallel seed/fold/L2 shards for l0 sweep. Use with "
+                             "OMP_NUM_THREADS=1/MKL_NUM_THREADS=1 to avoid CPU "
+                             "oversubscription.")
     parser.add_argument("--sample-reweight", choices=("equal_mass", "renorm_kept"),
                         default="equal_mass")
     parser.add_argument("--sample-replace", action=argparse.BooleanOptionalAction,
@@ -191,6 +195,8 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             out_was_provided=out_was_provided,
             run_id_was_provided=run_id_was_provided,
         )
+    if args.jobs < 1:
+        parser.error("--jobs must be >= 1")
     return args
 
 
@@ -339,6 +345,7 @@ def _run_sweep(args: argparse.Namespace, precal_dir: Path) -> None:
         "--rotation-seed", args.rotation_seed,
         "--sample-reweight", args.sample_reweight,
         "--run-id", args.run_id,
+        "--jobs", args.jobs,
     ]
     _extend_option(sweep_args, "--budgets", args.budgets)
     _extend_option(sweep_args, "--seeds", args.seeds)
