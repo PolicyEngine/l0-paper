@@ -58,6 +58,42 @@ def resolve_target_loss_cap(weighting: str, cap: float | None) -> float:
     return resolved
 
 
+def _spec_family(target: Any) -> str:
+    """Family of a target, matching Populace's registry derivation.
+
+    Populace's ``TargetRegistry`` derives a spec's ``family`` from the
+    ``"<family>/..."`` name prefix (``calibrate/registry.py``); mirror that so the
+    production loss-weighting helper, which keys per-concept budgets on
+    ``spec.family``, sees the same value. Fall back to the full name when a target
+    carries no prefix: the registry surface always prefixes, and bare-name targets
+    appear only in tests, where each name is unique so the concept grouping is a
+    no-op.
+    """
+    name = str(target.name)
+    return name.split("/", 1)[0] if "/" in name else name
+
+
+class _SpecView:
+    """Read-only view of a :class:`Target` that also exposes ``family``.
+
+    Populace's production weighting reads each spec's ``value``, ``metadata``,
+    ``entity``, ``period``, ``filter``, ``name`` and ``family``. A ``TargetSet``
+    yields ``Target``s, which carry every field but ``family`` (a registry-level
+    attribute). This view delegates every attribute to the wrapped target and
+    supplies ``family``, so it stays correct if the helper later reads another
+    existing target field.
+    """
+
+    __slots__ = ("_target", "family")
+
+    def __init__(self, target: Any) -> None:
+        self._target = target
+        self.family = _spec_family(target)
+
+    def __getattr__(self, attr: str) -> Any:
+        return getattr(self._target, attr)
+
+
 def target_loss_weights(targets: TargetSet, *, weighting: str) -> np.ndarray | None:
     """Return target-row loss weights aligned to ``targets`` or ``None``."""
     if weighting == UNIFORM:
