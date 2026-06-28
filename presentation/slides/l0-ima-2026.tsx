@@ -131,7 +131,7 @@ export function BuildBigThenPruneSlide() {
           <p className="mt-8 text-2xl leading-snug text-slate-600">
             A pipeline built for fidelity combines many sources and adds record-level variation. That
             makes the candidate dataset rich enough to represent the targets, and also too large to
-            store, calibrate, and simulate.
+            store and simulate.
           </p>
         </div>
         <div className="space-y-5">
@@ -188,8 +188,8 @@ export function ArchSlide() {
             ]}
           />
           <p className="mt-7 text-base text-slate-400">
-            Draft scale: roughly 22k candidate facts, 9k at district level, 4.6k active US targets
-            (counts to be confirmed against a build report).
+            Roughly 22k candidate facts, with 9k at district level; this build calibrates to 4,393
+            active US targets.
           </p>
         </div>
         <FactAnatomy />
@@ -591,7 +591,8 @@ export function MainFrontierSlide() {
           <SlideTitle kicker="Main result">Graceful degradation under compression</SlideTitle>
           <p className="mt-8 text-2xl leading-snug text-slate-600">
             At the smallest budgets, informed selection spends the budget on the records the targets
-            need, and leads. As the budget grows, the sample-then-fit baselines catch up and overtake.
+            need, and leads. As the budget grows the baselines catch up: on the median they draw level
+            and overtake, while informed L0 keeps the lower mean throughout.
           </p>
           <p className="mt-6 text-xl leading-snug text-slate-500">
             The crossover region is itself the finding. L1 anchors the convex point of comparison.
