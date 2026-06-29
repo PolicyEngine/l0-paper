@@ -55,7 +55,7 @@ export function RoadmapSlide() {
           className="mt-10 max-w-5xl"
           items={[
             "The goal: granular, live policy analysis across geographies.",
-            "The data engine: Arch facts and the Populace sampling frame.",
+            "The data engine: Ledger facts and the Populace sampling frame.",
             "Why a faithful candidate dataset grows too large to ship.",
             "L0 regularization, from Louizos et al. to record selection.",
             "A proof-of-concept comparison, and where it goes next.",
@@ -160,7 +160,7 @@ export function BuildBigThenPruneSlide() {
 }
 
 /* ------------------------------------------------------------------ */
-/* 2 · The data engine: Arch + Populace                                */
+/* 2 · The data engine: Ledger + Populace                                */
 /* ------------------------------------------------------------------ */
 
 export function DataEngineSectionSlide() {
@@ -168,23 +168,23 @@ export function DataEngineSectionSlide() {
     <SectionSlide
       section="The data engine"
       title="From government publications to a shipped dataset"
-      subtitle="Arch turns published values into source-backed facts; Populace carries a weighted sampling frame through imputation, geography, and calibration."
+      subtitle="Ledger turns published values into source-backed facts; Populace carries a weighted sampling frame through imputation, geography, and calibration."
     />
   );
 }
 
-export function ArchSlide() {
+export function LedgerSlide() {
   return (
     <Slide>
       <div className="grid h-full grid-cols-[1fr_1fr] items-center gap-12">
         <div>
-          <SlideTitle kicker="Arch">Source-backed facts, provenance intact</SlideTitle>
+          <SlideTitle kicker="Ledger">Source-backed facts, provenance intact</SlideTitle>
           <BulletList
             className="mt-8"
             items={[
               "A fact pins a value to its geography, entity, measure, aggregation, and source.",
               "Targets are classified: hard (fit), validation-only (scored, never fit), or not-yet-estimable.",
-              "Arch re-expresses published values; it never reconciles, ages, or imputes.",
+              "Ledger re-expresses published values; it never reconciles, ages, or imputes.",
             ]}
           />
           <p className="mt-7 text-base text-slate-400">

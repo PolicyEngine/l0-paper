@@ -48,7 +48,7 @@ export default function FactAnatomy({ className = "" }: FactAnatomyProps) {
           ))}
         </div>
         <div className="mt-5 rounded-md bg-slate-50 px-4 py-3 text-base text-slate-600">
-          Provenance and value are preserved exactly; Arch re-expresses, it does not reconcile or impute.
+          Provenance and value are preserved exactly; Ledger re-expresses, it does not reconcile or impute.
         </div>
       </div>
 

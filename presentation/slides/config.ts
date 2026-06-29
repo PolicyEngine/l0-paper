@@ -1,6 +1,5 @@
 import { SlideshowConfig } from "@/lib/types";
 import {
-  ArchSlide,
   BaselinesSlide,
   BuildBigThenPruneSlide,
   CalibrationObjectiveSlide,
@@ -9,6 +8,7 @@ import {
   FutureWorkSlide,
   GeneralizationSlide,
   L0MathSlide,
+  LedgerSlide,
   LouizosFoundationSlide,
   MainFrontierSlide,
   NestedTargetsSlide,
@@ -53,7 +53,7 @@ export const l0Ima2026Config: SlideshowConfig = {
     BuildBigThenPruneSlide,
     // 2 · Data engine
     DataEngineSectionSlide,
-    ArchSlide,
+    LedgerSlide,
     PopulaceValueSlide,
     PipelineSlide,
     // 3 · Imputation mechanics

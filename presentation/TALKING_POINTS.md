@@ -3,7 +3,7 @@
 L0 regularization for subnational microsimulation calibration · ~23 minutes.
 
 The deck is deliberately front-loaded on context: the paper results are a proof of
-concept, so most of the value is in the production goal, the data engine (Arch +
+concept, so most of the value is in the production goal, the data engine (Ledger +
 Populace), the imputation mechanics, and the L0 foundation and our translation.
 
 ## Timing budget
@@ -12,7 +12,7 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
 |---|---|---|
 | 0 · Open | 1–2 | 1:00 |
 | 1 · Motivation | 3–5 | 2:30 |
-| 2 · Data engine (Arch + Populace) | 6–9 | 3:00 |
+| 2 · Data engine (Ledger + Populace) | 6–9 | 3:00 |
 | 3 · Imputation mechanics | 10–12 | 3:30 |
 | 4 · Reduction + Louizos + our method | 13–19 | 5:00 |
 | **First half** | **1–19** | **~15:00** |
@@ -85,19 +85,19 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
 - **TRANSITION:** "To make that concrete, here is the engine that builds and prunes."
 
 ## Slide 6 · Section — the data engine
-- **KEY MESSAGE:** Two pieces: Arch (facts) and Populace (the frame).
-- **SAY:** One sentence: "Arch turns government publications into facts; Populace
+- **KEY MESSAGE:** Two pieces: Ledger (facts) and Populace (the frame).
+- **SAY:** One sentence: "Ledger turns government publications into facts; Populace
   carries one weighted sampling frame through imputation, geography, and calibration."
 
-## Slide 7 · Arch
-- **KEY MESSAGE:** Arch is a source-backed fact store; a fact pins a value to its full
+## Slide 7 · Ledger
+- **KEY MESSAGE:** Ledger is a source-backed fact store; a fact pins a value to its full
   context and keeps its provenance.
 - **SAY:**
   - A fact = geography × entity × measure × aggregation × source provenance. Example:
     California, tax unit, adjusted gross income, sum, IRS SOI.
   - Targets are classified: hard (we fit to it), validation-only (scored but never fit
     — e.g. SPM poverty, the thing we are trying to diagnose), and not-yet-estimable.
-  - The boundary rule: Arch may re-express a published value, but never reconciles,
+  - The boundary rule: Ledger may re-express a published value, but never reconciles,
     ages, or imputes — that keeps the fact layer auditable.
   - Scale is roughly tens of thousands of candidate facts; treat the exact counts as
     draft until confirmed.
