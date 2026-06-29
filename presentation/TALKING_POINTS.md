@@ -13,12 +13,12 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
 | 0 · Open | 1–2 | 1:00 |
 | 1 · Motivation | 3–5 | 2:30 |
 | 2 · Data engine (Ledger + Populace) | 6–9 | 3:00 |
-| 3 · Imputation mechanics | 10–12 | 3:30 |
-| 4 · Reduction + Louizos + our method | 13–19 | 5:00 |
-| **First half** | **1–19** | **~15:00** |
-| 5 · Proof of concept (design + results) | 20–25 | 6:00 |
-| 6 · Close | 26–28 | 2:00 |
-| **Second half** | **20–28** | **~8:00** |
+| 3 · Imputation | 10 | 1:30 |
+| 4 · Reduction + Louizos + method | 11–15 | 4:00 |
+| **First half** | **1–15** | **~12:00** |
+| 5 · Proof of concept (design + results) | 16–20 | 5:30 |
+| 6 · Close | 21–23 | 2:00 |
+| **Second half** | **16–23** | **~7:30** |
 
 ## Delivery notes (PolicyEngine voice)
 
@@ -31,14 +31,14 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
 
 ---
 
-# First half — detailed talking points (slides 1–19)
+# First half — detailed talking points (slides 1–15)
 
 ## Slide 1 · Title
 - **KEY MESSAGE:** This is about *which records survive* when a faithful candidate
   population has to become a deployable dataset.
 - **SAY:**
   - One line on who you are and that this is joint PolicyEngine work.
-  - "The question is narrow and practical: when a rich candidate dataset is too big
+  - "The question we address is: when a rich candidate dataset is too big
     to ship, which records do we keep, and at what weight?"
 - **TRANSITION:** "Let me start with why we have a rich-but-too-big dataset at all."
 
@@ -85,32 +85,38 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
 - **TRANSITION:** "To make that concrete, here is the engine that builds and prunes."
 
 ## Slide 6 · Section — the data engine
-- **KEY MESSAGE:** Two pieces: Ledger (facts) and Populace (the frame).
-- **SAY:** One sentence: "Ledger turns government publications into facts; Populace
-  carries one weighted sampling frame through imputation, geography, and calibration."
+- **KEY MESSAGE:** Two pieces: Ledger, the source-data foundation, and Populace, the
+  microdata engine.
+- **SAY:** One sentence: "Ledger turns government publications into source-backed facts;
+  Populace is the engine that builds survey microdata into a calibrated, deployable
+  population."
 
 ## Slide 7 · Ledger
-- **KEY MESSAGE:** Ledger is a source-backed fact store; a fact pins a value to its full
-  context and keeps its provenance.
+- **KEY MESSAGE:** Ledger is PolicyEngine's *source-data foundation* for social simulation: 
+  it captures source publications, preserves provenance, and represents published values 
+  as structured, queryable facts.
 - **SAY:**
+  - "Ledger captures source publications, preserves provenance, and represents published 
+    values as structured, queryable facts."
   - A fact = geography × entity × measure × aggregation × source provenance. Example:
     California, tax unit, adjusted gross income, sum, IRS SOI.
-  - Targets are classified: hard (we fit to it), validation-only (scored but never fit
-    — e.g. SPM poverty, the thing we are trying to diagnose), and not-yet-estimable.
-  - The boundary rule: Ledger may re-express a published value, but never reconciles,
-    ages, or imputes — that keeps the fact layer auditable.
-  - Scale is roughly tens of thousands of candidate facts; treat the exact counts as
-    draft until confirmed.
+  - Ledger may re-express a published value, but never reconciles, ages, or imputes 
+    — that keeps the fact layer auditable.
 - **TRANSITION:** "Populace is what consumes those facts."
 
 ## Slide 8 · Populace — the frame
-- **KEY MESSAGE:** A population is a *weighted sampling frame*, not a flat table.
+- **KEY MESSAGE:** Populace is PolicyEngine's *microdata engine*, the micro stack: weighted 
+  entity bundles, synthesis, calibration, and rules-engine adapters for survey microdata.
 - **SAY:**
-  - Entity tables preserve structure: person, household, tax unit, family.
-  - Weights are *typed* and move one way: design (from the survey) → importance (from
-    pool assembly) → calibrated (terminal — once calibrated, never reverts).
-  - Strata record per-record provenance, so generation owns support and calibration
-    owns representation. That separation is what lets us prune safely later.
+  - "Populace is our microdata engine — weighted entity bundles, synthesis, calibration, 
+    and rules-engine adapters for survey microdata."
+  - A population is a *weighted sampling frame*, not a flat table: entity tables keep the
+    structure (person, household, tax unit, family).
+  - Two jobs stay separate: generation decides *which records exist*, calibration decides
+    *how much each one counts*. That separation is what lets us drop records safely when we
+    prune later.
+  - (The frame diagram also shows the three weight types — survey design → pool assembly →
+    calibrated; mention only if time.)
 - **TRANSITION:** "Those pieces flow through a fixed pipeline."
 
 ## Slide 9 · Pipeline
@@ -123,53 +129,23 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
 - **TRANSITION:** "The stage that does the heavy lifting for representativeness is
   imputation."
 
-## Slide 10 · Imputation — representativeness
-- **KEY MESSAGE:** No single survey measures everything, so we combine surveys by
-  imputation. Let us look at the US.
+## Slide 10 · Imputation
+- **KEY MESSAGE:** No single survey measures everything, so we borrow from many different
+  surveys — learning whole conditional distributions, which is what keeps the data faithful.
 - **SAY:**
-  - The CPS is strong on demographics and program receipt, weak on wealth, tax detail,
+  - The CPS is strong on demographics and program receipt, thin on wealth, tax detail,
     wages, and housing.
-  - For each gap, fit a model on the survey that measures it best, then predict onto the
-    CPS: SCF for wealth, the IRS PUF for tax detail, SIPP for tips, CPS-ORG for wages,
-    MEPS-IC for premiums, ACS for rent.
-  - The key idea: we borrow a *conditional distribution* — P(wealth | demographics,
-    income) — from people who were actually asked, not a single predicted number.
-- **TRANSITION:** "Borrowing a distribution, not a mean, is the part that matters."
+  - Fill each gap from whichever survey measures it best — many surveys can be donors.
+  - The fitting step learns a *conditional distribution* on the donor data —
+    P(variable | demographics, income) — not a single point prediction.
+  - We use Quantile Regression Forests to predict the whole distribution and sample a 
+    draw per record, preserving the variability (similar people get a realistic spread), 
+    not collapsed to a mean.
+  - (If asked, the mechanics: quantile regression forests — weighted bootstrap, regime
+    gates, sequential chaining.)
+- **TRANSITION:** "All this richness multiplies the record count — which is why we prune."
 
-## Slide 11 · Imputation — variability
-- **KEY MESSAGE:** We sample the weighted conditional distribution; we do not predict
-  the mean.
-- **SAY:**
-  - Method is quantile regression forests with three properties.
-  - Weighted bootstrap: training rows are resampled by survey weight before each forest
-    is grown, so the draws follow the *weighted* population — the weights are in the
-    data, not ignored.
-  - Regime gates: split a variable by sign support (negative / zero / positive) first,
-    then model the magnitude — so capital gains do not get interpolated across zero.
-  - Chaining: each variable is drawn conditional on the ones already drawn, so the joint
-    structure across variables survives.
-  - The payoff: a uniform draw q in (0,1) per record reproduces the full conditional
-    distribution, preserving heterogeneity instead of collapsing it to a point.
-- **TRANSITION:** "Doing this across many sources is exactly what blows up the size."
-
-## Slide 12 · Imputation — scale
-- **KEY MESSAGE:** A faithful candidate population outgrows what production can carry —
-  which is the reason pruning exists.
-- **SAY:**
-  - Combining sources, oversampling rare support, and cloning records for fine
-    geographies all multiply the record count.
-  - The design target runs from the survey spine (the initial frame) toward one
-    statistically-faithful record per person — far more than a model can ship.
-  - And calibration memory scales with targets times records, so the bigger we build the
-    more pruning has to do.
-- **TRANSITION:** "So: we have built big. Now, which records survive?"
-
-## Slide 13 · Section — the pruning problem
-- **KEY MESSAGE:** State the reduction problem cleanly.
-- **SAY:** "Given a large candidate universe, a record budget, and a target system,
-  which records does the shipped dataset keep, and at what weight?"
-
-## Slide 14 · The reduction problem
+## Slide 11 · The reduction problem
 - **KEY MESSAGE:** With the universe and targets fixed, reduction is a sampling problem
   with fitted weights.
 - **SAY:** Walk input → constraint → goal → output. Emphasize the output is selected
@@ -177,32 +153,30 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
 - **TRANSITION:** "There are four ways to do this, and they differ in where selection
   enters."
 
-## Slide 15 · Four methods
+## Slide 12 · Four methods
 - **KEY MESSAGE:** Four samplers, one shared calibrator; the comparison isolates where selection enters.
 - **SAY:**
   - Target-informed sparse selection: **informed L0** (hard-concrete gates select and
-    weight jointly; the L0 penalty sets an exact retained count) and **L1** (a convex
-    sparse penalty; a proximal solver soft-thresholds weights to exact zeros).
+    weight jointly; the L0 penalty sets an exact retained count) and **L1** (penalizes the
+    total magnitude of the weights; a fixed pull toward zero each step sends any weight the
+    targets do not strongly need to exactly zero, dropping that record).
   - The two classical baselines differ in ordering: **random + reweight** draws a subset
     first, then fits weights on it; **survey-weight sampling** calibrates the full universe
     first, then draws records with probability proportional to the fitted weights.
-  - One framing to land: survey-weight sampling *is* informed, but by how much population
-    a record carries, not by how well it reproduces the targets — informed toward a
-    different objective.
   - Targets and universe stay fixed, so the comparison isolates *where selection enters*.
 - **TRANSITION:** "The two sparse methods come from a deep-learning idea — here is L0."
 
-## Slide 16 · Louizos foundation
+## Slide 13 · Louizos foundation
 - **KEY MESSAGE:** Louizos, Welling and Kingma (2018) made L0 trainable by gradient
   descent for neural-network sparsification; we reuse that machinery.
 - **SAY:**
-  - Their problem: automatically zero weights in a neural network. The L0 "norm" simply
-    counts how many weights are non-zero.
-  - Why pure L0 cannot be trained directly: a count is a step function. It stays flat as
-    a weight changes, then jumps by one the instant the weight crosses zero. So its
-    gradient is zero almost everywhere and undefined at the jumps — gradient descent gets
-    no signal telling it which weight to turn off, and choosing the subset to zero by hand
-    is combinatorial.
+  - Their goal was to make a neural network smaller by automatically driving some of its
+    weights to exactly zero.
+  - Why pure L0 "norm" (the count of non-zero weights) cannot be trained directly: 
+    a count is a step function. It stays flat as a weight changes, then jumps by 
+    one the instant the weight crosses zero. So its gradient is zero almost everywhere 
+    and undefined at the jumps — gradient descent gets no signal telling it which weight 
+    to turn off and thus cannot learn from it.
   - The fix is to make the on/off decision *soft and learnable*: put a stochastic gate on
     each weight and learn the probability that the gate is open.
   - The stretch-and-clip intuition (point to the diagram): draw a smooth random number
@@ -217,7 +191,7 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
     gradient descent can now push toward fewer open gates.
 - **TRANSITION:** "Now translate this from network weights to microdata records."
 
-## Slide 17 · Translation
+## Slide 14 · Translation
 - **KEY MESSAGE:** The mapping is one-to-one: weights become records.
 - **SAY:** Read the table left to right. A network weight becomes a candidate record;
   zeroing a weight becomes dropping a record; the expected count of open gates becomes
@@ -226,48 +200,32 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
 - **TRANSITION:** "With that mapping, our objective is one loss over selection and
   weights."
 
-## Slide 18 · Our objective
+## Slide 15 · Our objective
 - **KEY MESSAGE:** Selection and weighting are optimized together against the same loss.
 - **SAY:**
   - The training objective has three terms: the calibration loss on *gated* weights,
     an L0 penalty equal to the expected retained count, and an L2 penalty on the ratio of
     fitted to initial weight.
-  - The gated estimate of a target is the matrix-weight product with the gate folded in,
-    so a record only contributes when its gate is open.
-  - λ_L0 sets the retained count — tuned by an outer bisection to a requested budget,
-    not by hand. The L2 term penalizes the squared magnitude of each fitted weight
+  - The L2 term penalizes the squared magnitude of each fitted weight
     (relative to its starting weight), which discourages loading the fit onto a few very
     large weights — that keeps population mass spread across records, so the effective
     sample size stays high and the dataset stays usable downstream. A hard per-record cap
     bounds the single largest weight as a backstop.
+  - A a record only contributes to the training objective when its gate is open.
   - At publication, gates are evaluated deterministically: the output is an ordinary
     sparse dataset with calibrated positive weights.
-  - The point: selection is trained against the same target system the final weights must
-    match, so records survive when keeping them helps reproduce a target.
-- **TRANSITION:** "And this is not a one-off prototype."
-
-## Slide 19 · Production tie
-- **KEY MESSAGE:** Both sparse methods ship inside Populace's calibration step.
-- **SAY:** Setting a record budget activates the hard-concrete L0 gates inside the same
-  step that fits production weights; the convex L1 solver lives in the same place. So the
-  paper method is a first-class build option, which is why getting it right matters.
-- **TRANSITION:** "So does informed selection actually beat the baselines? Here is the
-  proof of concept." (Hand into the second half.)
+  - The point: **selection is trained against the same target system the final weights must**
+    **match, so records survive when keeping them helps reproduce a target.**
+- **TRANSITION:** "So does informed selection actually beat the baselines? Here is the proof of concept."
 
 ---
 
-# Second half — proof of concept (slides 20–28)
+# Second half — proof of concept (slides 16–23)
 
 > Numbers and figures below reflect the final four-way sweep (L0 vs L1 vs random vs
 > survey-weight), production loss cap c=1, run `4way-l1-cap1`.
 
-## Slide 20 · Section — proof of concept
-- **KEY MESSAGE:** One frozen candidate universe, one target system, four samplers, a range
-  of budgets — the experiment isolates how records are chosen.
-- **SAY:** One sentence: "Everything upstream is held fixed; the only thing that varies is
-  the sampler, so any difference is the selection rule, not the data."
-
-## Slide 21 · Experiment design
+## Slide 16 · Experiment design
 - **KEY MESSAGE:** Hold the input, the targets, and the budget fixed; vary only the sampler,
   and score on families held out of every fit.
 - **SAY:**
@@ -279,34 +237,37 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
     plus validation-only CBO (206 targets held out) — scored after calibration.
 - **TRANSITION:** "All four are scored by the same loss."
 
-## Slide 22 · Calibration objective
-- **KEY MESSAGE:** One loss scores every method — capped weighted MAPE — so the comparison
-  is apples to apples.
+## Slide 17 · Calibration objective
+- **KEY MESSAGE:** One loss scores every method — capped weighted MAPE (Mean Abs % Error).
 - **SAY:**
   - Relative error puts count and dollar targets on one scale; the cap c limits any single
     hard-to-fit target, so one bad row cannot dominate the gradient.
-  - The reported runs use the production cap c=1.
+  - The reported runs use the production cap c=1, so targets more than 100% away do not contribute
+    to the gradient. 
+  - The per-target weights ω_j scale each target by the square root of its size, within two
+    bases (count vs dollar) that are rescaled to contribute equally — so large aggregates
+    count for more, and the many dollar cells do not swamp the count targets.
   - Same targets, same loss, same weight bounds — only the sampler changes.
 - **TRANSITION:** "So where does informed selection actually win?"
 
-## Slide 23 · Main frontier
+## Slide 18 · Main frontier
 - **KEY MESSAGE:** Graceful degradation under compression — informed selection leads at
   tight budgets, the baselines draw level as the budget grows.
 - **SAY:**
   - Read the figure: out-of-sample error against retained records, median and mean panels,
     all four methods.
   - At 2,000 records, informed L0's median out-of-sample ARE (Abs Rel Error) is 47.3% vs random 
-    50.1%, survey-weight 48.1%, and L1 pinned at 100%; on the tail-sensitive mean the gap is far
-    wider — 225% vs random's 1,798%.
+    50.1%, survey-weight 48.1%, and L1 at 100% (its weights collapse toward zero); on the 
+    tail-sensitive mean the gap is far wider — 225% vs random's 1,798%.
   - As the budget grows the baselines draw level: on the median, random + reweight overtakes
-    from ~5,000 records up, while informed L0 keeps the lower mean at every budget — the
-    small-budget story is as much about variance as accuracy. At 10k, L0 median is 35.0%.
-  - L1 is the convex point of comparison: one penalty cannot both select records and keep
-    their weights, so it collapses under forced sparsity and recovers toward L0 only at
-    large budgets.
+    from ~5,000 records up, while informed L0 keeps the lower mean at every budget.
+    At 10k, L0 median is 35.0%.
+  - L1 is the convex point of comparison, and the weakest arm at every budget: one penalty
+    cannot both select records and size their weights, so it collapses under forced sparsity
+    and recovers toward L0 only at the largest budgets.
 - **TRANSITION:** "Does the retained sample generalize to targets it never saw?"
 
-## Slide 24 · Generalization
+## Slide 19 · Generalization
 - **KEY MESSAGE:** Hold out whole families, not random cells, and informed selection carries
   over with the smaller in-sample-to-out-of-sample gap.
 - **SAY:**
@@ -319,7 +280,7 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
     rather than on driving the in-sample fit down.
 - **TRANSITION:** "Accuracy is not the whole story — what does it cost?"
 
-## Slide 25 · Reading the results honestly
+## Slide 20 · Operability
 - **KEY MESSAGE:** Lead with the median, and report effective sample size as a primary
   result — a good fit can still concentrate weight on a few records.
 - **SAY:**
@@ -332,7 +293,7 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
     operability and robustness.
 - **TRANSITION:** "Where does this go next?"
 
-## Slide 26 · Future work
+## Slide 21 · Future work
 - **KEY MESSAGE:** The proof of concept points at two production extensions; classical
   calibrators are related work, not missing baselines.
 - **SAY:**
@@ -342,20 +303,21 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
     surface it is designed for, not just national and state.
   - Broader held-out targets: bring district age, SNAP, and SOI facts into the held-out
     design.
-  - If asked about GREG / IPF / raking / balanced sampling: they are reference methods for
+  - [If asked about GREG / IPF / raking / balanced sampling: they are reference methods for
     simpler margin surfaces, not full-surface baselines here — they apply only as robustness
     checks on the categorical-margin subsets where their assumptions hold (see the lit
-    review). L1 is now in the sweep, not future work.
+    review). L1 is now in the sweep, not future work.]
 - **TRANSITION:** "To wrap up."
 
-## Slide 27 · Takeaway
+## Slide 22 · Conclusion
 - **KEY MESSAGE:** Target-informed pruning is both a calibration method and a sampling
   method, with record count and weight concentration as tunable, reportable outputs.
 - **SAY:** It selects records because they help reproduce the target system, and keeps the
   retained count and weight concentration as explicit controls. This is a proof of concept
-  on national and state targets, built for the subnational case.
+  on national and state targets. We will build on the observed operability and performance 
+  at large compression regimes to score the subnational case.
 
-## Slide 28 · Questions
+## Slide 23 · Questions
 - **KEY MESSAGE:** Open the floor.
 - **SAY:** Thank the audience and invite questions. Likely areas: the median/mean split, the
   effective-sample-size cost, and why classical calibrators are not baselines.

@@ -4,10 +4,10 @@ interface ScaleLadderProps {
 
 // Generation grows the record count; heights are illustrative (log-ish), not to scale.
 const grow = [
-  { value: "~75k", label: "survey spine", height: 18 },
-  { value: "300k", label: "matched pool", height: 36 },
-  { value: "3M", label: "generate-big", height: 60 },
-  { value: "30M", label: "one per person", height: 80 },
+  { value: "~75k", label: "survey base", height: 18 },
+  { value: "300k", label: "combine sources", height: 36 },
+  { value: "3M", label: "across geographies", height: 60 },
+  { value: "30M", label: "≈ one per person", height: 80 },
 ];
 
 // The shipped, pruned file must sit clearly below the generate-big peak.

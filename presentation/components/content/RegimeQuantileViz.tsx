@@ -41,7 +41,7 @@ export default function RegimeQuantileViz({ className = "" }: RegimeQuantileVizP
       {/* Sign regimes (e.g. capital gains) */}
       <div className="mt-5">
         <div className="mb-2 text-base font-semibold text-slate-500">
-          Regime gate picks the sign, a forest draws the magnitude — e.g. capital gains
+          Regime gate picks the sign, QRF draws the magnitude — e.g. capital gains
         </div>
         <div className="grid grid-cols-3 overflow-hidden rounded-md border border-slate-200 text-center text-base font-semibold">
           <span className="bg-amber-50 py-2.5 text-pe-amber">negative</span>

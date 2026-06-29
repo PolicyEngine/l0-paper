@@ -16,18 +16,13 @@ import {
   PipelineSlide,
   PolicyGoalSlide,
   PopulaceValueSlide,
-  ProductionTieSlide,
-  ProofSectionSlide,
   QuestionsSlide,
-  ReductionSectionSlide,
   RepresentativenessSlide,
   RoadmapSlide,
   SamplingQuestionSlide,
-  ScaleSlide,
   TakeawaySlide,
   TitleSlide,
   TranslationSlide,
-  VariabilitySlide,
 } from "@/slides/l0-ima-2026";
 
 export const l0Ima2026Config: SlideshowConfig = {
@@ -56,20 +51,15 @@ export const l0Ima2026Config: SlideshowConfig = {
     LedgerSlide,
     PopulaceValueSlide,
     PipelineSlide,
-    // 3 · Imputation mechanics
+    // 3 · Imputation
     RepresentativenessSlide,
-    VariabilitySlide,
-    ScaleSlide,
     // 4 · Reduction problem + Louizos + method
-    ReductionSectionSlide,
     SamplingQuestionSlide,
     BaselinesSlide,
     LouizosFoundationSlide,
     TranslationSlide,
     L0MathSlide,
-    ProductionTieSlide,
     // 5 · Proof of concept
-    ProofSectionSlide,
     ExperimentDesignSlide,
     CalibrationObjectiveSlide,
     MainFrontierSlide,

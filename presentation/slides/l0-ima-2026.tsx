@@ -12,8 +12,6 @@ import GeographyHierarchy from "@/components/content/GeographyHierarchy";
 import HardConcreteGate from "@/components/content/HardConcreteGate";
 import Math from "@/components/content/Math";
 import PipelineDiagram from "@/components/content/PipelineDiagram";
-import RegimeQuantileViz from "@/components/content/RegimeQuantileViz";
-import ScaleLadder from "@/components/content/ScaleLadder";
 import StatNumber from "@/components/content/StatNumber";
 import TranslationTable from "@/components/content/TranslationTable";
 import Slide from "@/components/core/Slide";
@@ -183,7 +181,6 @@ export function LedgerSlide() {
             className="mt-8"
             items={[
               "A fact pins a value to its geography, entity, measure, aggregation, and source.",
-              "Targets are classified: hard (fit), validation-only (scored, never fit), or not-yet-estimable.",
               "Ledger re-expresses published values; it never reconciles, ages, or imputes.",
             ]}
           />
@@ -208,8 +205,7 @@ export function PopulaceValueSlide() {
             className="mt-10"
             items={[
               "Entity tables preserve household, person, tax-unit, and family structure.",
-              "Typed weights make each stage explicit: design, then importance, then calibrated.",
-              "Strata carry provenance, so generation owns support while calibration owns representation.",
+              "Generation sets which records exist; calibration sets how much each counts. Keeping the two separate is what lets us prune records safely.",
             ]}
           />
         </div>
@@ -241,15 +237,15 @@ export function RepresentativenessSlide() {
     <Slide>
       <div className="grid h-full grid-cols-[0.95fr_1.05fr] items-center gap-12">
         <div>
-          <SlideTitle kicker="Imputation · representativeness">
-            No single survey measures everything
+          <SlideTitle kicker="Imputation">
+            Borrow whole distributions from many surveys
           </SlideTitle>
           <BulletList
             className="mt-9"
             items={[
-              "The CPS is strong on demographics and program receipt, weak on wealth, tax detail, wages, and housing.",
-              "For each gap, fit a model on the survey that measures it best, then predict onto the CPS.",
-              "Imputation borrows a conditional distribution, not a single number.",
+              "Fill each gap from whichever survey measures it best — many surveys can be donors.",
+              "The fitting step learns a conditional distribution on the donor data, not a single prediction.",
+              "Predicting the whole distribution and sampling a draw per record preserves real variability.",
             ]}
           />
         </div>
@@ -259,65 +255,9 @@ export function RepresentativenessSlide() {
   );
 }
 
-export function VariabilitySlide() {
-  return (
-    <Slide>
-      <div className="grid h-full grid-cols-[0.95fr_1.05fr] items-center gap-12">
-        <div>
-          <SlideTitle kicker="Imputation · variability">
-            Sample the distribution, do not predict the mean
-          </SlideTitle>
-          <BulletList
-            className="mt-9"
-            items={[
-              "A weighted bootstrap puts the survey weights into the training data, so draws follow the weighted population.",
-              "Regime gates split a variable by sign before modeling its magnitude.",
-              "Sequential chaining conditions each draw on the ones before it, preserving joint structure.",
-            ]}
-          />
-        </div>
-        <RegimeQuantileViz />
-      </div>
-    </Slide>
-  );
-}
-
-export function ScaleSlide() {
-  return (
-    <Slide>
-      <div className="grid h-full grid-cols-[0.95fr_1.05fr] items-center gap-12">
-        <div>
-          <SlideTitle kicker="Imputation · scale">
-            A faithful candidate population outgrows production
-          </SlideTitle>
-          <p className="mt-8 text-2xl leading-snug text-slate-600">
-            Combining sources, oversampling rare support, and cloning records for fine geographies
-            multiply the record count.
-          </p>
-          <p className="mt-6 text-xl leading-snug text-slate-500">
-            The design target runs from the survey spine toward one record per person, far more than a
-            shipped model can carry. That is why the pipeline has to prune.
-          </p>
-        </div>
-        <ScaleLadder />
-      </div>
-    </Slide>
-  );
-}
-
 /* ------------------------------------------------------------------ */
 /* 4 · Reduction problem + Louizos + our method                        */
 /* ------------------------------------------------------------------ */
-
-export function ReductionSectionSlide() {
-  return (
-    <SectionSlide
-      section="The pruning problem"
-      title="Which records should survive?"
-      subtitle="Given a large candidate universe, a record budget, and a target system, which records does the shipped dataset keep, and at what weight?"
-    />
-  );
-}
 
 export function SamplingQuestionSlide() {
   return (
@@ -333,7 +273,7 @@ export function SamplingQuestionSlide() {
         <ContentCard accent="teal">
           <div className="space-y-6 text-2xl leading-snug text-slate-700">
             <div>
-              <span className="font-bold text-pe-dark">Input:</span> candidate records, initial weights,
+              <span className="font-bold text-pe-dark">Input:</span> candidate records, uniform weights,
               calibration targets
             </div>
             <div>
@@ -370,8 +310,8 @@ export function BaselinesSlide() {
           </ContentCard>
           <ContentCard title="L1 (convex sparse)" accent="teal">
             <p className="text-lg leading-snug text-slate-600">
-              A convex sparse penalty with a proximal solver; soft-thresholding drives weights to exact
-              zeros.
+              A convex L1 penalty on weight magnitude; soft-thresholding drives small weights to
+              exact zeros.
             </p>
           </ContentCard>
           <ContentCard title="Random + reweight" accent="slate">
@@ -450,7 +390,7 @@ export function L0MathSlide() {
           <EquationCard
             title="What the optimizer minimizes"
             equation="\begin{aligned}\mathcal{L}(w,\alpha)=\;&\mathcal{L}_{\mathrm{cal}}(w\odot z)\\[2pt]&+\;\lambda_{L_0}\textstyle\sum_i \Pr(z_i\neq 0)\\[2pt]&+\;\lambda_{L_2}\,\tfrac{1}{n}\textstyle\sum_i\!\left(\tfrac{w_i}{w_{0,i}}\right)^{2}\end{aligned}"
-            note="The first term is the shared calibration loss, on gated weights; the next slide-section defines it. The L0 term prices open gates (λ_L0 sets the retained count via an outer bisection); the L2 term, with a hard weight cap, controls concentration."
+            note="The first term is the shared calibration loss, on gated weights. The L0 term prices open gates (λ_L0 sets the retained count via an outer bisection); the L2 term, with a hard weight cap, controls concentration."
           />
           <EquationCard
             title="Estimate and publication"
@@ -459,43 +399,8 @@ export function L0MathSlide() {
           />
         </div>
         <p className="mt-7 max-w-6xl text-xl leading-snug text-slate-600">
-          Selection is trained against the same target system the final weights must match, so records
-          survive when keeping them helps reproduce a target.
+          
         </p>
-      </div>
-    </Slide>
-  );
-}
-
-export function ProductionTieSlide() {
-  return (
-    <Slide>
-      <div className="grid h-full grid-cols-[1fr_1fr] items-center gap-12">
-        <div>
-          <SlideTitle kicker="Not just a paper method">This selector ships inside Populace</SlideTitle>
-          <p className="mt-8 text-2xl leading-snug text-slate-600">
-            L0 selection is a calibration option in Populace: setting a record budget activates
-            hard-concrete gates inside the same step that fits production weights.
-          </p>
-          <p className="mt-6 text-xl leading-snug text-slate-500">
-            The convex L1 solver lives in the same place, so both sparse methods are first-class build
-            options.
-          </p>
-        </div>
-        <div className="space-y-5">
-          <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="math-text text-lg text-pe-dark">
-              {`calibrate(..., target_records=N)`}
-            </div>
-            <div className="mt-2 text-base text-slate-500">activates the hard-concrete L0 gates</div>
-          </div>
-          <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="math-text text-lg text-pe-dark">
-              {`calibrate(..., method="prox", l1_lambda=...)`}
-            </div>
-            <div className="mt-2 text-base text-slate-500">runs the convex L1 proximal solver</div>
-          </div>
-        </div>
       </div>
     </Slide>
   );
@@ -504,16 +409,6 @@ export function ProductionTieSlide() {
 /* ------------------------------------------------------------------ */
 /* 5 · Proof of concept: design + results                              */
 /* ------------------------------------------------------------------ */
-
-export function ProofSectionSlide() {
-  return (
-    <SectionSlide
-      section="Proof of concept"
-      title="Does target-informed selection beat the baselines?"
-      subtitle="One frozen candidate universe, one target system, four samplers, and a range of record budgets."
-    />
-  );
-}
 
 export function ExperimentDesignSlide() {
   return (
@@ -536,7 +431,6 @@ export function ExperimentDesignSlide() {
           </p>
         </ContentCard>
         <p className="mt-4 text-base text-slate-400">
-          Counts from the pinned run manifests for the final four-way sweep.
         </p>
       </div>
     </Slide>
@@ -640,7 +534,7 @@ export function OperabilitySlide() {
     <Slide>
       <div className="grid h-full grid-cols-[0.78fr_1.22fr] items-center gap-10">
         <div>
-          <SlideTitle kicker="Reading the results honestly">Accuracy is not the whole story</SlideTitle>
+          <SlideTitle kicker="Operability">Trading accuracy for usable weights</SlideTitle>
           <p className="mt-7 text-xl leading-snug text-slate-600">
             We lead with the median, because a few near-zero-denominator targets inflate the mean. And we
             report effective sample size as a primary result: matching a demanding target system can
@@ -713,9 +607,9 @@ export function FutureWorkSlide() {
 export function TakeawaySlide() {
   return (
     <SectionSlide
-      section="Takeaway"
-      title="Target-informed pruning is a calibration method and a sampling method"
-      subtitle="It selects records because they help reproduce the target system, and keeps record count and weight concentration as tunable, reportable outputs. This is a proof of concept on national and state targets, built for the subnational case."
+      section="In closing"
+      title="Target-informed pruning is both a calibration method and a sampling method"
+      subtitle="It keeps records that help reproduce the targets, and turns dataset size and weight concentration into tunable, reportable controls — a proof of concept on national and state targets, built for the subnational case."
     />
   );
 }

@@ -7,10 +7,8 @@ const entities = ["person", "household", "tax unit", "SPM unit", "family", "mari
 const weights = [
   { label: "design", note: "carried from the survey" },
   { label: "importance", note: "from pool assembly" },
-  { label: "calibrated", note: "terminal: never reverts" },
+  { label: "calibrated", note: "fit to the targets (final)" },
 ];
-
-const strata = ["cps_passthrough", "synthetic_conditional", "tail_verbatim"];
 
 export default function FrameAnatomy({ className = "" }: FrameAnatomyProps) {
   return (
@@ -36,7 +34,7 @@ export default function FrameAnatomy({ className = "" }: FrameAnatomyProps) {
 
       {/* Typed weights: one-way flow */}
       <div className="mb-5">
-        <div className="mb-2 text-base font-semibold text-slate-500">Typed weights (move forward only)</div>
+        <div className="mb-2 text-base font-semibold text-slate-500">Types of weights</div>
         <div className="flex flex-wrap items-center gap-2">
           {weights.map((w, i) => (
             <span key={w.label} className="flex items-center gap-2">
@@ -45,21 +43,6 @@ export default function FrameAnatomy({ className = "" }: FrameAnatomyProps) {
                 <span className="ml-2 font-normal text-slate-500">{w.note}</span>
               </span>
               {i < weights.length - 1 && <span className="text-pe-teal">→</span>}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      {/* Strata / provenance */}
-      <div>
-        <div className="mb-2 text-base font-semibold text-slate-500">Strata (per-record provenance)</div>
-        <div className="flex flex-wrap gap-2">
-          {strata.map((s) => (
-            <span
-              key={s}
-              className="math-text rounded-md border border-pe-amber/40 bg-amber-50 px-3 py-1.5 text-sm text-pe-dark"
-            >
-              {s}
             </span>
           ))}
         </div>
