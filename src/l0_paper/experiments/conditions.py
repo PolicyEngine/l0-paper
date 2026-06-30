@@ -33,6 +33,11 @@ from populace.calibrate import calibrate
 from populace.calibrate.target import TargetSet
 from populace.frame import MassChange, WeightKind, Weights
 
+try:
+    from populace.calibrate import refit_l0_selection as _populace_refit_l0_selection
+except ImportError:  # pragma: no cover - compatibility with released Populace.
+    _populace_refit_l0_selection = None
+
 # Default Hard-Concrete / optimizer hyperparameters (Appendix table in the paper).
 DEFAULT_EPOCHS = 1000
 DEFAULT_LEARNING_RATE = 0.02
@@ -204,6 +209,71 @@ def run_l0_post_refit(
     if not np.isfinite(selected_weights).all() or not (selected_weights > 0).any():
         raise ValueError("Selected L0 weights are not a positive finite vector.")
 
+    fit_seed = l0_selection.seed if seed is None else seed
+    if (
+        _populace_refit_l0_selection is not None
+        and l0_selection.calibration_result is not None
+    ):
+        result = _populace_refit_l0_selection(
+            frame,
+            fit_targets,
+            l0_selection.calibration_result,
+            weight_entity=weight_entity,
+            epochs=epochs,
+            learning_rate=learning_rate,
+            mass=mass,
+            max_weight_ratio=max_weight_ratio,
+            seed=fit_seed,
+            target_loss_weights=target_loss_weights,
+            target_loss_cap=target_loss_cap,
+            progress_callback=progress_callback,
+        )
+        refit = result.refit
+        refit_ids = refit.frame.table(weight_entity)[f"{weight_entity}_id"].to_numpy()
+
+        def _native_to_full(values: np.ndarray) -> np.ndarray:
+            return (
+                pd.Series(np.asarray(values, dtype=np.float64), index=refit_ids)
+                .reindex(ids)
+                .fillna(0.0)
+                .to_numpy()
+            )
+
+        weights = _native_to_full(refit.weights)
+        initial_weights = _native_to_full(refit.initial_weights)
+        runtime = l0_selection.runtime_s + (time.perf_counter() - start)
+        options = dict(result.options)
+        options.update(
+            {
+                "populace_refit_l0_selection": True,
+                "selection_runtime_s": l0_selection.runtime_s,
+                "target_loss_cap": target_loss_cap,
+            }
+        )
+        return RunResult(
+            method="informed_l0_refit",
+            weight_entity=weight_entity,
+            weights=weights,
+            initial_weights=initial_weights,
+            n_records=weights.size,
+            n_selected=int(np.count_nonzero(weights)),
+            l0_lambda=float(l0_selection.l0_lambda),
+            l2_lambda=float(l0_selection.l2_lambda),
+            max_weight_ratio=max_weight_ratio,
+            loss_trajectory=np.asarray(refit.loss_trajectory, dtype=np.float64),
+            initial_loss=float(refit.initial_loss),
+            final_loss=float(refit.final_loss),
+            runtime_s=runtime,
+            seed=fit_seed,
+            options=options,
+            calibration_result=result,
+            sampling={
+                "strategy": "post_l0_refit",
+                "selection_method": l0_selection.method,
+                "selection_n_selected": int(l0_selection.n_selected),
+            },
+        )
+
     subset_start = subset.weights_for(weight_entity)
     subset = subset.with_weights(
         weight_entity,
@@ -213,7 +283,6 @@ def run_l0_post_refit(
             reason="initialize dense post-refit from informed L0 selected weights",
         ),
     )
-    fit_seed = l0_selection.seed if seed is None else seed
     result = calibrate(
         subset,
         fit_targets,
