@@ -56,13 +56,13 @@ fit, while full production release engineering remains outside the scope of the 
 
 The empirical question is whether informed selection earns its added complexity. We ask three
 things. First, on the actual \populace{} loss over the full target surface, does informed $L_0$ selection
-or its post-selection refit reproduce the targets more accurately than random sampling with reweighting and
-survey-weight sampling at the same record budget? Second, what do supplemental raw-error diagnostics reveal
-about the tail of the target distribution? Third, does the framework give usable control over the size of
-the output and the concentration of the fitted weights? The answer is not the one a method paper would hope
-for: on the current full surface, random + reweight is the strongest accuracy baseline. The informed
-selector still gives a controlled sparse subset and its post-selection refit improves the raw gated weights,
-but the result is a diagnostic frontier rather than a dominance claim.
+or its post-selection refit reproduce the targets more accurately than dense calibration and sampling
+baselines under the same optimizer budget? Second, what do supplemental raw-error diagnostics reveal about
+the tail of the target distribution? Third, does the framework give usable control over the size of the
+output and the concentration of the fitted weights? The current full-scale probe gives a constructive
+answer: the raw gated $L_0$ weights are not good enough by themselves, but the support selected by the
+gates becomes more accurate than matched random support and slightly lower-loss than the 1{,}500-epoch
+dense no-$L_0$ run after an ordinary calibration refit.
 
 The rest of the paper follows that structure. Section~\ref{sec:background} places the work in the
 literature on spatial microsimulation, survey calibration, and sparse selection.

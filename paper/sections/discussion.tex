@@ -1,37 +1,51 @@
 \section{Discussion}
 \label{sec:discussion}
 
-\subsection{What the sampling comparison establishes}
+\subsection{What the matched comparison establishes}
 
-The full-surface comparison rejects the strongest version of the $L_0$ hypothesis for the current
-implementation. If the claim is that target-informed gates should beat a random subset at the same record
-budget on the actual Populace objective, the evidence does not support it. Random sampling followed by
-gradient reweighting is the best-performing method on the production loss over most of the frontier, and
-survey-weight sampling is competitive throughout. Informed $L_0$ plus refit improves substantially on the
-raw gated weights, but the selected subset is not better enough to overcome the simpler baseline.
+The matched full-surface probe supports the central version of the $L_0$ hypothesis, with an important
+qualification. If the claim is that the raw gated weights returned by the joint $L_0$ optimization should
+be the final publication weights, the evidence does not support it: the thresholded gated weights have a
+9.86\% Populace loss. If the claim is instead that target-informed gates can select a useful support for
+ordinary calibration, the evidence is positive. After the gates choose 57{,}240 records, an ordinary
+calibration refit on that support reaches 4.74\% loss, compared with 5.07\% for the 1{,}500-epoch dense
+no-$L_0$ calibration, 7.55\% for a matched random support followed by the same reweighting, and 24.24\%
+for a random sample of dense calibrated weights scaled back to total mass without refitting.
 
-That negative result is useful. First, it shows that the experiment is now measuring the right object: the
-full materialized target surface, scored with the Populace loss, using the final retained weight vector
-rather than a solver-side proxy. Second, it separates selection from weighting. Raw informed $L_0$ performs
-poorly because the gated weights returned by the joint optimization are not good enough; the post-selection
-refit recovers a large share of that gap, which means the selected records contain signal but need ordinary
-calibration after selection. Third, it points to the next methodological question: whether the selector can
-be improved without increasing weight concentration.
+That distinction is useful. It separates selection from weighting. The Hard Concrete gates appear valuable
+as a way to decide which records survive, but the final dataset should be produced by a post-selection
+calibration refit rather than by directly publishing the stochastic-gate weights. This is also consistent
+with how the method would be used operationally: choose a sparsity penalty, use $L_0$ to prune a
+deliberately overbuilt support, then run the standard Populace calibrator on the retained records. The
+slight edge over dense no-$L_0$ at 1{,}500 epochs should be read as a finite-optimization result: the
+dense run is still declining, so a longer dense convergence check remains necessary.
 
 \subsection{What the controls establish}
 
-The operational control over record count works. The outer bisection over $\lambda_{L_0}$ hits the target
-size closely across the five requested budgets, and it does so without an arbitrary post-hoc cutoff. That
-is still a useful property for a build-large-then-prune pipeline: the output size is an optimization target
-rather than an accident of a threshold.
+The normalized sparsity scale is necessary. A raw $\lambda_{L_0}$ cannot be interpreted across candidate
+universes of different sizes: the same coefficient can be mild on a small support and overwhelming on a
+larger one. Expressing the penalty as
+$\lambda_{\mathrm{share}}\sum_i\bar{z}_i/n$ gives a dimensionless control, and
+$\lambda_{\mathrm{share}}=0.8$ selected a meaningful sparse support in the three-year ASEC build. This does
+not remove the need for a sweep, but it gives the sweep a stable axis.
 
-The weight-concentration diagnostics are less favorable. The informed subsets have much lower effective
-sample size and much larger maximum weights than the sampling baselines. This is not just an aesthetic
-problem: a dataset can match calibration aggregates while becoming fragile for downstream estimands that
-depend on the distribution of weights. In the current run, any future $L_0$ variant has to improve not only
-the Populace loss but also the ESS/max-weight frontier.
+The concentration diagnostics are also encouraging in this probe. Dense no-$L_0$ has the highest ESS among
+the publishable fits, but it retains every record. Among the sparse 57{,}240-record fits, the post-$L_0$
+refit has higher ESS and lower maximum weight than the matched random + reweight baseline, while fitting
+the targets more closely. That does not prove the concentration issue is solved: different penalties,
+seeds, and candidate-support regimes may move the frontier. But it means the current positive result is
+not bought by making the random baseline look better-conditioned.
 
 \subsection{Trade-offs and limitations}
+
+\subsubsection{Single penalty and seed}
+
+The current result is a matched full-scale probe, not a completed frontier. It uses one normalized
+sparsity penalty and one seed. The next version should sweep $\lambda_{\mathrm{share}}$ across multiple
+retained counts, repeat the most important points over seeds, add concentration controls, and run dense
+no-$L_0$ to an explicit stopping rule. The present result is enough to justify that sweep because it shows
+a clear separation from random + reweight at one large, realistic support size and a small finite-budget
+edge over dense no-$L_0$.
 
 \subsubsection{Target surface}
 
@@ -42,31 +56,34 @@ version, materialization registry, or production weighting scheme could change t
 
 \subsubsection{Random baselines}
 
-The random + reweight baseline is strong because it uses the same gradient calibrator as the $L_0$ method
-after drawing the subset. It is therefore not a straw baseline: it is the practical reduce-first,
-calibrate-after workflow an analyst could run today. The result also clarifies the role of random seeds.
-The paper averages over three seeds to measure run-to-run variation, but the workflow should not assume an
-analyst will repeatedly resample and cherry-pick the best random draw.
+The random + reweight baseline is strong because it uses the same gradient calibrator as the post-$L_0$
+refit after drawing the subset. It is therefore not a straw baseline: it is the practical reduce-first,
+calibrate-after workflow an analyst could run today. The dense random scaled baseline answers a different
+question: whether one can dense-calibrate once, keep a random subset of the dense weights, scale the
+retained mass back up, and avoid refitting. On this surface that is not competitive. A fuller paper should
+still add the implemented probability-proportional-to-size calibrate-then-sample baseline and classical
+calibration comparators on target subsets where they are well-defined.
 
-\subsubsection{Degenerate targets and raw error metrics}
+\subsubsection{Raw error metrics}
 
-The raw mean ARE is dominated by denominator-degenerate targets, mostly IRS SOI cells where one record can
-move a tiny target by more than the target's own value. The paper therefore leads with the Populace
-objective loss and reports raw median/mean ARE as supplemental diagnostics. We do not hide the degenerate
-targets: they are named in the audit, and the targeted-removal sensitivity shows how much they contribute
-to the raw mean.
+The raw mean ARE remains tail-sensitive even when the Populace loss is low. The paper therefore leads with
+the capped, target-weighted Populace objective loss and reports median/mean ARE as supplemental
+diagnostics. The raw median is useful for typical target fit; the raw mean is useful for finding the tail.
 
 \subsubsection{Computational cost}
 
-Informed $L_0$ is more expensive than the baselines because every budget requires an outer bisection over
-the sparsity penalty. That cost is only worth paying if the selected subset is materially better, or if the
-method delivers an operational constraint that the baselines cannot. On the current full-surface results,
-the accuracy case is not yet there.
+Informed $L_0$ is more expensive than the random baseline because it first has to learn the support. Dense
+no-$L_0$ is also expensive because it keeps all records active. In this matched probe, $L_0$ selection plus
+refit takes longer than the 1{,}500-epoch dense no-$L_0$ run but returns a sparse 57{,}240-record support
+with lower completed-run loss. That cost is only worth paying if the selected subset is materially better,
+or if the method delivers an operational constraint that the baselines cannot. A production build still
+needs a penalty schedule, dense convergence checks, and checkpointing that make the sweep reliable.
 
 \subsection{Generalizability}
 
 The data engineering here is specific to the United States, but the question is general. Many
 microsimulation projects combine sources into a candidate dataset larger than they can ship, and then have
 to reduce it. This run shows that target-informed sampling can be evaluated on the real production loss and
-target surface, but it also shows that a simple random subset plus a strong calibrator is hard to beat. The
-next round should treat random + reweight as the benchmark to surpass, not as a weak baseline.
+target surface. It also clarifies the benchmark: the method should be judged by whether the selected
+support, after ordinary refit, beats random + reweight and other practical baselines at the same retained
+count.

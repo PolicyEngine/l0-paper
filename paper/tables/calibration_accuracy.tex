@@ -5,20 +5,19 @@
 \toprule
 Geographic level & Targets & Median ARE (\%) & Mean ARE (\%) & Max ARE (\%) \\
 \midrule
-National & 443 & 37.6 & 839.6 & 36{,}702.7 \\
-State & 7{,}615 & 39.4 & 2{,}112.1 & 1{,}370{,}306.3 \\
-Congressional district & 23{,}450 & 91.3 & 2{,}500.9 & 4{,}330{,}171.6 \\
+National & 478 & 1.30 & 20.12 & 557.29 \\
+State & 7{,}815 & 0.31 & 86.36 & 122{,}712.20 \\
+Congressional district & 24{,}340 & 1.48 & 85.29 & 162{,}495.93 \\
 \midrule
-\textbf{All scored targets} & 31{,}508 & 83.0 & 2{,}383.5 & 4{,}330{,}171.6 \\
+\textbf{All scored targets} & 32{,}633 & 0.89 & 84.64 & 162{,}495.93 \\
 \bottomrule
 \end{tabular}
 }
-\caption{Calibration accuracy by geographic level for the Informed $L_0$ + refit run at the representative
-$\sim$10{,}000-record budget, measured as absolute relative error (ARE) across the full-surface in-sample targets.
-The median reports the typical target's error; the mean and maximum are inflated by a handful of
-near-zero-denominator targets whose relative error is large despite small absolute misses
-(Section~\ref{sec:results-degenerate}).}
+\caption{Calibration accuracy by geographic level for the Informed $L_0$ + refit run at 57{,}240
+records, measured as absolute relative error (ARE) across the full target surface. The median reports the
+typical target's error; the mean and maximum are tail-sensitive diagnostics.}
 \label{tab:calibration_accuracy}
-\tablenote{Target counts are read from the run manifest. Blank geography rows mean no scored targets
-of that geography were present in the selected split.}
+\tablenote{Raw ARE is undefined for 26 IRS SOI national targets where both target and achieved values are
+zero; those rows are included in the target count and the Populace loss but omitted from the raw ARE
+summary.}
 \end{table}

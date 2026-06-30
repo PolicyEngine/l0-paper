@@ -265,7 +265,7 @@ export function LedgerSlide() {
             ]}
           />
           <p className="mt-7 text-base text-slate-400">
-            Current run: 37,053 Ledger facts compile to 31,534 active targets, including 23,450
+            Current run: 37,053 Ledger facts compile to 32,633 active targets, including 24,340
             congressional-district targets.
           </p>
         </div>
@@ -379,30 +379,32 @@ export function BaselinesSlide() {
   return (
     <Slide>
       <div className="flex h-full flex-col justify-center">
-        <SlideTitle kicker="Four methods">Where does selection enter the workflow?</SlideTitle>
+        <SlideTitle kicker="Five completed arms">Where does selection enter the workflow?</SlideTitle>
 
-        <div className="mt-9 grid grid-cols-2 gap-5">
+        <div className="mt-9 grid grid-cols-5 gap-4">
           <ContentCard title="Informed L0" accent="teal">
-            <p className="text-lg leading-snug text-slate-600">
-              Hard-concrete gates select records and fit weights jointly; the L0 penalty sets an exact
-              retained count.
+            <p className="text-base leading-snug text-slate-600">
+              Hard-concrete gates select records and fit weights jointly.
             </p>
           </ContentCard>
           <ContentCard title="L0 + refit" accent="teal">
-            <p className="text-lg leading-snug text-slate-600">
-              Keep the L0-selected records, remove the gates, and refit ordinary calibration weights on
-              that subset.
+            <p className="text-base leading-snug text-slate-600">
+              Keep selected records, remove gates, and refit ordinary calibration weights.
+            </p>
+          </ContentCard>
+          <ContentCard title="Dense no-L0" accent="teal">
+            <p className="text-base leading-snug text-slate-600">
+              Fit ordinary calibration weights on the full candidate universe.
             </p>
           </ContentCard>
           <ContentCard title="Random + reweight" accent="slate">
-            <p className="text-lg leading-snug text-slate-600">
+            <p className="text-base leading-snug text-slate-600">
               Draw a random subset first, then fit weights on that fixed subset.
             </p>
           </ContentCard>
-          <ContentCard title="Survey-weight sampling" accent="amber">
-            <p className="text-lg leading-snug text-slate-600">
-              Calibrate the full universe first, then draw records with probability proportional to fitted
-              weights.
+          <ContentCard title="Dense sample" accent="amber">
+            <p className="text-base leading-snug text-slate-600">
+              Randomly keep dense calibrated weights and scale them back to total mass.
             </p>
           </ContentCard>
         </div>
@@ -498,10 +500,10 @@ export function ExperimentDesignSlide() {
           One frozen input, the full Populace target surface
         </SlideTitle>
         <div className="mt-9 grid grid-cols-4 gap-5">
-          <StatNumber value="75,112" label="households" sublabel="Populace US 2024 candidate file" />
-          <StatNumber value="4" label="method arms" sublabel="L0, L0 + refit, random, survey-weight" />
-          <StatNumber value="2k–40k" label="budget sweep" sublabel="aggressive compression upward" />
-          <StatNumber value="31,534" label="targets" sublabel="all fit and scored" />
+          <StatNumber value="337,704" label="households" sublabel="three-year ASEC support" />
+          <StatNumber value="5" label="method arms" sublabel="L0, dense, random baselines" />
+          <StatNumber value="57,240" label="retained" sublabel="matched record count" />
+          <StatNumber value="32,633" label="targets" sublabel="all fit and scored" />
         </div>
         <ContentCard className="mt-8" accent="teal">
           <p className="text-2xl leading-snug text-slate-700">
@@ -522,7 +524,7 @@ export function CalibrationObjectiveSlide() {
     <Slide>
       <div className="flex h-full flex-col justify-center">
         <SlideTitle kicker="Experiment · shared objective">
-          All four methods are scored by the same loss
+          All methods are scored by the same loss
         </SlideTitle>
         <div className="mt-9 grid grid-cols-[1.15fr_0.85fr] items-center gap-10">
           <EquationCard
@@ -535,7 +537,7 @@ export function CalibrationObjectiveSlide() {
               Held fixed across every method
             </div>
             <div className="space-y-2.5">
-              {["Informed L0", "L0 + refit", "Random + reweight", "Survey-weight sampling"].map((m) => (
+              {["Informed L0", "L0 + refit", "Dense no-L0", "Random + reweight", "Dense sample, scaled"].map((m) => (
                 <div
                   key={m}
                   className="rounded-md border border-slate-200 bg-slate-50 px-4 py-2.5 text-lg font-medium text-pe-dark"
@@ -560,22 +562,22 @@ export function MainFrontierSlide() {
     <Slide>
       <div className="grid h-full grid-cols-[0.78fr_1.22fr] items-center gap-10">
         <div>
-          <SlideTitle kicker="Main result">Random + reweight is the benchmark to beat</SlideTitle>
+          <SlideTitle kicker="Main result">L0 selects a better support than random</SlideTitle>
           <p className="mt-8 text-2xl leading-snug text-slate-600">
-            On the current full Populace target surface, the target-informed subset is not yet the
-            most accurate way to prune. Random sampling followed by reweighting has the lowest
-            production loss at every budget except the smallest.
+            On the current full Populace target surface, the raw gated L0 weights are not the publication
+            weights. But the records selected by the gates become substantially more accurate after an
+            ordinary calibration refit.
           </p>
           <p className="mt-6 text-xl leading-snug text-slate-500">
-            The useful signal is narrower: post-selection refit closes much of the gap from raw L0, but
-            selection quality and weight concentration still have to improve.
+            At 57,240 records, L0 + refit reaches 4.74% Populace loss. Dense no-L0 with all records is
+            5.07%, and random + reweight at the same count is 7.55%.
           </p>
         </div>
         <Figure
           src="/figures/f0_objective_frontier.png"
           width={2168}
           height={886}
-          alt="Full-surface Populace objective loss versus retained records for the four samplers"
+          alt="Matched full-surface Populace objective loss for L0 gated weights, L0 refit, and random reweight"
         />
       </div>
     </Slide>
@@ -599,7 +601,7 @@ export function GeneralizationSlide() {
             items={[
               "The Populace loss is the headline score; raw ARE is supplemental.",
               "Median ARE shows typical target fit across the full surface.",
-              "Mean ARE is dominated by denominator-degenerate IRS cells, so we name those targets separately instead of hiding the tail.",
+              "Mean ARE remains tail-sensitive, so we report it as a diagnostic rather than the main score.",
             ]}
           />
         </div>
@@ -613,27 +615,27 @@ export function OperabilitySlide() {
     <Slide>
       <div className="grid h-full grid-cols-[0.78fr_1.22fr] items-center gap-10">
         <div>
-          <SlideTitle kicker="Concentration">The selected subset carries too much weight</SlideTitle>
+          <SlideTitle kicker="Concentration">The selected subset is also better conditioned</SlideTitle>
           <p className="mt-7 text-xl leading-snug text-slate-600">
-            Effective sample size is a primary result, not a footnote. The L0 selector finds records that
-            matter for the targets, but the current subset relies on a small number of very high-weight
-            records.
+            Effective sample size is a primary result, not a footnote. In this matched probe, dense
+            calibration has the highest sparse-fit ESS because it retains all records; among sparse
+            supports, L0 + refit beats random + reweight on both target loss and concentration.
           </p>
           <div className="mt-6 space-y-2.5">
             <p className="border-l-[3px] border-pe-teal pl-4 text-lg leading-snug text-slate-600">
-              <span className="font-bold text-pe-dark">At 10k records:</span> L0 + refit reaches ESS 393.
+              <span className="font-bold text-pe-dark">L0 + refit:</span> ESS 4,726; max weight 913,836.
+            </p>
+            <p className="border-l-[3px] border-teal-700 pl-4 text-lg leading-snug text-slate-600">
+              <span className="font-bold text-pe-dark">Dense no-L0:</span> ESS 5,970; max weight 579,298.
             </p>
             <p className="border-l-[3px] border-slate-400 pl-4 text-lg leading-snug text-slate-600">
-              <span className="font-bold text-pe-dark">Random + reweight:</span> ESS 1,624 at the same budget.
-            </p>
-            <p className="border-l-[3px] border-pe-amber pl-4 text-lg leading-snug text-slate-600">
-              <span className="font-bold text-pe-dark">Survey-weight sampling:</span> ESS 4,129, with the
-              lowest concentration.
+              <span className="font-bold text-pe-dark">Random + reweight:</span> ESS 2,480; max weight
+              1,163,939.
             </p>
           </div>
           <p className="mt-5 text-lg leading-snug text-slate-500">
-            The next methodological work is selection with concentration controls, not just lower target
-            loss.
+            The next methodological work is a normalized-penalty sweep, with concentration controls added
+            around this full-surface result.
           </p>
         </div>
         <Figure
@@ -659,20 +661,20 @@ export function FutureWorkSlide() {
         <div className="space-y-5">
           <ContentCard title="Build really large, then prune" accent="teal">
             <p className="text-xl leading-snug text-slate-600">
-              Push from the compact file to a deliberately over-built pool, then prune back to a
-              publishable artifact.
+              Sweep normalized L0 penalties on the three-year support and larger over-built pools, then
+              prune back to a publishable artifact.
             </p>
           </ContentCard>
-          <ContentCard title="Congressional-district production builds" accent="amber">
+          <ContentCard title="Complete the comparator set" accent="amber">
             <p className="text-xl leading-snug text-slate-600">
-              Use the full-surface run to choose deployable district files, then rerun fiscal release
-              scoring against the same target ledger.
+              Add PPS survey-weight sampling, categorical-margin raking panels, longer dense convergence
+              checks, and concentration controls around the same Populace loss.
             </p>
           </ContentCard>
           <ContentCard title="Targeted robustness" accent="slate">
             <p className="text-xl leading-snug text-slate-600">
-              Add family holdouts, raking-compatible margin subsets, and concentration-penalty sweeps as
-              diagnostics around the production target surface.
+              Keep family holdouts separate from the headline fit; use them to test robustness, not as the
+              production objective.
             </p>
           </ContentCard>
         </div>
@@ -685,8 +687,8 @@ export function TakeawaySlide() {
   return (
     <SectionSlide
       section="In closing"
-      title="Target-informed pruning is a useful control, not yet an accuracy win"
-      subtitle="The full-surface run makes the benchmark clear: beat random + reweight on Populace loss while keeping effective sample size high enough for a deployable dataset."
+      title="Target-informed pruning works as support selection"
+      subtitle="The full-surface probe says: choosing a sparse support with L0 and then refitting reaches lower completed-run loss than dense no-L0 and matched random baselines."
     />
   );
 }

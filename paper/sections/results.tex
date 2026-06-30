@@ -3,122 +3,116 @@
 
 The results answer the production question directly: with the candidate universe, target surface, and
 record budget fixed, which retained weight vector best fits the current \populace{} target surface? All
-methods are scored on the full set of 31{,}534 materialized targets, using the penalty-free Populace
-objective loss in Equation~\ref{eq:loss_cal}. The run uses three seeds at each requested record budget.
-Raw absolute-relative-error (ARE) summaries, effective sample size, and max weight are reported as
-diagnostics around that loss.
+methods are scored on the full set of 32{,}633 materialized targets, using the penalty-free Populace
+objective loss in Equation~\ref{eq:loss_cal}. The run reported here is a matched full-scale probe rather
+than a full budget frontier: a normalized $L_0$ penalty selects a sparse support, the same retained count
+is used for the post-$L_0$ refit and sparse baselines, and an epoch-matched dense no-$L_0$ calibration
+anchors the comparison. Raw absolute-relative-error (ARE) summaries, effective sample size, and max weight
+are reported as diagnostics around the headline loss.
 
-\subsection{The full-surface accuracy frontier}
+\subsection{The full-surface matched probe}
 
-Figure~\ref{fig:objective_frontier} is the headline result. The target-informed $L_0$ subset is not the
-most accurate method on the current full surface. Random sampling followed by gradient reweighting has the
-lowest Populace objective loss at every budget except the smallest, where survey-weight sampling is
-slightly lower. At the 10{,}000-record anchor, random + reweight reaches a 46.3\% objective loss, survey-
-weight sampling 50.8\%, informed $L_0$ plus refit 55.4\%, and the raw informed $L_0$ gated weights
-72.2\%. At 40{,}000 records the ranking narrows but does not reverse: random + reweight is 44.1\%,
-informed $L_0$ plus refit 46.4\%, survey-weight sampling 47.7\%, and informed $L_0$ 69.0\%.
+Figure~\ref{fig:objective_frontier} is the headline result. On the current three-year ASEC support file,
+the normalized $L_0$ penalty selects 57{,}240 of 337{,}704 candidate households, or 17.0\% of the
+candidate universe. The raw gated $L_0$ weights are not the right publication weights: scored after
+thresholding, they reach a Populace objective loss of 9.86\%. Removing the gates and refitting ordinary
+calibration weights on exactly the selected records lowers that loss to 4.74\%. A dense no-$L_0$
+calibration using all 337{,}704 records and the same 1{,}500-epoch optimizer budget reaches 5.07\%. A
+random subset of the same size as the $L_0$ support, followed by the same 1{,}500-epoch gradient
+reweighting, reaches 7.55\%. A random subset of the dense calibrated weights, scaled back to the dense
+total but not refit, reaches 24.24\%.
 
-The post-selection refit is therefore essential. Refitting ordinary calibration weights on the selected
-$L_0$ records lowers the objective by 11--23 percentage points relative to the raw gated weights and
-brings the selected subset close to the sampling baselines at larger budgets. But the refit does not turn
-the current $L_0$ selector into the best full-surface sampler. The current implementation is better read
-as a working target-informed selection mechanism whose weights need refitting, not as an accuracy win over
-random + reweight on this target surface.
+The practical interpretation is that the $L_0$ selector is doing useful support-selection work, but the
+post-selection refit is essential. The selected support gives a lower finite-budget optimizer loss than
+the full dense run at 1{,}500 epochs and fits the full target surface much more closely than a random
+support of the same size. This should not be read as a claim that the dense feasible set is worse: the
+dense no-$L_0$ loss is still declining at the end of the 1{,}500-epoch budget. The defensible claim is that
+this $L_0$ support gives a better sparse support and a faster route to low loss under the completed
+optimizer budget. The current evidence should still be read as a single fixed-penalty probe, not as proof
+that this exact penalty is optimal: the next sweep needs to trace the normalized penalty across multiple
+retained counts and concentration settings.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=\textwidth]{figures/f0_objective_frontier}
-    \caption{Full-surface Populace objective loss against the retained-record budget. The objective is the
-    capped, target-weighted calibration loss in Equation~\ref{eq:loss_cal}, evaluated on each method's
-    final retained/sampled weight vector and excluding sparsity or concentration penalties. Lines are
-    means over three seeds and bands are 95\% confidence intervals.}
+    \includegraphics[width=0.96\textwidth]{figures/f0_objective_frontier}
+    \caption{Full-surface Populace objective loss in the matched probe. The objective is the capped,
+    target-weighted calibration loss in Equation~\ref{eq:loss_cal}, evaluated on each method's final
+    retained/sampled weight vector and excluding sparsity or concentration penalties. The $L_0$ run uses a
+    normalized penalty share of 0.8, equivalent to raw $\lambda_{L_0}=2.37\times10^{-6}$ for 337{,}704
+    candidate households.}
     \label{fig:objective_frontier}
 \end{figure}
 
-Table~\ref{tab:sampling_comparison} reports the same comparison at the representative
-$\sim$10{,}000-record budget, with raw ARE and weight diagnostics. The raw median ARE follows the
-objective ordering: random + reweight has the lowest median error (68.8\%), followed by survey-weight
-sampling (71.2\%), informed $L_0$ plus refit (83.0\%), and raw informed $L_0$ (95.5\%). The raw mean ARE
-is much larger because a tail of denominator-degenerate targets has tiny values relative to a single
-record's contribution (Section~\ref{sec:results-degenerate}).
+Table~\ref{tab:sampling_comparison} reports the same comparison with raw ARE and weight diagnostics. The
+median ARE gives a different view from the capped objective: dense no-$L_0$ has the lowest median ARE
+(0.56\%), while the post-$L_0$ refit is close (0.89\%) and has the lowest capped Populace loss. Random +
+reweight has 6.70\% median ARE, raw gated $L_0$ has 11.66\%, and the dense random scaled sample has
+55.24\%. The mean ARE remains much larger because a small tail of difficult IRS targets can have very
+large relative misses even when the capped Populace loss is low.
 
 \input{tables/sampling_comparison}
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\textwidth]{figures/f1_frontier}
-    \caption{Supplemental raw-error frontier: median and mean absolute relative error across the full
-    target surface. These diagnostics are useful for interpretation but are not the headline loss; the
-    mean is especially sensitive to denominator-degenerate targets. Lines are means over three seeds and
-    bands are 95\% confidence intervals.}
-    \label{fig:budget_frontier}
-\end{figure}
-
-The paired comparison in Table~\ref{tab:paired_comparison} makes the gap explicit. Against random +
-reweight, informed $L_0$ plus refit has a higher median ARE at every budget above the smallest; the gap is
-14.3 percentage points at 10{,}000 records and 19.2 points at 20{,}000 records. On the tail-sensitive
-mean, the gap is not stable enough to claim a win either way. At 40{,}000 records the mean AREs are nearly
-level, but the median still favours random + reweight. With three seeds, these paired intervals should be
-read as descriptive uncertainty rather than formal inference.
+Table~\ref{tab:paired_comparison} expresses the comparison on the headline loss scale. Relative to dense
+no-$L_0$, the post-$L_0$ refit lowers the completed-run Populace objective by 6.4\%. Relative to random +
+reweight, it lowers the objective by 37.2\%. Relative to the raw gated $L_0$ weights, it lowers the
+objective by 51.9\%. The comparison isolates the value of the support and the refit: keeping dense weights
+on a random retained set and merely scaling them back to total mass performs poorly, so a sparse file still
+needs a reweighting step.
 
 \input{tables/paired_comparison}
 
 \subsection{Size and concentration}
 \label{sec:results-controls}
 
-The size control works even though the accuracy result is negative. The eight-step bisection over
-$\lambda_{L_0}$ hits the requested budgets closely: the achieved retained counts average 2{,}079, 5{,}034,
-9{,}770, 19{,}319, and 41{,}004 records for the five requested budgets (Appendix~\ref{app:presets}). This
-is a real operational advantage over manually choosing a cutoff on fitted weights.
+The normalized penalty gives a usable size control in this probe. We parameterize the sparsity price as a
+share of the mean calibration loss, $\lambda_{\mathrm{share}}\sum_i\bar{z}_i/n$, rather than as an
+unscaled raw coefficient. With $\lambda_{\mathrm{share}}=0.8$, the optimizer retained 57{,}240 records.
+This scaling matters operationally: the same raw coefficient has very different meanings when the
+candidate universe changes from tens of thousands to hundreds of thousands of records.
 
-The weight distribution is the cost. Figure~\ref{fig:usability} shows that informed $L_0$ and the
-post-$L_0$ refit concentrate far more mass than the sampling baselines. At the 10{,}000-record anchor, the
-effective sample size is 393 for informed $L_0$ plus refit, 219 for raw informed $L_0$, 1{,}624 for random
-+ reweight, and 4{,}129 for survey-weight sampling. The largest weight in the post-$L_0$ refit is about
-6.4 million, compared with 1.2 million for random + reweight and 0.55 million for survey-weight sampling.
-The target-informed selector is finding records that matter for the targets, but the resulting subset is
-still too reliant on a small number of high-weight records.
+The selected support is more concentrated than the full dense calibration but better conditioned than the
+matched random sparse baselines. Dense no-$L_0$ has an effective sample size of 5{,}970 and a maximum
+weight of 579{,}298. The post-$L_0$ refit has ESS 4{,}726 and maximum weight 913{,}836. Random + reweight
+has lower ESS, 2{,}480, and a higher maximum weight, 1{,}163{,}939; the dense random scaled sample is worse
+again, with ESS 981 and maximum weight 2{,}176{,}121. The raw gated $L_0$ weights have higher ESS,
+6{,}879, but worse target fit, which is why the refit is the publishable sparse variant.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=\textwidth]{figures/f2_usability}
-    \caption{Effective sample size and largest fitted weight against the requested record budget. ESS is
-    computed on each method's final retained/sampled weight vector. Lines are means over three seeds and
-    bands are 95\% confidence intervals.}
+    \caption{Weight concentration in the matched full-surface probe. Effective sample size and maximum
+    weight are computed on each method's final retained/sampled weight vector. Dense no-$L_0$ retains all
+    337{,}704 records; the other sparse rows retain 57{,}240 records.}
     \label{fig:usability}
 \end{figure}
 
 \subsection{Accuracy by geography}
 
-Table~\ref{tab:calibration_accuracy} breaks the informed $L_0$ plus refit diagnostics down by geography at
-the anchor budget. District targets are the hardest part of the current surface: their median ARE is
-91.3\%, compared with 39.4\% for state targets and 37.6\% for national targets. This is the intended stress
-test for the method, because the congressional-district surface is exactly why \populace{} needs to
-construct a large candidate universe before pruning it. It is also where the current selector is not yet
-delivering enough fit.
+Table~\ref{tab:calibration_accuracy} breaks the post-$L_0$ refit diagnostics down by geography. The fit is
+strongest at the state level, where median ARE is 0.31\%, followed by national targets at 1.30\% and
+district targets at 1.48\%. District targets are the intended stress test for the method: they are the
+largest part of the target surface, and they are the reason \populace{} needs to build a large candidate
+universe before pruning it.
 
 \input{tables/calibration_accuracy}
 
-\subsection{Degenerate targets and metric robustness}
+\subsection{Raw-error tails}
 \label{sec:results-degenerate}
 
-The full surface contains 8{,}095 denominator-degenerate targets: targets whose value is smaller than the
-largest single-record contribution at the initial weight. Almost all of the largest raw AREs are IRS SOI
-cells in this class. These targets are real source-backed facts and are retained in the headline objective,
-but the raw ARE mean is not a reliable summary of typical fit because a small absolute miss can imply an
-enormous relative error.
-
-For transparency, the report names the degenerate targets in \texttt{degenerate\_targets.csv} and
-recomputes the mean after dropping exactly those named rows. For informed $L_0$ plus refit, that targeted
-removal lowers the mean ARE from 2{,}383.5\% to 151.1\% at the 10{,}000-record budget, and from
-1{,}540.5\% to 84.6\% at 40{,}000 records. The median is much less sensitive to this tail, which is why the
-paper reports it beside the Populace objective rather than leading with the raw mean.
+The Populace objective is the headline score because it is capped and target weighted; raw ARE summaries
+are supplemental. In the matched probe, raw ARE is defined for 32{,}607 of the 32{,}633 scored targets.
+The remaining 26 rows are IRS SOI national targets with both target and achieved values equal to zero, so
+they are omitted from raw relative-error summaries but do not affect the capped loss. Among the defined
+rows, the post-$L_0$ refit has a 0.89\% median ARE and an 84.6\% mean ARE. The gap between the median and
+the mean is the reason the paper leads with the Populace loss and reports raw ARE only as a diagnostic.
 
 \subsection{Cost}
 
-Appendix~\ref{app:cost} reports runtime against the headline split's median ARE. Informed $L_0$ is
-expensive because each budget requires an outer bisection over $\lambda_{L_0}$, while the two sampling
-baselines reuse a dense fit or refit a sampled subset. The current full-surface results therefore do not
-justify $L_0$ on accuracy alone. The research value is narrower but useful: the code now runs the full
-surface, preserves every weight vector, imports Populace's own scoring/loss helpers, and shows where the
-target-informed selector must improve before it can beat simpler baselines.
+The matched probe took 39.4 minutes for the $L_0$ selection run. The post-selection refit then added about
+9.5 minutes, for a combined 48.9 minutes reported in the artifact. Dense no-$L_0$ took 38.7 minutes for
+1{,}500 epochs, random + reweight took 7.3 minutes, and the dense random scaled sample required no extra
+optimization beyond the dense fit. The selector is therefore computationally expensive, and the dense run
+is still slowly declining at the endpoint. The accuracy gain over dense and random + reweight is large
+enough in this probe to justify a broader normalized-penalty sweep, but not enough to skip the next
+robustness work: more penalties, longer dense convergence checks, more candidate-support regimes, and
+concentration controls.

@@ -12,8 +12,8 @@ state, and congressional-district aggregates across the major tax and transfer f
 the exact target system used rather than against a pipeline-wide inventory.
 
 Table~\ref{tab:target_sources} lists each family with its administrative source. The system holds
-31{,}534 targets across eleven families and three geographic levels: 23{,}450 congressional-district,
-7{,}615 state, and 469 national targets. The \texttt{irs\_soi} family supplies 30{,}252 of them (96\%),
+32{,}633 targets across eleven families and three geographic levels: 24{,}340 congressional-district,
+7{,}815 state, and 478 national targets. The \texttt{irs\_soi} family supplies 31{,}350 of them (96\%),
 so the micro-average over all targets is dominated by IRS income-tax aggregates; the family
 macro-average (Section~\ref{sec:metrics}) is the counterweight that gives each family equal weight.
 
@@ -24,19 +24,19 @@ macro-average (Section~\ref{sec:metrics}) is the counterweight that gives each f
 \toprule
 Family & Administrative source & Levels & Targets \\
 \midrule
-\texttt{irs\_soi} & IRS Statistics of Income: Historic Table 2 state totals and congressional-district tables & National, state, district & 30{,}252 \\
-\texttt{census\_population} & Census Bureau annual state resident population estimates & National, state & 936 \\
+\texttt{irs\_soi} & IRS Statistics of Income: Historic Table 2 state totals and congressional-district tables & National, state, district & 31{,}350 \\
+\texttt{census\_pep} & Census Bureau annual state resident population estimates & National, state & 936 \\
 \texttt{cms\_medicaid} & CMS Medicaid and CHIP applications, eligibility, and enrollment reports & National, state & 102 \\
 \texttt{cms\_aca} & CMS open-enrollment-period state-level public use file & State & 102 \\
 \texttt{usda\_snap} & USDA FNS SNAP monthly state participation and benefit summaries & National, state & 52 \\
-\texttt{state\_income\_tax} & Census Bureau State Tax Collections (STC), item T40 individual income taxes & State & 44 \\
+\texttt{census\_stc} & Census Bureau State Tax Collections (STC), item T40 individual income taxes & State & 44 \\
 \texttt{hhs\_acf\_tanf} & HHS ACF federal TANF and state MOE financial data & National, state & 30 \\
-\texttt{ssa} & SSA Annual Statistical Supplement, OASDI beneficiaries and benefits & National & 6 \\
+\texttt{ssa\_supplement} & SSA Annual Statistical Supplement, OASDI beneficiaries and benefits & National & 6 \\
 \texttt{jct} & JCT estimates of federal tax expenditures & National & 5 \\
-\texttt{cbo} & CBO revenue projections by category & National & 4 \\
+\texttt{cbo} & CBO revenue projections by category & National & 5 \\
 \texttt{cms\_medicare} & CMS Medicare Trustees Report & National & 1 \\
 \midrule
-\textbf{Total} & & & \textbf{31{,}534} \\
+\textbf{Total} & & & \textbf{32{,}633} \\
 \bottomrule
 \end{tabular}
 }
@@ -46,19 +46,17 @@ and scored; holdout variants are supplemental diagnostics (Section~\ref{sec:oos}
 \label{tab:target_sources}
 \end{table}
 
-\section{From a record budget to the sparsity penalty}
+\section{From a sparsity penalty to a record budget}
 \label{app:presets}
 
-The sparsity penalty $\lambda_{L_0}$ sets the retained-record count, but the map from a penalty to a
-count is monotone and problem-dependent rather than closed-form: a larger $\lambda_{L_0}$ prunes more
-records, and how many depends on the candidate universe and the targets. Each build therefore specifies
-a requested record count, and an outer bisection adjusts $\lambda_{L_0}$ over eight steps (each a full
-optimization) until the achieved count matches. Table~\ref{tab:presets} reports the $\lambda_{L_0}$ that
-each requested count converged to (informed $L_0$, $\lambda_{L_2}=0$), with the achieved count. The penalty
-spans about an order of magnitude across the budget range, and the achieved count lands within three per
-cent of the request at every point.
-
-\input{tables/presets}
+The sparsity penalty sets the retained-record count, but the map from a penalty to a count is
+problem-dependent rather than closed-form: a larger penalty prunes more records, and how many depends on
+the candidate universe and the targets. In the matched full-scale probe we use a normalized penalty share,
+$\lambda_{\mathrm{share}}\sum_i\bar{z}_i/n$, so the coefficient has the same interpretation as the
+candidate universe changes. With $n=337{,}704$ candidate household records and
+$\lambda_{\mathrm{share}}=0.8$, the raw coefficient passed to the optimizer is
+$2.37\times10^{-6}$ and the deterministic gates retain 57{,}240 records. A full frontier should sweep
+$\lambda_{\mathrm{share}}$ rather than hard-coding raw $\lambda_{L_0}$ values.
 
 \section{Optimization hyperparameters}
 \label{app:hyperparameters}
@@ -82,11 +80,11 @@ Initial keep probability & 0.8 & Records start mostly active while leaving room 
 Weight jitter SD & 0.05 & Log-space noise on weights at initialization \\
 Logit jitter SD & 0.01 & Log-space noise on gate logits at initialization \\
 Learning rate & 0.02 & Adam optimizer step size \\
-Epochs & 250 & Training iterations per bisection step \\
+Epochs & 1{,}500 & Training iterations in the reported fixed-penalty probe \\
 Target loss cap $c$ & 1 & Caps a single target's contribution to $\mathcal{L}_{\text{cal}}$; the runs reported here use Populace's production US-fiscal value $c=1$ \\
-$\lambda_{L_0}$ & $5.9\times10^{-3}$ to $1.4\times10^{-2}$ & Sparsity penalty, set per build by bisection to the target size (Appendix~\ref{app:presets}) \\
+$\lambda_{\mathrm{share}}$ & 0.8 & Normalized sparsity share in $\lambda_{\mathrm{share}}\sum_i\bar{z}_i/n$; raw $\lambda_{L_0}=2.37\times10^{-6}$ for 337{,}704 records \\
 $\lambda_{L_2}$ & $0$ & Soft concentration penalty on $(w_i/w_{0,i})^2$ (mean over records); held at zero in the reported full-surface run \\
-Budget bisection steps & 8 & Re-runs of the optimization that tune $\lambda_{L_0}$ to the target size \\
+Budget bisection steps & None & The reported full-scale probe uses one fixed normalized penalty; a future frontier should sweep this value \\
 \texttt{max\_weight\_ratio} & None (uncapped) & Hard per-record weight cap: $w_i \leq \text{ratio}\times w_{0,i}$, clamped each step \\
 \bottomrule
 \end{tabular}
@@ -156,16 +154,17 @@ assembled dataset.
 \section{Cost diagnostics}
 \label{app:cost}
 
-Figure~\ref{fig:cost_accuracy} reports the wall-clock runtime of each method against the full-surface
-median ARE it reaches, across the budget sweep, so the accuracy comparison can be read alongside its
-compute cost.
+Figure~\ref{fig:cost_accuracy} is retained as a supplemental cost diagnostic from the earlier budget
+sweep. The matched full-scale probe's current runtimes are reported in Section~\ref{sec:results}: dense
+no-$L_0$ took 38.7 minutes for 1{,}500 epochs, $L_0$ selection plus refit took 48.9 minutes combined, and
+random + reweight took 7.3 minutes.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.8\textwidth]{figures/f5_cost_accuracy}
-    \caption{Cost against accuracy: wall-clock runtime (log scale) against full-surface median ARE (log
-    scale) for the four methods, each point labelled by its requested record budget. Informed $L_0$ and
-    informed $L_0$ plus refit runtimes include the eight-step budget bisection that sets the sparsity
-    penalty; the matched baselines run once at the budget. Points are the mean over three seeds.}
+    \caption{Supplemental historical cost against accuracy: wall-clock runtime (log scale) against
+    full-surface median ARE (log scale), each point labelled by its requested record budget. This figure
+    predates the fixed normalized-penalty full-scale probe and is used only to motivate reporting runtime
+    alongside accuracy.}
     \label{fig:cost_accuracy}
 \end{figure}

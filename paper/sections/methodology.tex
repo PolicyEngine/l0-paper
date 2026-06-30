@@ -17,7 +17,7 @@ target $j$ is
     \label{eq:estimate}
 \end{equation}
 
-The four methods compared in this study fit weights with the same calibrator, the \texttt{calibrate}
+The methods compared in this study fit weights with the same calibrator, the \texttt{calibrate}
 routine in \populace{}. It minimizes a capped, weighted mean absolute percentage error (capped weighted
 MAPE) of the estimates against the targets,
 \begin{equation}
@@ -34,10 +34,10 @@ per-target weights, normalised by their sum so only their relative magnitudes ma
 relative, so a one per cent miss on a small target and on a large one count the same. The weights are
 parameterized in log space, $w_i = \exp(\theta_i)$, so the fitted weights stay positive; an Adam
 optimizer \citep{kingma2015} implemented in PyTorch \citep{pytorch2019} minimizes the loss, and the
-total weight is held to the input population. On a fixed set of
-records this calibrator answers a calibration question: it finds weights that match the targets. The
-random and survey-weight baselines use it unchanged; informed $L_0$ extends it with a
-selection term.
+total weight is held to the input population. On a fixed set of records this calibrator answers a
+calibration question: it finds weights that match the targets. Dense no-$L_0$, post-$L_0$ refit, and
+random + reweight use it unchanged on different supports; informed $L_0$ extends it with a selection
+term.
 
 The per-target weights $\omega_j$ in the runs reported here follow \populace{}'s production US-fiscal
 weighting, computed through the same code path the production US build uses rather than a separate
@@ -59,19 +59,21 @@ gated estimate becomes $\hat{t}_j = \sum_i M_{ji} w_i z_i$, and the optimizer mi
 \begin{equation}
     \mathcal{L}(\mathbf{w}, \boldsymbol{\alpha}) =
     \mathcal{L}_{\mathrm{cal}}(\mathbf{w}, \mathbf{z}) +
-    \lambda_{L_0} \sum_{i=1}^{n} \bar{z}_i +
+    \lambda_{\mathrm{share}}\frac{1}{n}\sum_{i=1}^{n} \bar{z}_i +
     \lambda_{L_2} \frac{1}{n} \sum_{i=1}^{n} \left(\frac{w_i}{w_{0,i}}\right)^2.
     \label{eq:loss}
 \end{equation}
 The first term is the capped weighted MAPE of Equation~\ref{eq:loss_cal}, now evaluated on the gated
 weights $w_i z_i$. The second term is the $L_0$ penalty and sets the sample size: $\bar{z}_i = \Pr(z_i \neq 0)$ is the
 expected activation of gate $i$ (Equation~\ref{eq:l0penalty}), so $\sum_i \bar{z}_i$ is the expected number of open gates, the
-expected retained-record count, and $\lambda_{L_0}$ sets how aggressively the optimizer prunes. Rather
-than set $\lambda_{L_0}$ by hand, each build tunes it by an outer bisection to a requested record count
-(Appendix~\ref{app:presets}). The third term is a soft concentration penalty: $\lambda_{L_2}$ multiplies the mean squared ratio of each
+expected retained-record count, and $\lambda_{L_0}$ sets how aggressively the optimizer prunes. In the
+full-scale probe we report $\lambda_{L_0}$ through a normalized penalty share,
+$\lambda_{\mathrm{share}}\sum_i\bar{z}_i/n$, so the sparsity price is comparable when the candidate
+record count changes. The raw coefficient passed to the optimizer is therefore
+$\lambda_{L_0}=\lambda_{\mathrm{share}}/n$. The third term is a soft concentration penalty: $\lambda_{L_2}$ multiplies the mean squared ratio of each
 fitted weight to its initial weight $w_{0,i}$, which discourages the optimizer from carrying the fit on
-a few heavily inflated records. It applies to informed $L_0$ only; the random and survey-weight baselines
-run the shared calibrator without any selection or concentration term.
+a few heavily inflated records. It applies to informed $L_0$ only; the dense and random baselines run the
+shared calibrator without any selection or concentration term.
 
 Read as a sampler, the calibration term keeps the retained sample faithful to the targets, the $L_0$
 penalty sets the sample size, and the $L_2$ penalty governs weight concentration. The concentration
@@ -83,10 +85,10 @@ smoothly, and it is the control we sweep to trace the accuracy-concentration tra
 \texttt{max\_weight\_ratio} is a hard per-record cap on the same ratio: no fitted weight may exceed a
 fixed multiple of that record's initial weight, clamped after every optimizer step. The soft penalty
 shapes the whole weight distribution during optimization; the cap bounds the single largest weight.
-Size and concentration are therefore set by separate controls: $\lambda_{L_0}$ fixes how many records
+Size and concentration are therefore set by separate controls: $\lambda_{L_0}$ sets how many records
 remain, and the $L_2$ penalty and \texttt{max\_weight\_ratio} can fix how concentrated their weights may
-become. The headline full-surface runs leave the cap off and set $\lambda_{L_2}=0$, so the reported
-accuracy frontier is the pure-calibration result. Tightening either control is a natural robustness panel:
+become. The headline full-surface probe leaves the cap off and sets $\lambda_{L_2}=0$, so the reported
+accuracy comparison is the pure-calibration result. Tightening either control is a natural robustness panel:
 it bounds how much population a single record can carry, at some cost to calibration fit. Appendix~\ref{app:hyperparameters} lists the
 full configuration, and Appendix~\ref{app:algorithm} gives the optimization loop as
 Algorithm~\ref{alg:l0}.
@@ -114,9 +116,12 @@ balanced sampling is designed for fixed balancing variables, and combinatorial o
 discrete and costly at production scale. The headline comparison therefore keeps the candidate
 universe, target surface, positivity restriction, and calibration loss fixed, and varies only the way
 records are selected and, for the post-selection arms, refit. From one candidate universe and one target
-set, we compare four method arms at a matched record budget: informed $L_0$ selection, informed $L_0$
-selection followed by an ordinary calibration refit on the selected records, and two classical reduction
-baselines that bracket where calibration enters (Section~\ref{sec:reduction_methods}):
+set, the matched full-scale probe compares five method arms: informed $L_0$ selection, informed $L_0$
+selection followed by an ordinary calibration refit on the selected records, dense no-$L_0$ calibration on
+the full candidate universe, random sampling followed by gradient reweighting, and a no-refit random
+sample of dense calibrated weights scaled back to total mass. The survey-weight sampling arm is
+implemented in the code and remains the natural probability-proportional-to-size calibrate-then-reduce
+baseline for the next full sweep, but it was not run in the current matched probe. The run arms are:
 
 \begin{itemize}
     \item \textbf{Informed $L_0$ sampling with Hard Concrete gates.} The shared calibrator with the
@@ -126,31 +131,32 @@ baselines that bracket where calibration enters (Section~\ref{sec:reduction_meth
     and the shared calibrator refits ordinary dense weights on that retained subset, initialized from the
     informed $L_0$ weights. This post-selection refit isolates the value of the selected subset from the
     particular gated weights returned by the joint optimization.
+    \item \textbf{Dense no-$L_0$ calibration.} The shared calibrator fits positive weights on the full
+    337{,}704-record candidate universe, with gates off and no sparsity or concentration penalty. This is
+    the finite-optimization dense benchmark.
     \item \textbf{Random sampling with gradient-descent reweighting.} A random subset of the candidate
     universe of the same size is drawn, then the shared calibrator fits its weights to the same targets
     without the gate or concentration terms. This is the reduce-first, calibrate-after baseline.
-    \item \textbf{Survey-weight sampling (Hansen--Hurwitz).} The shared calibrator first reweights the
-    full universe to the targets, and records are then drawn with probability proportional to those
-    weights, with replacement; each of the $n$ draws receives an equal share $W/n$ of the total
-    weight $W$, and repeated draws accumulate on the same record. This is the unbiased Hansen--Hurwitz
-    integerisation \citep{hansen1943} of the dense weights, which preserves their expectation at every
-    budget, and is the calibrate-then-reduce baseline.
+    \item \textbf{Dense random sample, scaled.} Dense no-$L_0$ weights are fit once on the full universe;
+    a uniform random subset of the matched size is retained; the retained dense weights are then scaled so
+    their total equals the dense total, with no post-sampling refit. This tests whether dense calibration
+    alone can be made sparse by random thinning and mass scaling.
 \end{itemize}
 
 This design does not claim that raking, GREG, balanced sampling, or combinatorial optimisation are
 irrelevant in general. They remain the reference methods for simpler margin surfaces, classical
 calibration, target-balanced survey designs, and discrete synthetic-population construction. The
 empirical comparison below focuses on the methods that can be applied to the full Populace target
-surface under the same scoring loss and that were run in the real-data sweep.
+surface under the same scoring loss and that were run in the real-data probe.
 
 Holding the candidate universe and the target set fixed isolates the effect of how records are
 chosen. Every method starts from the same candidate frame with its weights reset to a uniform prior, so
-each record's initial weight $w_{0,i}$ is one shared constant. We sweep the retained-record budget across
-2{,}000, 5{,}000, 10{,}000, 20{,}000, and 40{,}000 records,
-from aggressive compression of the candidate universe up to a large fraction of it, and run each budget
-over three calibration seeds (seeds $0$--$2$). Informed $L_0$ sets the achieved budget
-at each grid point through its $\lambda_{L_0}$ bisection, and the baselines are matched to the same
-retained count.
+each record's initial weight $w_{0,i}$ is one shared constant. The reported probe uses
+$\lambda_{\mathrm{share}}=0.8$, which equals raw $\lambda_{L_0}=2.37\times10^{-6}$ for the 337{,}704
+candidate records and retains 57{,}240 records. The post-$L_0$ refit, dense no-$L_0$, and random +
+reweight baselines each use a 1{,}500-epoch optimizer budget; the sparse baselines use the same
+57{,}240-record count. Multi-seed sweeps across penalties and concentration controls are the next
+robustness panel rather than part of the headline evidence here.
 
 \subsection{Full-surface scoring and holdout robustness}
 \label{sec:oos}
@@ -158,8 +164,8 @@ retained count.
 The production motivation is not to predict a hidden target family; it is to construct a deployable
 dataset that fits the full target surface \populace{} currently assembles. The headline experiment
 therefore fits and scores every materialized target, including validation-only families and
-congressional-district targets. In the run reported here, 37{,}053 Ledger facts compile to 31{,}534
-materialized calibration targets on 75{,}112 candidate household records. The reported objective is the
+congressional-district targets. In the run reported here, 37{,}053 Ledger facts compile to 32{,}633
+materialized calibration targets on 337{,}704 candidate household records. The reported objective is the
 same capped, weighted calibration loss in Equation~\ref{eq:loss_cal}, evaluated on the final retained
 weights and excluding the $L_0$ and $L_2$ penalties. This is the frontier an analyst would use
 when choosing a publishable record budget for the actual \populace{} build.

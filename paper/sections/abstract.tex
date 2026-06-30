@@ -14,17 +14,21 @@ them, the reduced dataset continues to match its targets.
 
 We implement the method within \populace{}, PolicyEngine's microsimulation data pipeline, and present a
 proof of concept on its current full United States target surface. The run starts from 37{,}053 Ledger facts
-and scores 31{,}534 materialized calibration targets, including 23{,}450 congressional-district targets, on
-75{,}112 candidate households. Holding the candidate universe, target surface, and record budget fixed, we
-vary only how records are chosen across target-informed $L_0$ selection and matched random-sampling
-baselines, all scored by the same Populace capped weighted calibration loss. The experiment is therefore a
-frontier between retained-record count and target fit, not a holdout exercise. On the current full target
-surface, random sampling followed by gradient reweighting is the strongest baseline: informed $L_0$ plus an
-ordinary post-selection refit improves substantially on the raw gated weights and nearly catches the
-baselines at larger budgets, but it does not dominate the production loss. The useful finding is therefore
-diagnostic rather than promotional. The machinery now runs the full surface, preserves the resulting weight
-vectors, and exposes where target-informed selection needs work: better selected subsets, less weight
-concentration, and robustness checks against classical calibration comparators.
+and scores 32{,}633 materialized calibration targets, including 24{,}340 congressional-district targets, on
+337{,}704 candidate households from a three-year pooled ASEC support file. Holding the candidate universe,
+target surface, and optimizer budget fixed, we vary how records are chosen across target-informed $L_0$
+selection, dense no-$L_0$ calibration, and matched sampling baselines, all scored by the same Populace
+capped weighted calibration loss. A normalized $L_0$ penalty retaining 57{,}240 records produces a sparse
+support whose raw gated weights score poorly, but an ordinary post-selection refit on that support lowers
+the Populace loss to 4.74\%. The 1{,}500-epoch dense no-$L_0$ calibration reaches 5.07\%, a random subset
+followed by the same reweighting reaches 7.55\%, and a random sample of the dense calibrated weights
+scaled back to total mass reaches 24.24\%. The useful finding is therefore specific and actionable: the
+gates are valuable as a support selector, while the publication weights should be refit after selection.
+Because the dense loss is still declining at the endpoint, the result is a finite-optimization and sparse
+support result rather than a claim that dense calibration could not converge lower. The machinery now runs
+the full surface, preserves the resulting weight vectors, and sets up the next robustness work:
+normalized-penalty sweeps, longer dense convergence checks, concentration controls, and comparisons
+against classical calibration methods on target subsets where their assumptions hold.
 \end{abstract}
 
 \noindent\textbf{Keywords:} microsimulation, survey calibration, subsampling, $L_0$ regularization,

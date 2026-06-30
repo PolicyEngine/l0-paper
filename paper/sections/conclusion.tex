@@ -3,24 +3,22 @@
 
 This paper studies $L_0$ regularization as a way to subsample a large microsimulation dataset down to
 a usable size. The problem arises because a pipeline built for fidelity combines many sources and
-adds record-level variation, which produces more candidate records than a deployable dataset can
-hold. The reduction to a fixed budget is a sampling choice, and the paper treats it as one.
+adds record-level geographic variation, which produces more candidate records than a deployable dataset
+can hold. The reduction to a fixed budget is a sampling choice, and the paper treats it as one.
 
 The method uses Hard Concrete gates to select records and fit their weights in one optimization, with
-selection driven by the calibration targets. That makes the retained-record count an explicit control
-and keeps the reduced dataset calibrated to its targets. We compare the method against matched-budget
-baselines that share its calibrator, and report the frontier between retained records, Populace's
-production calibration loss, and weight concentration.
+selection driven by the calibration targets. The current full-scale probe shows that the gates are most
+useful as a support selector. On the full Populace target surface, a normalized $L_0$ penalty retained
+57{,}240 of 337{,}704 candidate household records. Publishing the raw gated weights would leave too much
+loss, but refitting ordinary calibration weights on the selected support reduced the Populace objective to
+4.74\%. The same 1{,}500-epoch budget gives 5.07\% for dense no-$L_0$ calibration, 7.55\% for a matched
+random support followed by the same reweighting, and 24.24\% for a random sample of dense calibrated
+weights scaled back to total mass without refitting.
 
-The current experiment evaluates the production-style question directly: every materialized target in the
-current Populace surface is fit and scored, including congressional-district targets. The result is a
-sampling frontier, and it is a negative accuracy result for the current selector. Random sampling followed
-by gradient reweighting is the strongest full-surface baseline on the production loss; informed $L_0$ plus
-post-selection refit improves on the raw gated weights and becomes competitive at larger budgets, but does
-not overtake random + reweight. That finding is still useful because it identifies the next engineering
-target: improve target-informed selection without increasing weight concentration.
-
-The contribution is therefore twofold: a target-informed sampling method, and an open pipeline,
-\populace{}, that makes the method a configuration choice other projects can reuse.
-Section~\ref{sec:future_work} sets out the build-large-then-prune extensions and targeted robustness
-comparisons that follow from the full-surface run.
+The result is not the final frontier; it is the first presentable full-surface signal. It justifies a
+broader sweep over normalized sparsity penalties, seeds, and concentration controls, with dense
+calibration run to a stopping rule and the implemented survey-weight and classical calibration comparators
+added where they are appropriate. The contribution is therefore twofold: a target-informed sampling method
+that can select a sparse support with lower completed-run loss than the current random and dense baselines,
+and an open \populace{} pipeline that makes such support-selection experiments reproducible on the real
+production target surface.
