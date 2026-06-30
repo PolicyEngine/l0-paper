@@ -23,11 +23,12 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
 ## Delivery notes (PolicyEngine voice)
 
 - Use exact numbers; never "large" / "significant" / "dramatically".
-- Describe what the method does, not whether it is good. Sign the gaps ("17 points
-  lower", "the smaller in-to-out gap"), do not say "better".
+- Describe what the method does, not whether it is good. Sign the gaps ("9 points
+  higher loss", "ESS 393 versus 1,624"), do not say "better".
 - Lead with the median; the mean is tail-sensitive and is reported, not headlined.
 - Treat effective sample size as a result, not a caveat.
-- This is a proof of concept on national and state targets — say so plainly.
+- This version leads with the full Populace target surface — do not describe the
+  holdout run as the main result.
 
 ---
 
@@ -157,9 +158,9 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
 - **KEY MESSAGE:** Four samplers, one shared calibrator; the comparison isolates where selection enters.
 - **SAY:**
   - Target-informed sparse selection: **informed L0** (hard-concrete gates select and
-    weight jointly; the L0 penalty sets an exact retained count) and **L1** (penalizes the
-    total magnitude of the weights; a fixed pull toward zero each step sends any weight the
-    targets do not strongly need to exactly zero, dropping that record).
+    weight jointly; the L0 penalty sets an exact retained count) and **L0 + refit**
+    (keep the L0-selected records, remove the gates, and refit ordinary calibration
+    weights on that subset).
   - The two classical baselines differ in ordering: **random + reweight** draws a subset
     first, then fits weights on it; **survey-weight sampling** calibrates the full universe
     first, then draws records with probability proportional to the fitted weights.
@@ -222,19 +223,24 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
 
 # Second half — proof of concept (slides 16–23)
 
-> Numbers and figures below reflect the final four-way sweep (L0 vs L1 vs random vs
-> survey-weight), production loss cap c=1, run `4way-l1-cap1`.
+> Numbers and figures below should be refreshed from the full-surface run report before
+> presenting. The design facts are current: 37,053 Ledger facts compile to 31,534
+> materialized targets on 75,112 candidate households.
 
 ## Slide 16 · Experiment design
-- **KEY MESSAGE:** Hold the input, the targets, and the budget fixed; vary only the sampler,
-  and score on families held out of every fit.
+- **KEY MESSAGE:** Hold the input, the full target surface, and the budget fixed; vary only
+  the method arm.
 - **SAY:**
-  - 75,112-household Populace US 2024 candidate file; one target set of ~4,393 targets, IRS
-    SOI ~71% of them; budget sweep 2k–40k records, from aggressive compression upward.
-  - All four methods share the calibrator, the loss, and the weight bounds — only record
-    selection differs.
-  - Generalization is tested on whole held-out families — Medicaid, SNAP, state income tax,
-    plus validation-only CBO (206 targets held out) — scored after calibration.
+  - 75,112-household Populace US 2024 candidate file; 31,534 materialized targets from
+    37,053 Ledger facts; 23,450 targets are congressional-district targets.
+  - Budget sweep is 2k–40k retained records, from aggressive compression upward.
+  - The four arms are informed L0, informed L0 plus an ordinary post-selection refit,
+    random plus reweighting, and survey-weight sampling.
+  - All methods share the Populace production loss, target weights, candidate frame, and
+    scoring path — the comparison varies selection and, for the refit arm, whether the
+    selected records are reweighted after gates are removed.
+  - Holdouts are separate diagnostics; the headline score fits and scores the full target
+    surface.
 - **TRANSITION:** "All four are scored by the same loss."
 
 ## Slide 17 · Calibration objective
@@ -251,46 +257,42 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
 - **TRANSITION:** "So where does informed selection actually win?"
 
 ## Slide 18 · Main frontier
-- **KEY MESSAGE:** Graceful degradation under compression — informed selection leads at
-  tight budgets, the baselines draw level as the budget grows.
+- **KEY MESSAGE:** The main figure is the target-fit frontier: Populace objective loss
+  against retained records.
 - **SAY:**
-  - Read the figure: out-of-sample error against retained records, median and mean panels,
-    all four methods.
-  - At 2,000 records, informed L0's median out-of-sample ARE (Abs Rel Error) is 47.3% vs random 
-    50.1%, survey-weight 48.1%, and L1 at 100% (its weights collapse toward zero); on the 
-    tail-sensitive mean the gap is far wider — 225% vs random's 1,798%.
-  - As the budget grows the baselines draw level: on the median, random + reweight overtakes
-    from ~5,000 records up, while informed L0 keeps the lower mean at every budget.
-    At 10k, L0 median is 35.0%.
-  - L1 is the convex point of comparison, and the weakest arm at every budget: one penalty
-    cannot both select records and size their weights, so it collapses under forced sparsity
-    and recovers toward L0 only at the largest budgets.
-- **TRANSITION:** "Does the retained sample generalize to targets it never saw?"
-
-## Slide 19 · Generalization
-- **KEY MESSAGE:** Hold out whole families, not random cells, and informed selection carries
-  over with the smaller in-sample-to-out-of-sample gap.
-- **SAY:**
-  - Why whole families: random target splits leak through nested totals (a held-out cell is
-    nearly determined by its retained siblings), so they overstate generalization.
-  - Read the figure: the gap between out-of-sample and in-sample error across the sweep.
-    Informed L0's gap stays near zero; random + reweight fits the in-sample targets far more
-    tightly but pays a large gap on families it never saw.
-  - The reading: informed selection spends the budget on records that carry across families,
-    rather than on driving the in-sample fit down.
+  - Read the figure as a frontier, not a binary winner: smaller retained files cost target
+    fit, and different samplers trace different costs.
+  - Lead with Populace capped weighted loss. Raw median/mean ARE are supplemental because the
+    full surface has many near-zero-denominator targets.
+  - State the actual result: random + reweight is lowest on the Populace objective at every
+    budget except 2k, where survey-weight sampling is slightly lower. At 10k records:
+    random + reweight is 46.3%, survey-weight sampling 50.8%, L0 + refit 55.4%, and raw
+    L0 72.2%.
+  - The useful L0 finding is post-selection refit: it closes 11-23 percentage points of
+    production loss relative to raw L0, but it does not beat random + reweight.
 - **TRANSITION:** "Accuracy is not the whole story — what does it cost?"
 
-## Slide 20 · Operability
-- **KEY MESSAGE:** Lead with the median, and report effective sample size as a primary
-  result — a good fit can still concentrate weight on a few records.
+## Slide 19 · Full-surface diagnostics
+- **KEY MESSAGE:** Populace loss is the headline; raw median and mean ARE explain what is
+  underneath it.
 - **SAY:**
-  - We lead with the median because a few near-zero-denominator targets inflate the mean; we
-    name those targets in a one-time audit rather than winsorize.
-  - Effective sample size is a result: matching a demanding target system can load population 
-    mass onto a few records.
-  - Read the figure: sweeping λ_L2 traces an effective-sample-size-against-accuracy frontier
-    — cheap to buy at large budgets, costly at tight ones. Value shifts from accuracy toward
-    operability and robustness.
+  - Median ARE shows typical target fit; mean ARE shows the tail.
+  - The full surface has 8,095 denominator-degenerate targets, almost all IRS SOI cells,
+    where a small absolute miss can create an enormous relative error.
+  - We keep those targets in the production objective and name them in the audit rather than
+    hiding them with a generic winsorization.
+- **TRANSITION:** "Accuracy is not the whole story — what does it cost?"
+
+## Slide 20 · Concentration
+- **KEY MESSAGE:** Effective sample size is a primary result — the current L0-selected
+  subset carries too much weight on too few records.
+- **SAY:**
+  - At 10k records, L0 + refit reaches ESS 393; random + reweight is 1,624; survey-weight
+    sampling is 4,129.
+  - The largest post-L0-refit weight is about 6.4 million, versus about 1.2 million for
+    random + reweight and 0.55 million for survey-weight sampling.
+  - So the next method question is selection with concentration controls, not just lower
+    target loss.
 - **TRANSITION:** "Where does this go next?"
 
 ## Slide 21 · Future work
@@ -299,23 +301,23 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
 - **SAY:**
   - Build really large, then prune: push from the compact file to a deliberately over-built
     pool, then prune back to a publishable artifact at far more aggressive compression.
-  - Congressional-district production builds: score the method on the full subnational
-    surface it is designed for, not just national and state.
-  - Broader held-out targets: bring district age, SNAP, and SOI facts into the held-out
-    design.
+  - Production release scoring: use the full-surface frontier to choose deployable district files.
+  - Targeted robustness: family holdouts, raking-compatible categorical margin subsets, and
+    concentration-penalty sweeps are diagnostics around the production target surface.
   - [If asked about GREG / IPF / raking / balanced sampling: they are reference methods for
     simpler margin surfaces, not full-surface baselines here — they apply only as robustness
     checks on the categorical-margin subsets where their assumptions hold (see the lit
-    review). L1 is now in the sweep, not future work.]
+    review). Convex sparse calibration is also a natural ablation, but it is not in this
+    completed full-surface run.]
 - **TRANSITION:** "To wrap up."
 
 ## Slide 22 · Conclusion
-- **KEY MESSAGE:** Target-informed pruning is both a calibration method and a sampling
-  method, with record count and weight concentration as tunable, reportable outputs.
-- **SAY:** It selects records because they help reproduce the target system, and keeps the
-  retained count and weight concentration as explicit controls. This is a proof of concept
-  on national and state targets. We will build on the observed operability and performance 
-  at large compression regimes to score the subnational case.
+- **KEY MESSAGE:** Target-informed pruning is a useful control, not yet an accuracy win over
+  random + reweight.
+- **SAY:** The full-surface run makes the benchmark clear: beat random + reweight on the
+  Populace loss while keeping effective sample size high enough for a deployable dataset.
+  This is a proof of concept on the full current Populace target surface; the next step is
+  larger candidate universes and targeted robustness checks.
 
 ## Slide 23 · Questions
 - **KEY MESSAGE:** Open the floor.

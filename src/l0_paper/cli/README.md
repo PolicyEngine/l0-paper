@@ -38,10 +38,10 @@ frozen artifact.
    descent (gates off). The paper's method 2.
 
 All four return a full-length weight vector (zero for unretained records), scored
-in- and out-of-sample by [`metrics`](../experiments/metrics.py) with
-targets held out via [`holdout`](../experiments/holdout.py). The current paper
-tables report the three real-data arms that have been run: informed L0,
-random + reweight, and survey-weight sampling.
+against the same Populace target surface by [`metrics`](../experiments/metrics.py).
+The current manuscript leads with `--full-target-surface`, fitting and scoring
+every materialized target; [`holdout`](../experiments/holdout.py) supports separate
+family-level robustness diagnostics.
 
 ## Getting the Ledger facts file
 
@@ -108,7 +108,8 @@ For the current manuscript reproduction, prefer the wrapper:
 
 ```bash
 uv run --extra data --extra viz l0 paper \
-    --consumer-facts data/targets/consumer_facts.jsonl
+    --consumer-facts data/targets/consumer_facts.jsonl \
+    --full-target-surface
 ```
 
 It builds or reuses `runs/weighted-loss-3seed/precalibration`, runs the paper
@@ -119,6 +120,29 @@ legacy direct-LaTeX path through `paper/main.tex`. Add
 `--build-targets --target-base <consumer_facts.jsonl>` to first construct
 `data/targets/consumer_facts.jsonl`, or pass `--reuse-precalibration <dir>`
 when the frozen artifact already exists.
+
+For the full congressional-district target surface, use the current Populace
+facts and crosswalk explicitly and cache expensive target materialization:
+
+```bash
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+uv run --extra data --extra viz l0 paper \
+    --consumer-facts /path/to/consumer_facts_cd_expanded_spliced.jsonl \
+    --include-congressional-district-targets \
+    --congressional-district-vintage-crosswalk /path/to/cd117_to_cd119_population_crosswalk.csv \
+    --target-materialization-cache-dir runs/full-cd/target_materialization_cache \
+    --out runs/full-cd \
+    --full-target-surface \
+    --epochs 250 \
+    --init-mean 0.8 \
+    --budget-iters 8 \
+    --jobs 2
+```
+
+The historical gate initialization (`--init-mean 0.999`) expects long optimizer
+runs. If you shorten the full-surface sweep to a few hundred epochs, use a lower
+initial open probability such as `--init-mean 0.8`; otherwise the Hard-Concrete
+logits may not reach exact zero and the requested record budget will not bind.
 
 The lower-level commands below are useful for custom smoke runs and individual
 steps.
@@ -171,7 +195,14 @@ forbids the ~100x concentration the fiscal targets require -- so it must be trea
 as a swept axis, not a fixed default (see issue #4). `l2_lambda` applies to the
 informed-L0 path only.
 
-Holdout note: Populace itself uses **rotated k-fold** holdout
+Every sweep cell writes a compressed full-length weight artifact under
+`weights/` plus `weights_manifest.csv`, so later report metrics can be
+reconstructed against the frozen precalibration frame and registry.
+
+Holdout note: the production-surface frontier should usually use
+`--full-target-surface`, fitting every compiled target and reporting the
+penalty-free Populace calibration loss. Holdout is a separate robustness
+experiment. Populace itself uses **rotated k-fold** holdout
 (`populace/build/holdout.py`, every target held out once) plus **family-level
 `validation_only`** targets (excluded from the fit, scored separately) and
 out-of-sample reform validation. The quick POC can still use a single fixed split;
@@ -198,11 +229,10 @@ uv run --extra data l0 sweep \
     --out runs/sweep-moderate \
     --budgets 2000 5000 10000 20000 40000 \
     --seeds 0 1 2 \
-    --epochs 1000 \
-    --holdout-families cms_medicaid usda_snap state_income_tax \
-    --rotation-folds 5 --rotation-budget 10000 \
-    --target-loss-cap 10 \
-    --methods informed_l0 random_reweight dense_sample
+	    --epochs 1000 \
+	    --holdout-families cms_medicaid usda_snap state_income_tax \
+	    --rotation-folds 5 --rotation-budget 10000 \
+	    --methods informed_l0 informed_l0_refit random_reweight dense_sample
 ```
 
 Add `--jobs N` to run independent seed/fold/L2 shards in parallel. The parent
@@ -216,24 +246,25 @@ OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
 uv run --extra data l0 sweep \
     --reuse-precalibration runs/full-35k/precalibration \
     --out runs/35k-narrow \
-    --budgets 2000 10000 40000 \
-    --seeds 0 1 2 \
-    --jobs 4 \
-    --methods informed_l0 informed_l1 random_reweight dense_sample
+	    --budgets 2000 10000 40000 \
+	    --seeds 0 1 2 \
+	    --jobs 4 \
+	    --methods informed_l0 informed_l0_refit informed_l1 random_reweight dense_sample
 ```
 
-Production US-fiscal weighting defaults to the production target-loss cap
-(`c=1`). The current manuscript's committed real-data runs used the generic
-solver cap (`c=10`), so pass `--target-loss-cap 10` when reproducing those
-figures and tables.
+Production US-fiscal weighting defaults to the Populace production target-loss
+cap (`c=1`). Pass `--target-loss-cap 10` only when reproducing the older looser
+cap sensitivity runs.
 
 Design points:
 
 - **Frozen input only** (`--reuse-precalibration`): the calibration method is the
   only thing that varies. Build the artifact once with `l0 poc`.
 - **Matched budget**: informed L0 sets the budget at each `(seed, budget)` point;
-  `informed_l1`, `random_reweight`, and `dense_sample` (survey-weight sampling)
-  match its retained count.
+  `informed_l0_refit`, `informed_l1`, `random_reweight`, and `dense_sample`
+  (survey-weight sampling) match its retained count. `informed_l0_refit` reuses
+  the selected L0 subset and refits ordinary dense calibration weights on those
+  retained records.
 - **Weight concentration**: `--max-weight-ratio` is an informed-L0 **per-record**
   cap (weight <= ratio x *initial* weight), default **None (uncapped)**. Since the
   experiment resets weights to uniform, the cap is relative to a flat initial
@@ -241,7 +272,9 @@ Design points:
   and collapses L0 to a near-uniform, non-fitting solution -- treat the cap as a
   swept axis (issue #4), not a fixed default. The baselines are left unconstrained;
   their ESS and max weight are reported so concentration is visible. Use
-  `--methods informed_l0` to run only the (expensive) L0 condition.
+  `--methods informed_l0` to run only the (expensive) L0 condition, then rerun
+  later with `--methods informed_l0_refit random_reweight dense_sample` to fill
+  in the cheaper arms from saved weight artifacts.
 - **Dense reuse**: the dense fit for survey-weight sampling does not depend on the
   budget, so [`conditions.calibrate_dense`](../experiments/conditions.py)
   computes it once per seed and [`conditions.sample_from_dense`](../experiments/conditions.py)
@@ -290,11 +323,14 @@ uv run --extra viz l0 figures \
     --sweep runs/sweep-moderate --paper-figures
 ```
 
-- **F1** frontier — out-of-sample mean & median ARE vs retained records (seed bands).
+- **F0** objective frontier — Populace capped weighted loss vs retained records.
+- **F1** frontier — mean & median ARE vs retained records (full-surface in-sample
+  for `--full-target-surface`; out-of-sample for holdout runs).
 - **F2** usability — effective sample size and max weight vs budget.
-- **F3** generalization gap — out-of-sample minus in-sample mean ARE.
+- **F3** generalization gap — out-of-sample minus in-sample mean ARE when a holdout
+  split exists.
 - **F4** by-family ARE at the anchor budget (rotation holdout when present).
-- **F5** cost–accuracy — runtime vs out-of-sample mean ARE.
+- **F5** cost–accuracy — runtime vs the headline split's mean ARE.
 - **F6** operability — L2 concentration penalty versus fit.
 
 Matplotlib is imported lazily, so without the `viz` extra the tables and summary

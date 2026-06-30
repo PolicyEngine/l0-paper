@@ -8,21 +8,19 @@ hold. The reduction to a fixed budget is a sampling choice, and the paper treats
 
 The method uses Hard Concrete gates to select records and fit their weights in one optimization, with
 selection driven by the calibration targets. That makes the retained-record count an explicit control
-and keeps the reduced dataset calibrated to its targets. We compare the method against three matched-budget
-alternatives that share its calibrator---its convex $L_1$ analog, random sampling with reweighting, and
-survey-weight (Hansen--Hurwitz) sampling---and report how the size, geography, and weight controls behave.
+and keeps the reduced dataset calibrated to its targets. We compare the method against matched-budget
+baselines that share its calibrator, and report the frontier between retained records, Populace's
+production calibration loss, and weight concentration.
 
-Across the budget sweep, informed $L_0$ reaches lower out-of-sample error than random sampling under
-aggressive compression; the two converge as the budget grows, and on the median random sampling becomes the
-more accurate of them, while on the tail-sensitive mean informed $L_0$ stays ahead throughout. Survey-weight
-sampling is the least accurate of the classical baselines, and the convex $L_1$ analog collapses under
-forced sparsity, recovering toward informed $L_0$ only at large budgets. Informed selection's distinctive
-value is therefore operational: it sets the dataset size, the geographic emphasis, and the weight
-concentration through explicit parameters in one optimization, and it avoids the variance of a random draw
-at tight budgets.
+The current experiment evaluates the production-style question directly: every materialized target in the
+current Populace surface is fit and scored, including congressional-district targets. The result is a
+sampling frontier, and it is a negative accuracy result for the current selector. Random sampling followed
+by gradient reweighting is the strongest full-surface baseline on the production loss; informed $L_0$ plus
+post-selection refit improves on the raw gated weights and becomes competitive at larger budgets, but does
+not overtake random + reweight. That finding is still useful because it identifies the next engineering
+target: improve target-informed selection without increasing weight concentration.
 
 The contribution is therefore twofold: a target-informed sampling method, and an open pipeline,
 \populace{}, that makes the method a configuration choice other projects can reuse.
-Section~\ref{sec:future_work} sets out the subnational and build-large-then-prune extensions the method is
-designed for, as well as the raking, balanced-sampling, and combinatorial-optimisation comparators that
-become appropriate on target surfaces where their assumptions fit cleanly.
+Section~\ref{sec:future_work} sets out the build-large-then-prune extensions and targeted robustness
+comparisons that follow from the full-surface run.

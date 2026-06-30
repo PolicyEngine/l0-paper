@@ -89,7 +89,7 @@ async function main() {
 
     const pdf = await PDFDocument.create();
     for (let i = 0; i < count; i++) {
-      await page.goto(`${BASE}/?slide=${i}`, { waitUntil: "networkidle" });
+      await page.goto(`${BASE}/?slide=${i}&export=1`, { waitUntil: "networkidle" });
       await page.evaluate(() => document.fonts.ready);
       await page.waitForTimeout(400); // settle KaTeX / transitions
       const shot = await page.screenshot({

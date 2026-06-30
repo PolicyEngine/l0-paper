@@ -100,9 +100,10 @@ relaxations. Not all of these are equally applicable to the production problem. 
 is large, mixed, and hierarchical, so methods built for categorical margins or discrete area-by-area
 searches are reference points rather than direct full-surface baselines. The matched-budget comparison
 in Section~\ref{sec:methodology} therefore focuses on the tractable full-surface set: informed $L_0$,
-its convex $L_1$ analog, random sampling with reweighting, and survey-weight sampling. Raking-based
-reductions, balanced sampling, and combinatorial optimisation remain published comparators that
-motivate robustness checks where their assumptions fit cleanly. We also note the coreset view from
+informed $L_0$ followed by ordinary refitting on the selected records, random sampling with reweighting,
+and survey-weight sampling. Raking-based reductions, convex sparse calibration, balanced sampling, and
+combinatorial optimisation remain published comparators that motivate robustness checks where their
+assumptions fit cleanly. We also note the coreset view from
 machine learning, where a weighted subset is chosen so that a model fit on the subset approximates the
 fit on the full data \citep{feldman2020coresets, bachem2017coresets}.
 
@@ -255,9 +256,9 @@ weight and clips at zero \citep{beck2009fista}, so a record whose pull on the ta
 threshold is dropped while the rest are kept and shrunk. The trade-off is structural: the single penalty
 $\lambda_{L_1}$ controls both how many records survive and how much their weights shrink, because the same
 norm that zeroes small weights also pulls the surviving ones toward zero, so forcing a small sample forces
-heavy shrinkage on the records that remain. We include this convex arm as the direct comparison to $L_0$:
-it pursues the same target-informed sparse selection by a more stable route, and contrasting the two
-isolates what the $L_0$ gates buy by separating selection from weighting.
+heavy shrinkage on the records that remain. This convex arm is a natural next ablation for $L_0$: it
+pursues the same target-informed sparse selection by a more stable route, and contrasting the two would
+isolate what the $L_0$ gates buy by separating selection from weighting.
 
 \subsection{Microsimulation dataset engines}
 

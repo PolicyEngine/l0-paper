@@ -13,21 +13,18 @@ bound how large individual weights can grow. Because the optimization that selec
 them, the reduced dataset continues to match its targets.
 
 We implement the method within \populace{}, PolicyEngine's microsimulation data pipeline, and present a
-proof of concept on its national and state target surface. Holding the candidate universe, the target set,
-and the record budget fixed, we vary only how records are chosen across four samplers: informed $L_0$
-selection, its convex $L_1$ analog, random sampling followed by reweighting, and survey-weight
-(Hansen--Hurwitz) sampling. All fit weights with the same calibrator, so the experiment isolates selection.
-Under aggressive compression informed $L_0$ keeps out-of-sample error bounded where a small random draw
-cannot: at a 2{,}000-record budget its out-of-sample median absolute relative error is 47.3\% against random
-sampling's 50.1\%, and on the tail-sensitive mean the gap is far wider (225\% against 1{,}798\%). As the
-budget grows the median edge passes to random sampling, but informed $L_0$ keeps the lower mean throughout,
-avoiding the seed-to-seed instability of a small draw. The convex $L_1$ arm collapses under forced
-sparsity---one penalty cannot both select records and keep their weights---and recovers toward $L_0$ only
-at large budgets. The informed $L_0$ method's distinctive value is operational rather than a uniform accuracy 
-gain: it sets dataset size, geographic emphasis, and weight concentration through explicit parameters in one
-optimization, and removes the variance of a poor random draw at tight budgets. Matching a demanding target
-system can still concentrate population mass on a few records, a cost we report rather than hide. We leave
-the larger build-and-prune and subnational settings the controls are designed for to future work.
+proof of concept on its current full United States target surface. The run starts from 37{,}053 Ledger facts
+and scores 31{,}534 materialized calibration targets, including 23{,}450 congressional-district targets, on
+75{,}112 candidate households. Holding the candidate universe, target surface, and record budget fixed, we
+vary only how records are chosen across target-informed $L_0$ selection and matched random-sampling
+baselines, all scored by the same Populace capped weighted calibration loss. The experiment is therefore a
+frontier between retained-record count and target fit, not a holdout exercise. On the current full target
+surface, random sampling followed by gradient reweighting is the strongest baseline: informed $L_0$ plus an
+ordinary post-selection refit improves substantially on the raw gated weights and nearly catches the
+baselines at larger budgets, but it does not dominate the production loss. The useful finding is therefore
+diagnostic rather than promotional. The machinery now runs the full surface, preserves the resulting weight
+vectors, and exposes where target-informed selection needs work: better selected subsets, less weight
+concentration, and robustness checks against classical calibration comparators.
 \end{abstract}
 
 \noindent\textbf{Keywords:} microsimulation, survey calibration, subsampling, $L_0$ regularization,

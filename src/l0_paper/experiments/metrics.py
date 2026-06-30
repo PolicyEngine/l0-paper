@@ -1,13 +1,10 @@
 """Scoring for a calibrated/sampled dataset against a target set.
 
-The Populace ``CalibrationResult`` only carries diagnostics for the targets it was
-*fit* to, so out-of-sample scoring is done here: each target's achieved aggregate
-is computed exactly with :meth:`populace.calibrate.target.Target.achieved_value`
-under the method's weight vector and compared to the target value. Aggregates are
-reported overall and broken out two ways -- by target family and by geographic
-level -- because a sampler can match national totals or one source while missing
-others. The current US target surface is national + state only, so the by-family
-breakdown is usually the more informative cut.
+Populace's exported ``score_targets`` helper evaluates a frozen weight vector
+against any target set through the same constraint-matrix path used by
+calibration. This module layers the paper-specific summaries on top: overall
+ARE, by-family/geography cuts, denominator-degenerate labeling, and weight
+diagnostics.
 """
 
 from __future__ import annotations
@@ -17,7 +14,8 @@ from typing import Any
 
 import numpy as np
 
-from populace.calibrate.target import Target
+from populace.calibrate import default_target_loss_scales, score_targets
+from populace.calibrate.target import Target, TargetSet
 
 _NATIONAL_LEVELS = {"country", "nation", "national", "us", "0100000us"}
 _DISTRICT_LEVELS = {"congressional_district", "district", "cd"}
@@ -68,7 +66,9 @@ def absolute_relative_error(target: Target, frame, weights: np.ndarray) -> float
     value = float(target.value)
     if value == 0.0:
         return None
-    achieved = float(target.achieved_value(frame, np.asarray(weights, dtype=np.float64)))
+    achieved = float(
+        target.achieved_value(frame, np.asarray(weights, dtype=np.float64))
+    )
     return abs(achieved - value) / abs(value)
 
 
@@ -85,19 +85,36 @@ def target_diagnostics(
     ``None`` for relative fields and still report signed/absolute misses.
 
     When ``loss_weights`` (the per-target ``omega_j``, aligned to ``targets``) is
-    given, each row carries it as ``loss_weight``. ``scale`` is always emitted as
-    the objective's denominator ``max(|t_j|, 1)`` (Equation 8). Storing the raw
-    ``target_value``/``achieved_value`` together with ``scale`` and ``loss_weight``
-    lets the capped, weighted MAPE be recomputed downstream at any cap (see
-    :mod:`l0_paper.experiments.crunch`).
+    given, each row carries it as ``loss_weight``. ``scale`` is emitted from
+    Populace's canonical :func:`default_target_loss_scales` helper, so the stored
+    diagnostics reproduce the production objective denominator. Storing the raw
+    ``target_value``/``achieved_value`` together with ``scale`` and
+    ``loss_weight`` lets the capped, weighted MAPE be recomputed downstream at
+    any cap (see :mod:`l0_paper.experiments.crunch`).
     """
-    weights = np.asarray(weights, dtype=np.float64)
     targets = list(targets)
-    omega = None if loss_weights is None else np.asarray(loss_weights, dtype=np.float64)
+    if not targets:
+        return []
+    weights = np.asarray(weights, dtype=np.float64)
+    scored = score_targets(frame, TargetSet(targets), weights=weights)
+    scored_targets = list(scored.problem.targets)
+    values = np.asarray(
+        [float(diag.target) for diag in scored.diagnostics], dtype=np.float64
+    )
+    scales = default_target_loss_scales(values)
+    omega_by_name: dict[str, float] = {}
+    if loss_weights is not None:
+        omega = np.asarray(loss_weights, dtype=np.float64)
+        omega_by_name = {
+            target.row_name: float(weight)
+            for target, weight in zip(targets, omega, strict=True)
+        }
     rows: list[dict[str, Any]] = []
-    for index, target in enumerate(targets):
-        value = float(target.value)
-        achieved = float(target.achieved_value(frame, weights))
+    for index, (target, diag) in enumerate(
+        zip(scored_targets, scored.diagnostics, strict=True)
+    ):
+        value = float(diag.target)
+        achieved = float(diag.final_estimate)
         error = achieved - value
         if value == 0.0:
             relative_error = None
@@ -114,8 +131,8 @@ def target_diagnostics(
                 "absolute_error": abs(error),
                 "relative_error": relative_error,
                 "absolute_relative_error": absolute_relative_error_value,
-                "scale": max(abs(value), 1.0),
-                "loss_weight": (float(omega[index]) if omega is not None else None),
+                "scale": float(scales[index]),
+                "loss_weight": omega_by_name.get(target.row_name),
                 "family": target_family(target),
                 "geography_level": geography_level(target),
                 "is_zero_value_target": value == 0.0,
@@ -207,7 +224,9 @@ def identifiability_floors(
     contributions = np.abs(coo.data) * w0[coo.col]
     floors = np.zeros(problem.matrix.shape[0], dtype=np.float64)
     np.maximum.at(floors, coo.row, contributions)
-    return {target.row_name: float(floors[i]) for i, target in enumerate(problem.targets)}
+    return {
+        target.row_name: float(floors[i]) for i, target in enumerate(problem.targets)
+    }
 
 
 def degenerate_audit(
@@ -305,8 +324,12 @@ def score(
         "n_targets": len(targets),
         "n_zero_value_targets": len(zero_value_absolute_errors),
         **_are_stats(overall_errors),
-        "by_family": {name: _are_stats(errors) for name, errors in sorted(by_family.items())},
-        "by_geography": {level: _are_stats(errors) for level, errors in sorted(by_geo.items())},
+        "by_family": {
+            name: _are_stats(errors) for name, errors in sorted(by_family.items())
+        },
+        "by_geography": {
+            level: _are_stats(errors) for level, errors in sorted(by_geo.items())
+        },
         "zero_value_absolute_error": _absolute_error_stats(zero_value_absolute_errors),
     }
     if degenerate_names:

@@ -1,22 +1,26 @@
 \section{Future work}
 \label{sec:future_work}
 
-This study is a proof of concept on \populace{}'s national and state target surface. The production
-motivation for informed selection is subnational: calibrating one dataset to congressional-district totals
-while keeping district sums consistent with state and national totals. Reaching that surface means pairing
-a much larger candidate universe---records replicated across the geographic placements district targets
-require---with the finer target system the pipeline can already construct (Appendix~\ref{app:targets}), and
-testing whether informed $L_0$ holds its small-budget edge when the targets are local and numerous. That
-setting also opens the targeted comparisons the present full-surface design sets aside
-(Section~\ref{sec:reduction_methods}): on the simpler categorical-margin subsets where their assumptions
-hold, classical raking-based reductions and balanced sampling become like-for-like robustness checks
-against informed selection, in the spirit of \citet{tanton2014co}'s comparison of generalized regression
-with combinatorial optimisation for small-area reweighting.
+This study moves the proof of concept onto \populace{}'s current full target surface, including
+congressional-district targets. The next empirical step is not to hold districts back from the headline
+fit, but to run separate robustness panels that ask narrower questions: which target families or
+geographies generalize when withheld, which targets dominate the loss, and how sensitive the frontier is
+to the production target weights and cap. Those panels should be read as diagnostics around the production
+surface rather than as replacements for it.
 
 A second thread is the build-large-then-prune regime the controls are designed for, in which a pipeline
 assembles a candidate universe far larger than it can ship---millions of records rather than the 75{,}112
 used here---and prunes it to a deployable budget under the calibration targets. The compression ratios
-would be far more aggressive than the range tested here, which is where informed selection is expected to
-help most: a random draw from a tight budget is least likely to span a demanding target system, so the
-gates have the most to add. Whether their small-budget edge scales to that regime, and at what compute
-cost (Appendix~\ref{app:cost}), is what that setting tests.
+would be far more aggressive than the range tested here, which is where target-informed selection has its
+clearest opportunity to justify its cost: a random draw from a tight budget is least likely to span a
+demanding target system, so a selector trained on the targets has the most to add. Whether the current
+$L_0$ implementation can realize that opportunity, and at what compute cost (Appendix~\ref{app:cost}), is
+what that setting tests.
+
+The full-surface design also clarifies which classical comparators are worth adding. Raking, GREG, balanced
+sampling, and combinatorial optimization remain relevant reference methods, but not all are natural
+baselines for a heterogeneous 31{,}534-target fiscal surface. The appropriate next comparison is on the
+simpler categorical-margin subsets where their assumptions hold cleanly, in the spirit of
+\citet{tanton2014co}'s comparison of generalized regression with combinatorial optimisation for
+small-area reweighting, while the production frontier continues to use the Populace loss over the complete
+surface.

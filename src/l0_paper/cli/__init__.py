@@ -15,15 +15,43 @@ from collections.abc import Sequence
 
 #: command name -> (module, one-line help). Module must expose ``main()``.
 _COMMANDS: dict[str, tuple[str, str]] = {
-    "sweep": ("l0_paper.cli.sweep", "Budget x seed sweep of the calibration conditions."),
-    "poc": ("l0_paper.cli.poc", "Single-run proof of concept; builds/reuses the precalibration cache."),
-    "figures": ("l0_paper.cli.figures", "Render figures + LaTeX tables from a sweep's metrics_long.csv."),
-    "summarize": ("l0_paper.cli.summarize", "Readable summaries (CSV/Markdown) from a run manifest."),
-    "merge-l2": ("l0_paper.cli.merge_l2", "Merge single-l2 sweep runs into one comparison directory."),
+    "sweep": (
+        "l0_paper.cli.sweep",
+        "Budget x seed sweep of the calibration conditions.",
+    ),
+    "poc": (
+        "l0_paper.cli.poc",
+        "Single-run proof of concept; builds/reuses the precalibration cache.",
+    ),
+    "figures": (
+        "l0_paper.cli.figures",
+        "Render figures + LaTeX tables from a sweep's metrics_long.csv.",
+    ),
+    "summarize": (
+        "l0_paper.cli.summarize",
+        "Readable summaries (CSV/Markdown) from a run manifest.",
+    ),
+    "merge-l2": (
+        "l0_paper.cli.merge_l2",
+        "Merge single-l2 sweep runs into one comparison directory.",
+    ),
+    "merge-runs": (
+        "l0_paper.cli.merge_runs",
+        "Merge compatible sweep shard directories into one run.",
+    ),
     "paper": ("l0_paper.cli.paper", "Run the current-paper reproduction workflow."),
-    "build-candidate": ("l0_paper.cli.build_candidate", "Build the candidate-universe precalibration frame."),
-    "build-targets": ("l0_paper.cli.build_targets", "Build the calibration target bundle from arch-data."),
-    "demo": ("l0_paper.cli.demo", "Run the whole pipeline end-to-end on the toy frame (no real data)."),
+    "build-candidate": (
+        "l0_paper.cli.build_candidate",
+        "Build the candidate-universe precalibration frame.",
+    ),
+    "build-targets": (
+        "l0_paper.cli.build_targets",
+        "Build the calibration target bundle from arch-data.",
+    ),
+    "demo": (
+        "l0_paper.cli.demo",
+        "Run the whole pipeline end-to-end on the toy frame (no real data).",
+    ),
 }
 
 

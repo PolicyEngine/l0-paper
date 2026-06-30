@@ -2,29 +2,26 @@
 \centering
 {\tablefont
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{p{0.20\textwidth}rrrrrr}
+\begin{tabular}{p{0.23\textwidth}rrrrr}
 \toprule
-Method & Budget & In-sample median ARE (\%) & Out-of-sample median ARE (\%) & Out-of-sample mean ARE (\%) & ESS & Max weight \\
+Method & Budget & Full-surface median ARE (\%) & Full-surface mean ARE (\%) & ESS & Max weight \\
 \midrule
-Informed $L_0$ & 10{,}000 & 35.3 & 35.0 & 584.0 & 1{,}993 & 665{,}674 \\
-Informed $L_1$ & 10{,}000 & 667.9 & 356.9 & 5{,}724.7 & 2{,}370 & 296{,}974 \\
-Random + reweight & 10{,}000 & 0.6 & 31.3 & 1{,}171.7 & 1{,}313 & 1{,}095{,}575 \\
-Survey-weight sampling & 10{,}000 & 29.1 & 31.2 & 1{,}022.1 & 3{,}090 & 1{,}268{,}715 \\
+Informed $L_0$ + refit & 10{,}000 & 83.0 & 2{,}383.5 & 393 & 6{,}411{,}363 \\
+Informed $L_0$ & 10{,}000 & 95.5 & 3{,}138.3 & 219 & 10{,}455{,}430 \\
+Random + reweight & 10{,}000 & 68.8 & 1{,}569.1 & 1{,}624 & 1{,}244{,}207 \\
+Survey-weight sampling & 10{,}000 & 71.2 & 1{,}700.8 & 4{,}129 & 550{,}133 \\
 \bottomrule
 \end{tabular}
 }
 }
-\caption{Informed $L_0$ sampling against the matched-budget baselines at a representative budget (the
+\caption{Informed sampling against the matched-budget baselines at a representative budget (the
 $\sim$10{,}000-record anchor of Figure~\ref{fig:budget_frontier}), at $\lambda_{L_2}=0$. All methods
-share the candidate universe, the target set, and the fixed family-level holdout, and differ only in how
-records are selected. ARE is absolute relative error across the scored targets; the median is the headline
-read and the mean is reported alongside as tail-sensitive. ESS is the Kish effective sample size, reported
-as an output diagnostic because a sampler can fit the targets while concentrating population mass on a few
-records. Cells are the cross-seed summary over 3 seeds.}
+share the candidate universe and scored target surface, and differ only in how records are selected.
+The reported accuracy columns use the full-surface in-sample split. ARE is absolute relative error across
+the scored targets; the median is a robust companion diagnostic and the mean is reported alongside as
+tail-sensitive. ESS is the Kish effective sample size, reported as an output diagnostic because a sampler
+can fit the targets while concentrating population mass on a few records. Cells are the cross-seed summary
+over 3 seeds.}
 \label{tab:sampling_comparison}
-\tablenote{The matched record budget and target counts are read from each run's manifest; the
-out-of-sample columns score the held-out families. The survey-weight baseline is the unbiased
-Hansen--Hurwitz integerisation (probability-proportional-to-size with replacement). Informed $L_0$ and
-informed $L_1$ runtimes include the outer budget bisection that sets their penalty; the matched baselines
-run once at the budget. Runtime and the family macro-average are reported in the run summary.}
+\tablenote{The matched record budget and target counts are read from each run's manifest. All listed targets are fit and scored; holdout variants are separate diagnostics. The survey-weight baseline is the unbiased Hansen--Hurwitz integerisation (probability-proportional-to-size with replacement). Runtime and the family macro-average are reported in the run summary.}
 \end{table}

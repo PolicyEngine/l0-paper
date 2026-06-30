@@ -16,13 +16,10 @@ uv run --extra data --extra viz l0 paper \
 The manuscript currently references:
 
 - `fig:pipeline` (Data): Populace pipeline overview for this build's configuration.
-- `fig:budget_frontier` (Results): out-of-sample calibration error vs. retained-record budget,
-  informed L0 vs. random sampling.
-- `fig:generalization_gap` (Results): in-sample vs. out-of-sample calibration error.
-- `fig:by_family` (Results): out-of-sample error by held-out target family.
+- `fig:objective_frontier` (Results): full-surface Populace objective loss vs. retained-record budget.
+- `fig:budget_frontier` (Results): supplemental raw mean/median ARE vs. retained-record budget.
 - `fig:usability` (Results): weight concentration and effective-sample-size diagnostics.
-- `fig:operability` (Results): the L2 concentration-control contrast.
-- `fig:cost_accuracy` (Appendix): runtime and accuracy tradeoff.
+- `fig:cost_accuracy` (Results): runtime and accuracy tradeoff.
 
 The pipeline overview is generated separately:
 

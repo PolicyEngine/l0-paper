@@ -3,13 +3,17 @@ title-meta: "$L_0$ regularization for subnational microsimulation calibration"
 author-meta: "María Juaristi; Nikhil Woodruff; Ben Ogorek; Max Ghenis"
 date: ""
 bibliography: bibliography/references.bib
-cite-method: natbib
-biblio-style: plainnat
 format:
+  html:
+    cite-method: citeproc
+    link-citations: true
+    link-bibliography: true
   pdf:
     documentclass: article
     classoption: 11pt
     pdf-engine: pdflatex
+    cite-method: natbib
+    biblio-style: plainnat
     include-in-header:
       - preamble.tex
     keep-tex: true

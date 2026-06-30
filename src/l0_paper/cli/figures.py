@@ -13,11 +13,12 @@ Reads the sweep's tidy long CSV, aggregates it with
 
 Figures
 -------
-* F1  frontier: out-of-sample mean & median ARE vs average retained records (seed bands).
+* F0  objective frontier: Populace capped weighted loss vs retained records.
+* F1  raw-error frontier: mean & median ARE vs average retained records.
 * F2  usability: effective sample size and max weight vs budget.
-* F3  generalization gap: out-of-sample minus in-sample mean ARE vs budget.
-* F4  by-family ARE at the anchor budget (rotation holdout when available).
-* F5  cost-accuracy: runtime vs out-of-sample mean ARE.
+* F3  generalization gap: out-of-sample minus in-sample mean ARE when a holdout exists.
+* F4  by-family ARE at the anchor budget when a holdout exists.
+* F5  cost-accuracy: runtime vs the headline split's median ARE.
 
 Run
 ---
@@ -34,7 +35,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from l0_paper.experiments import aggregate, tables
+from l0_paper.experiments import aggregate, crunch, tables
 from l0_paper.experiments.tables import SWEEP_METHOD_LABELS, SWEEP_METHOD_ORDER
 
 # Fonts are vendored with the package (found via __file__, so they ship in the
@@ -48,12 +49,14 @@ PAPER_TABLES = Path.cwd() / "paper" / "tables"
 # figure. Each method also gets a distinct marker so the series stay legible in
 # grayscale -- the design system asks for charts that don't rely on colour alone.
 METHOD_COLORS = {
-    "informed_l0": "#319795",      # --chart-1 teal (the informed method)
-    "informed_l1": "#026AA2",      # --chart-4 dark blue (convex-sparse L1 analog)
+    "informed_l0_refit": "#0F766E",  # darker teal for post-selection refit
+    "informed_l0": "#319795",  # --chart-1 teal (the informed method)
+    "informed_l1": "#026AA2",  # --chart-4 dark blue (convex-sparse L1 analog)
     "random_reweight": "#0EA5E9",  # --chart-2 blue
-    "dense_sample": "#6B7280",     # --chart-5 gray (naive survey-weight baseline)
+    "dense_sample": "#6B7280",  # --chart-5 gray (naive survey-weight baseline)
 }
 METHOD_MARKERS = {
+    "informed_l0_refit": "o",
     "informed_l0": "o",
     "informed_l1": "D",
     "random_reweight": "s",
@@ -80,12 +83,18 @@ def _validation_only_families(long_csv: Path) -> tuple[str, ...]:
     manifest_path = long_csv.parent / "sweep_manifest.json"
     if manifest_path.is_file():
         manifest = json.loads(manifest_path.read_text())
-        families = (
-            manifest.get("frontier_split", {})
-            .get("validation_only_families", [])
+        families = manifest.get("frontier_split", {}).get(
+            "validation_only_families", []
         )
         return tuple(str(f) for f in families)
     return ("cbo",)
+
+
+def _sweep_manifest(long_csv: Path) -> dict:
+    manifest_path = long_csv.parent / "sweep_manifest.json"
+    if manifest_path.is_file():
+        return json.loads(manifest_path.read_text())
+    return {}
 
 
 def _default_anchor_budget(df: pd.DataFrame, requested: int | None) -> int | None:
@@ -119,11 +128,52 @@ def _default_anchor_budget(df: pd.DataFrame, requested: int | None) -> int | Non
     return candidates[len(candidates) // 2]
 
 
+def _headline_label(split: str) -> str:
+    return "Out-of-sample" if split == "out_of_sample" else "Full-surface in-sample"
+
+
+def _headline_l0_method(df: pd.DataFrame) -> str:
+    methods = set(df["method"]) if "method" in df.columns else set()
+    return "informed_l0_refit" if "informed_l0_refit" in methods else "informed_l0"
+
+
+def _objective_across_seeds(seed_summary: pd.DataFrame) -> pd.DataFrame:
+    """Collapse seed-level objective summaries to cross-seed means and CIs."""
+    if seed_summary.empty:
+        return seed_summary
+    group_cols = [
+        c
+        for c in ("method", "split", "l2_lambda", "budget_requested")
+        if c in seed_summary.columns
+    ]
+    metrics = ("objective_capped_weighted", "median_are", "mean_are", "frac_within")
+    records: list[dict] = []
+    for key, sub in seed_summary.groupby(group_cols, sort=True):
+        key_tuple = key if isinstance(key, tuple) else (key,)
+        record = dict(zip(group_cols, key_tuple, strict=True))
+        record["n_seeds"] = (
+            int(sub["seed"].nunique()) if "seed" in sub else int(len(sub))
+        )
+        if "n" in sub:
+            record["n"] = int(round(float(sub["n"].mean())))
+        for metric in metrics:
+            if metric not in sub:
+                continue
+            mean, lo, hi = aggregate.mean_ci(sub[metric])
+            record[f"{metric}_mean"] = mean
+            record[f"{metric}_lo"] = lo
+            record[f"{metric}_hi"] = hi
+        records.append(record)
+    return pd.DataFrame.from_records(records)
+
+
 def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -> dict:
     """Aggregate the long CSV and write LaTeX tables + a Markdown summary."""
     df = aggregate.load_long(long_csv)
     out_dir.mkdir(parents=True, exist_ok=True)
     anchor_budget = _default_anchor_budget(df, anchor_budget)
+    manifest = _sweep_manifest(long_csv)
+    target_loss_cap = float(manifest.get("target_loss", {}).get("cap", 1.0))
     validation_only = _validation_only_families(long_csv)
     l2_values = sorted(df["l2_lambda"].dropna().unique().tolist())
     multi_l2 = len(l2_values) > 1
@@ -137,18 +187,37 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
     has_exdeg = (df["metric"] == "mean_are_ex_degenerate").any()
     frontier_exdeg = (
         aggregate.frontier_table(df, metric="mean_are_ex_degenerate")
-        if has_exdeg else None
+        if has_exdeg
+        else None
     )
-    paired = aggregate.paired_method_diff(df)
-    macro = aggregate.macro_average(df)
+    paired = pd.DataFrame()
+    macro = pd.DataFrame()
     rotation_front = (
         aggregate.rotation_frontier_table(
             df,
             metric="mean_are",
             validation_only_families=validation_only,
         )
-        if has_rotation else None
+        if has_rotation
+        else None
     )
+
+    frontier_oos = frontier
+    headline_split = "out_of_sample"
+    if frontier_oos[
+        (frontier_oos["split"] == "out_of_sample")
+        & frontier_oos["mean_are_mean"].notna()
+    ].empty:
+        headline_split = "in_sample"
+    headline_label = _headline_label(headline_split)
+    headline_l0 = _headline_l0_method(df)
+    headline_l0_label = SWEEP_METHOD_LABELS.get(headline_l0, headline_l0).replace(
+        "$", ""
+    )
+    paired = aggregate.paired_method_diff(
+        df, challenger=headline_l0, split=headline_split
+    )
+    macro = aggregate.macro_average(df, split=headline_split)
 
     table_paths = tables.write_sweep_tables(
         out_dir / "tables",
@@ -156,6 +225,8 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
         frontier_in=frontier,
         paired=paired,
         rotation_oos=rotation_front,
+        paired_challenger=headline_l0,
+        paired_split=headline_split,
     )
     # Curated paper result tables (median-led, all methods, l2=0), regenerated from
     # the same sweep so paper/tables/ stays in sync. Kept in a separate directory so
@@ -163,11 +234,10 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
     paper_table_paths = tables.write_paper_tables(
         out_dir / "paper_tables", df, budget=anchor_budget
     )
-    frontier_oos = frontier
 
-    # Markdown summary. Lead with the MEDIAN (robust to the near-zero-denominator
-    # tail); the mean is reported alongside and explicitly flagged as tail-sensitive.
-    oos = frontier_oos[frontier_oos["split"] == "out_of_sample"]
+    # Markdown summary. Lead with the Populace objective loss (capped, weighted,
+    # penalty-free), with ARE tables as companion diagnostics.
+    oos = frontier_oos[frontier_oos["split"] == headline_split]
     methods = [m for m in SWEEP_METHOD_ORDER if m in set(oos["method"])]
 
     def _display_groups(front, *, split: str = "out_of_sample"):
@@ -181,7 +251,9 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
                 groups.append((method, float(l2), label))
         return groups
 
-    def _budget_table(front, value_col: str, *, split: str = "out_of_sample") -> list[str]:
+    def _budget_table(
+        front, value_col: str, *, split: str = "out_of_sample"
+    ) -> list[str]:
         sub = front[front["split"] == split]
         groups = _display_groups(front, split=split)
         first_col = "Requested budget" if multi_l2 else "Average retained records"
@@ -203,41 +275,98 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
             out_lines.append(f"| {first} | " + " | ".join(cells) + " |")
         return out_lines
 
+    def _objective_budget_table(summary: pd.DataFrame) -> list[str]:
+        if summary.empty:
+            return ["No per-target diagnostics available for objective scoring."]
+        value_col = (
+            "objective_capped_weighted_mean"
+            if "objective_capped_weighted_mean" in summary.columns
+            else "objective_capped_weighted"
+        )
+        groups = []
+        for method in methods:
+            for l2 in sorted(
+                summary[summary["method"] == method]["l2_lambda"].unique()
+            ):
+                label = SWEEP_METHOD_LABELS[method].replace("$", "")
+                if multi_l2:
+                    label = f"{label} (l2={float(l2):g})"
+                groups.append((method, float(l2), label))
+        first_col = "Requested budget" if multi_l2 else "Budget"
+        out_lines = [
+            f"| {first_col} | " + " | ".join(label for _, _, label in groups) + " |",
+            "| --- | " + " | ".join("---" for _ in groups) + " |",
+        ]
+        for budget in sorted(summary["budget_requested"].unique()):
+            cells = []
+            for method, l2, _label in groups:
+                row = summary[
+                    (summary["method"] == method)
+                    & (summary["l2_lambda"] == l2)
+                    & (summary["budget_requested"] == budget)
+                ]
+                cells.append(_fmt_pct(row[value_col].iloc[0]) if not row.empty else "")
+            out_lines.append(f"| {int(budget):,.0f} | " + " | ".join(cells) + " |")
+        return out_lines
+
+    diag_path = long_csv.parent / "target_diagnostics_long.csv"
+    objective_summary = pd.DataFrame()
+    if diag_path.exists():
+        diag = aggregate.load_target_diagnostics(diag_path)
+        objective_seed_summary = crunch.summarize(
+            diag[diag["split"] == headline_split],
+            cap=target_loss_cap,
+            group=("method", "split", "l2_lambda", "budget_requested", "seed"),
+        )
+        objective_summary = _objective_across_seeds(objective_seed_summary)
+        if not objective_summary.empty:
+            objective_summary.to_csv(out_dir / "objective_summary.csv", index=False)
+
     lines = [
         f"# Sweep summary: {long_csv.parent.name}",
         "",
         f"- Budgets: `{sorted(oos['budget_requested'].unique().tolist())}`",
         f"- Seeds per point: `{int(oos['n_seeds'].max()) if not oos.empty else 0}`",
+        f"- Headline split: `{headline_split}`",
+        f"- Populace loss cap: `{target_loss_cap:g}`",
         f"- Rotation panel: `{'yes' if has_rotation else 'no'}`",
         "",
-        "## Out-of-sample MEDIAN ARE (%) by budget (headline; robust to the near-zero tail)",
+        f"## {headline_label} Populace objective loss (%) by budget (headline; capped weighted MAPE, penalty-free)",
         "",
-        *_budget_table(frontier_median, "median_are_mean"),
+        *_objective_budget_table(objective_summary),
         "",
-        "## Out-of-sample mean ARE (%) by budget (tail-sensitive; see degenerate audit)",
+        f"## {headline_label} median ARE (%) by budget (supplement; robust to the near-zero tail)",
         "",
-        *_budget_table(frontier_oos, "mean_are_mean"),
+        *_budget_table(frontier_median, "median_are_mean", split=headline_split),
+        "",
+        f"## {headline_label} mean ARE (%) by budget (supplement; tail-sensitive; see degenerate audit)",
+        "",
+        *_budget_table(frontier_oos, "mean_are_mean", split=headline_split),
     ]
 
-    lines += ["", "## Paired L0 vs random+reweight (out-of-sample)", ""]
+    lines += [
+        "",
+        f"## Paired {headline_l0_label} vs random+reweight ({headline_label.lower()})",
+        "",
+    ]
     if not paired.empty:
-        lines.append("| Budget | L0 | random | diff (pp) | p | CI excludes 0 |")
+        lines.append("| Budget | L0 arm | random | diff (pp) | p | CI excludes 0 |")
         lines.append("| --- | --- | --- | --- | --- | --- |")
         for _, r in paired.iterrows():
             budget_label = f"{r['budget_requested']:,.0f}"
             if multi_l2:
                 budget_label = f"{budget_label} (l2={r['l2_lambda']:g})"
             lines.append(
-                f"| {budget_label} | {_fmt_pct(r['informed_l0_mean'])} | "
+                f"| {budget_label} | {_fmt_pct(r[f'{headline_l0}_mean'])} | "
                 f"{_fmt_pct(r['random_reweight_mean'])} | {r['diff_mean'] * 100:+.2f} | "
                 f"{r['p_value']:.3f} | {'yes' if r['ci_excludes_zero'] else 'no'} |"
             )
 
     # Family macro-average (equal weight per family) de-biases the SOI-dominated
     # micro mean -- a secondary read on whether a method wins broadly or just on SOI.
-    lines += ["", "## Out-of-sample family macro-average mean ARE (%)", ""]
+    lines += ["", f"## {headline_label} family macro-average mean ARE (%)", ""]
     if not macro.empty:
-        groups = _display_groups(frontier_oos)
+        groups = _display_groups(frontier_oos, split=headline_split)
         lines.append("| Budget | " + " | ".join(label for _, _, label in groups) + " |")
         lines.append("| --- | " + " | ".join("---" for _ in groups) + " |")
         for budget in sorted(macro["budget_requested"].unique()):
@@ -248,7 +377,11 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
                     & (macro["l2_lambda"] == l2)
                     & (macro["budget_requested"] == budget)
                 ]
-                cells.append(_fmt_pct(row["macro_mean_are_mean"].iloc[0]) if not row.empty else "")
+                cells.append(
+                    _fmt_pct(row["macro_mean_are_mean"].iloc[0])
+                    if not row.empty
+                    else ""
+                )
             lines.append(f"| {budget:,.0f} | " + " | ".join(cells) + " |")
 
     def _raw_metric_budget_table(
@@ -270,10 +403,20 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
             return
         metric_methods = [m for m in SWEEP_METHOD_ORDER if m in set(sub["method"])]
         lines.extend(["", title, "", note, ""])
-        lines.append("| Budget / l2 | " + " | ".join(SWEEP_METHOD_LABELS[m].replace("$", "") for m in metric_methods) + " |")
+        lines.append(
+            "| Budget / l2 | "
+            + " | ".join(
+                SWEEP_METHOD_LABELS[m].replace("$", "") for m in metric_methods
+            )
+            + " |"
+        )
         lines.append("| --- | " + " | ".join("---" for _ in metric_methods) + " |")
         for budget in sorted(frontier_oos["budget_requested"].unique()):
-            for l2 in sorted(frontier_oos[frontier_oos["budget_requested"] == budget]["l2_lambda"].unique()):
+            for l2 in sorted(
+                frontier_oos[frontier_oos["budget_requested"] == budget][
+                    "l2_lambda"
+                ].unique()
+            ):
                 cells = []
                 for method in metric_methods:
                     row = sub[
@@ -281,8 +424,12 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
                         & (sub["l2_lambda"] == l2)
                         & (sub["budget_requested"] == budget)
                     ]
-                    cells.append(formatter(row["value"].mean()) if not row.empty else "")
-                lines.append(f"| {budget:,.0f} / {float(l2):g} | " + " | ".join(cells) + " |")
+                    cells.append(
+                        formatter(row["value"].mean()) if not row.empty else ""
+                    )
+                lines.append(
+                    f"| {budget:,.0f} / {float(l2):g} | " + " | ".join(cells) + " |"
+                )
 
     _raw_metric_budget_table(
         title="## In-sample mean ARE (%) on final retained records",
@@ -314,13 +461,21 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
 
     # In-sample targeted-removal sensitivity: the mean before/after dropping the
     # *named* denominator-degenerate targets (no winsorization), led by the median.
-    lines += ["", "## In-sample degenerate-target sensitivity (informed L0)", ""]
+    lines += [
+        "",
+        f"## In-sample degenerate-target sensitivity ({headline_l0_label})",
+        "",
+    ]
     if frontier_exdeg is not None:
         in_mean = frontier_oos[frontier_oos["split"] == "in_sample"]
         in_med = frontier_median[frontier_median["split"] == "in_sample"]
         in_exd = frontier_exdeg[frontier_exdeg["split"] == "in_sample"]
-        ndeg = df[(df["holdout_type"] == "fixed_family") & (df["split"] == "in_sample")
-                  & (df["scope"] == "overall") & (df["metric"] == "n_degenerate")]
+        ndeg = df[
+            (df["holdout_type"] == "fixed_family")
+            & (df["split"] == "in_sample")
+            & (df["scope"] == "overall")
+            & (df["metric"] == "n_degenerate")
+        ]
         first_col = "Budget / l2" if multi_l2 else "Budget"
         lines += [
             "Mean ARE before/after dropping the *named* denominator-degenerate "
@@ -332,16 +487,18 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
 
         def _pick(front, col, budget, l2):
             r = front[
-                (front["method"] == "informed_l0")
+                (front["method"] == headline_l0)
                 & (front["l2_lambda"] == l2)
                 & (front["budget_requested"] == budget)
             ]
             return _fmt_pct(r[col].iloc[0]) if not r.empty else ""
 
         for budget in sorted(in_mean["budget_requested"].unique()):
-            for l2 in sorted(in_mean[in_mean["budget_requested"] == budget]["l2_lambda"].unique()):
+            for l2 in sorted(
+                in_mean[in_mean["budget_requested"] == budget]["l2_lambda"].unique()
+            ):
                 nd = ndeg[
-                    (ndeg["method"] == "informed_l0")
+                    (ndeg["method"] == headline_l0)
                     & (ndeg["l2_lambda"] == l2)
                     & (ndeg["budget_requested"] == budget)
                 ]["value"]
@@ -358,8 +515,11 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
         lines.append("No denominator-degenerate targets in the fit split.")
 
     # Attribution: which named targets drive the out-of-sample mean (no trimming).
-    diag_path = long_csv.parent / "target_diagnostics_long.csv"
-    lines += ["", "## Out-of-sample ARE attribution: top targets driving the mean (informed L0)", ""]
+    lines += [
+        "",
+        f"## {headline_label} ARE attribution: top targets driving the mean ({headline_l0_label})",
+        "",
+    ]
     if diag_path.exists() and not oos.empty:
         diag = aggregate.load_target_diagnostics(diag_path)
         max_budget = int(sorted(oos["budget_requested"].unique())[-1])
@@ -374,13 +534,16 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
             top = None
         else:
             top = aggregate.top_are_contributors(
-                diag, method="informed_l0", budget_requested=max_budget,
+                diag,
+                method=headline_l0,
+                budget_requested=max_budget,
                 l2_lambda=l2_values[0] if l2_values else 0.0,
-                split="out_of_sample", top_k=12,
+                split=headline_split,
+                top_k=12,
             )
         if top is not None and not top.empty:
             lines += [
-                f"`informed_l0` at budget {max_budget:,}, mean over seeds. "
+                f"`{headline_l0}` at budget {max_budget:,}, mean over seeds. "
                 "`deg` flags denominator-degenerate targets.",
                 "",
                 "| Target | Family | ARE (%) | Share of mean | deg |",
@@ -396,7 +559,9 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
         elif not skipped_attribution:
             lines.append("No per-target diagnostics for this config.")
     else:
-        lines.append("No per-target diagnostics CSV found (run the sweep to generate it).")
+        lines.append(
+            "No per-target diagnostics CSV found (run the sweep to generate it)."
+        )
 
     lines += ["", "## Rotation robustness: target-weighted mean ARE (%)", ""]
     if rotation_front is not None and not rotation_front.empty:
@@ -408,18 +573,28 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
         rot_oos = rotation_front[rotation_front["split"] == "out_of_sample"]
         rot_groups = _display_groups(rotation_front)
         first_col = "Requested budget" if multi_l2 else "Average retained records"
-        lines.append("| " + first_col + " | " + " | ".join(label for _, _, label in rot_groups) + " |")
+        lines.append(
+            "| "
+            + first_col
+            + " | "
+            + " | ".join(label for _, _, label in rot_groups)
+            + " |"
+        )
         lines.append("| --- | " + " | ".join("---" for _ in rot_groups) + " |")
         for budget in sorted(rot_oos["budget_requested"].unique()):
             cells = []
-            retained = rot_oos[rot_oos["budget_requested"] == budget]["budget_achieved"].mean()
+            retained = rot_oos[rot_oos["budget_requested"] == budget][
+                "budget_achieved"
+            ].mean()
             for method, l2, _label in rot_groups:
                 row = rot_oos[
                     (rot_oos["method"] == method)
                     & (rot_oos["budget_requested"] == budget)
                     & (rot_oos["l2_lambda"] == l2)
                 ]
-                cells.append(_fmt_pct(row["mean_are_mean"].iloc[0]) if not row.empty else "")
+                cells.append(
+                    _fmt_pct(row["mean_are_mean"].iloc[0]) if not row.empty else ""
+                )
             first = f"{budget:,.0f}" if multi_l2 else f"{retained:,.0f}"
             lines.append(f"| {first} | " + " | ".join(cells) + " |")
     else:
@@ -438,8 +613,11 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
             "Each cell is mean / median OOS ARE (%) over seeds.",
             "",
             "| Fold | Held-out families | "
-            + " | ".join(label for _, _, label in _display_groups(frontier_oos)) + " |",
-            "| --- | --- | " + " | ".join("---" for _ in _display_groups(frontier_oos)) + " |",
+            + " | ".join(label for _, _, label in _display_groups(frontier_oos))
+            + " |",
+            "| --- | --- | "
+            + " | ".join("---" for _ in _display_groups(frontier_oos))
+            + " |",
         ]
         for fold in sorted(rot["fold"].unique()):
             held = ", ".join(sorted(fams[fams["fold"] == fold]["scope_value"].unique()))
@@ -465,6 +643,10 @@ def write_reports(long_csv: Path, out_dir: Path, *, anchor_budget: int | None) -
         "macro": macro,
         "paired": paired,
         "rotation": rotation_front,
+        "objective_summary": objective_summary,
+        "headline_split": headline_split,
+        "headline_label": headline_label,
+        "target_loss_cap": target_loss_cap,
         "has_rotation": has_rotation,
         "validation_only_families": validation_only,
         "table_paths": table_paths,
@@ -502,31 +684,33 @@ def _setup_style() -> None:
             "back to a system sans. For brand fidelity: brew install --cask font-inter"
         )
 
-    plt.rcParams.update({
-        "font.family": ["Inter", "Helvetica Neue", "Arial", "DejaVu Sans"],
-        "font.size": 12,
-        "axes.titlesize": 13,
-        "axes.labelsize": 12,
-        "legend.fontsize": 10,
-        "legend.title_fontsize": 10,
-        "xtick.labelsize": 11,
-        "ytick.labelsize": 11,
-        "figure.titlesize": 14,
-        "axes.edgecolor": "#475569",   # gray-600
-        "axes.linewidth": 0.8,
-        "axes.spines.top": False,
-        "axes.spines.right": False,
-        "axes.titlecolor": "#101828",  # gray-900
-        "axes.labelcolor": "#101828",
-        "text.color": "#101828",
-        "xtick.color": "#475569",
-        "ytick.color": "#475569",
-        "grid.color": "#E2E8F0",       # --border / gray-200
-        "grid.linewidth": 0.7,
-        "figure.facecolor": "white",
-        "axes.facecolor": "white",
-        "savefig.facecolor": "white",
-    })
+    plt.rcParams.update(
+        {
+            "font.family": ["Inter", "Helvetica Neue", "Arial", "DejaVu Sans"],
+            "font.size": 12,
+            "axes.titlesize": 13,
+            "axes.labelsize": 12,
+            "legend.fontsize": 10,
+            "legend.title_fontsize": 10,
+            "xtick.labelsize": 11,
+            "ytick.labelsize": 11,
+            "figure.titlesize": 14,
+            "axes.edgecolor": "#475569",  # gray-600
+            "axes.linewidth": 0.8,
+            "axes.spines.top": False,
+            "axes.spines.right": False,
+            "axes.titlecolor": "#101828",  # gray-900
+            "axes.labelcolor": "#101828",
+            "text.color": "#101828",
+            "xtick.color": "#475569",
+            "ytick.color": "#475569",
+            "grid.color": "#E2E8F0",  # --border / gray-200
+            "grid.linewidth": 0.7,
+            "figure.facecolor": "white",
+            "axes.facecolor": "white",
+            "savefig.facecolor": "white",
+        }
+    )
 
 
 def _budget_label(budget: int) -> str:
@@ -539,6 +723,8 @@ def _budget_axis(ax, budgets) -> None:
     from matplotlib.ticker import FixedFormatter, FixedLocator, NullFormatter
 
     budgets = sorted(int(b) for b in budgets)
+    if not budgets:
+        return
     ax.set_xscale("log")
     ax.xaxis.set_major_locator(FixedLocator(budgets))
     ax.xaxis.set_major_formatter(FixedFormatter([_budget_label(b) for b in budgets]))
@@ -565,6 +751,11 @@ def _plot_methods(
     """
     import numpy as np
 
+    required = {x_col, mean_col, lo_col, hi_col, "method"}
+    if agg.empty or not required.issubset(agg.columns):
+        return False
+
+    plotted = False
     for method in [m for m in SWEEP_METHOD_ORDER if m in set(agg["method"])]:
         d = agg[agg["method"] == method].sort_values(x_col)
         if d.empty:
@@ -574,9 +765,15 @@ def _plot_methods(
         x = d[x_col].to_numpy(dtype=float)
         y = d[mean_col].to_numpy(dtype=float) * scale
         ax.plot(
-            x, y, marker=marker, color=color,
-            label=_label(method, comparison_l2=comparison_l2_label), lw=2, ms=6,
+            x,
+            y,
+            marker=marker,
+            color=color,
+            label=_label(method, comparison_l2=comparison_l2_label),
+            lw=2,
+            ms=6,
         )
+        plotted = True
         lo = d[lo_col].to_numpy(dtype=float) * scale
         hi = d[hi_col].to_numpy(dtype=float) * scale
         if np.isfinite(lo).all() and np.isfinite(hi).all() and np.any(hi > lo):
@@ -584,6 +781,7 @@ def _plot_methods(
     if log_y:
         ax.set_yscale("log")
     ax.grid(True, which="both", alpha=0.4)
+    return plotted
 
 
 def _save(fig, fig_dir: Path, name: str) -> list[Path]:
@@ -600,11 +798,14 @@ def write_figures(report: dict, out_dir: Path) -> list[Path]:
     """
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except ImportError:
-        print("matplotlib not installed -- skipping figures (install the 'viz' extra). "
-              "Tables and the Markdown summary were still written.")
+        print(
+            "matplotlib not installed -- skipping figures (install the 'viz' extra). "
+            "Tables and the Markdown summary were still written."
+        )
         return []
 
     import numpy as np
@@ -615,101 +816,234 @@ def write_figures(report: dict, out_dir: Path) -> list[Path]:
     fig_dir.mkdir(parents=True, exist_ok=True)
     df = report["df"]
     written: list[Path] = []
+    headline_split = str(report.get("headline_split", "out_of_sample"))
+    headline_label = str(report.get("headline_label", _headline_label(headline_split)))
 
     l2_values = sorted(float(v) for v in df["l2_lambda"].dropna().unique())
 
     def at_cmp_l2(frame: pd.DataFrame) -> pd.DataFrame:
         """Slice to the comparison lambda_L2 (F1-F5 hold the penalty fixed)."""
+        if frame.empty or "l2_lambda" not in frame.columns:
+            return frame
         return frame[frame["l2_lambda"] == COMPARISON_L2]
 
-    # F1: frontier (OOS median | mean) at the comparison lambda_L2, requested
+    def add_legend(ax, *, title: str = "Method") -> None:
+        handles, _labels = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend(title=title)
+
+    objective_summary = at_cmp_l2(report.get("objective_summary", pd.DataFrame()))
+    if not objective_summary.empty:
+        value_col = (
+            "objective_capped_weighted_mean"
+            if "objective_capped_weighted_mean" in objective_summary.columns
+            else "objective_capped_weighted"
+        )
+        lo_col = (
+            "objective_capped_weighted_lo"
+            if "objective_capped_weighted_lo" in objective_summary.columns
+            else None
+        )
+        hi_col = (
+            "objective_capped_weighted_hi"
+            if "objective_capped_weighted_hi" in objective_summary.columns
+            else None
+        )
+        required = {"method", "budget_requested", value_col}
+        if required.issubset(objective_summary.columns):
+            f0, ax0 = plt.subplots(figsize=(7, 4.5))
+            for method in [
+                m for m in SWEEP_METHOD_ORDER if m in set(objective_summary["method"])
+            ]:
+                d = objective_summary[
+                    objective_summary["method"] == method
+                ].sort_values("budget_requested")
+                if d.empty:
+                    continue
+                color = METHOD_COLORS.get(method, "#444")
+                x = d["budget_requested"].to_numpy(dtype=float)
+                y = d[value_col].to_numpy(dtype=float) * 100.0
+                ax0.plot(
+                    x,
+                    y,
+                    marker=METHOD_MARKERS.get(method, "o"),
+                    color=color,
+                    label=_label(method),
+                    lw=2,
+                    ms=6,
+                )
+                if lo_col and hi_col:
+                    lo = d[lo_col].to_numpy(dtype=float) * 100.0
+                    hi = d[hi_col].to_numpy(dtype=float) * 100.0
+                    if (
+                        np.isfinite(lo).all()
+                        and np.isfinite(hi).all()
+                        and np.any(hi > lo)
+                    ):
+                        ax0.fill_between(
+                            x, lo, hi, color=color, alpha=0.15, linewidth=0
+                        )
+            _budget_axis(ax0, objective_summary["budget_requested"].unique())
+            ax0.set(
+                title=f"{headline_label} Populace objective loss",
+                xlabel="Requested budget",
+                ylabel="Capped weighted MAPE (%, lower is better)",
+            )
+            ax0.grid(True, which="both", alpha=0.4)
+            add_legend(ax0)
+            f0.tight_layout()
+            written += _save(f0, fig_dir, "f0_objective_frontier")
+            plt.close(f0)
+
+    # F1: frontier (headline-split median | mean) at the comparison lambda_L2, requested
     # record budget on a log x-axis. Plotting against the *requested* budget keeps
     # every method aligned at the same x ticks, so the curves stay vertically
     # comparable even though each method's achieved count differs slightly --
     # notably L1, which prunes to its own budget rather than matching L0 exactly.
     front_mean = aggregate.frontier_table(df, metric="mean_are")
     front_median = aggregate.frontier_table(df, metric="median_are")
-    fm_oos = at_cmp_l2(front_mean[front_mean["split"] == "out_of_sample"])
-    fmed_oos = at_cmp_l2(front_median[front_median["split"] == "out_of_sample"])
-    requested_budgets = sorted(int(b) for b in fm_oos["budget_requested"].unique())
+    fm_head = at_cmp_l2(front_mean[front_mean["split"] == headline_split])
+    fmed_head = at_cmp_l2(front_median[front_median["split"] == headline_split])
+    requested_budgets = sorted(
+        int(b) for b in set(fm_head["budget_requested"].dropna().unique())
+    )
 
-    f1, (ax_med, ax_mean) = plt.subplots(1, 2, figsize=(11, 4.5))
-    # Log y: out-of-sample ARE spans ~7% to several thousand %, so a linear axis
-    # is dominated by the worst point and flattens every other curve.
-    _plot_methods(ax_med, fmed_oos, x_col="budget_requested", mean_col="median_are_mean",
-                  lo_col="median_are_lo", hi_col="median_are_hi", scale=100.0, log_y=True)
-    _plot_methods(ax_mean, fm_oos, x_col="budget_requested", mean_col="mean_are_mean",
-                  lo_col="mean_are_lo", hi_col="mean_are_hi", scale=100.0, log_y=True)
-    for ax in (ax_mean, ax_med):
-        _budget_axis(ax, requested_budgets)
-        ax.set_xlabel("Requested budget")
-    ax_mean.set(title="Mean ARE", ylabel="Out-of-sample ARE (%, log)")
-    ax_med.set(title="Median ARE", ylabel="Out-of-sample ARE (%, log)")
-    ax_med.legend(title="Method")
-    f1.suptitle("Accuracy versus requested budget (out-of-sample)")
-    f1.tight_layout(rect=(0, 0, 1, 0.96))
-    written += _save(f1, fig_dir, "f1_frontier")
-    plt.close(f1)
+    if requested_budgets:
+        f1, (ax_med, ax_mean) = plt.subplots(1, 2, figsize=(11, 4.5))
+        # Log y: ARE spans several orders of magnitude on the full target surface,
+        # so a linear axis is dominated by the worst point and flattens every other curve.
+        plotted_med = _plot_methods(
+            ax_med,
+            fmed_head,
+            x_col="budget_requested",
+            mean_col="median_are_mean",
+            lo_col="median_are_lo",
+            hi_col="median_are_hi",
+            scale=100.0,
+            log_y=True,
+        )
+        plotted_mean = _plot_methods(
+            ax_mean,
+            fm_head,
+            x_col="budget_requested",
+            mean_col="mean_are_mean",
+            lo_col="mean_are_lo",
+            hi_col="mean_are_hi",
+            scale=100.0,
+            log_y=True,
+        )
+        if plotted_med or plotted_mean:
+            for ax in (ax_mean, ax_med):
+                _budget_axis(ax, requested_budgets)
+                ax.set_xlabel("Requested budget")
+            ax_mean.set(title="Mean ARE", ylabel=f"{headline_label} ARE (%, log)")
+            ax_med.set(title="Median ARE", ylabel=f"{headline_label} ARE (%, log)")
+            add_legend(ax_med)
+            f1.suptitle(f"Accuracy versus requested budget ({headline_label.lower()})")
+            f1.tight_layout(rect=(0, 0, 1, 0.96))
+            written += _save(f1, fig_dir, "f1_frontier")
+        plt.close(f1)
 
     # F2: usability — effective sample size and max weight vs budget.
     ess = at_cmp_l2(aggregate.run_metric(df, metric="ess"))
     maxw = at_cmp_l2(aggregate.run_metric(df, metric="max_weight"))
+    usability_budgets = requested_budgets or sorted(
+        int(b)
+        for b in set(
+            ess.get("budget_requested", pd.Series(dtype=float)).dropna().unique()
+        )
+    )
     f2, (ax_ess, ax_mw) = plt.subplots(1, 2, figsize=(11, 4.5))
-    _plot_methods(ax_ess, ess, x_col="budget_requested", mean_col="ess_mean",
-                  lo_col="ess_lo", hi_col="ess_hi", comparison_l2_label=True)
-    _plot_methods(ax_mw, maxw, x_col="budget_requested", mean_col="max_weight_mean",
-                  lo_col="max_weight_lo", hi_col="max_weight_hi", log_y=True,
-                  comparison_l2_label=True)
-    for ax in (ax_ess, ax_mw):
-        _budget_axis(ax, requested_budgets)
-        ax.set_xlabel("Requested budget")
-    ax_ess.set(title="Effective sample size", ylabel="ESS")
-    ax_mw.set(title="Max weight", ylabel="Max weight (log)")
-    ax_ess.legend(title="Method")
-    f2.suptitle("Usability: effective sample size and weight concentration")
-    f2.tight_layout(rect=(0, 0, 1, 0.96))
-    written += _save(f2, fig_dir, "f2_usability")
+    plotted_ess = _plot_methods(
+        ax_ess,
+        ess,
+        x_col="budget_requested",
+        mean_col="ess_mean",
+        lo_col="ess_lo",
+        hi_col="ess_hi",
+        comparison_l2_label=True,
+    )
+    plotted_mw = _plot_methods(
+        ax_mw,
+        maxw,
+        x_col="budget_requested",
+        mean_col="max_weight_mean",
+        lo_col="max_weight_lo",
+        hi_col="max_weight_hi",
+        log_y=True,
+        comparison_l2_label=True,
+    )
+    if plotted_ess or plotted_mw:
+        for ax in (ax_ess, ax_mw):
+            _budget_axis(ax, usability_budgets)
+            ax.set_xlabel("Requested budget")
+        ax_ess.set(title="Effective sample size", ylabel="ESS")
+        ax_mw.set(title="Max weight", ylabel="Max weight (log)")
+        add_legend(ax_ess)
+        f2.suptitle("Usability: effective sample size and weight concentration")
+        f2.tight_layout(rect=(0, 0, 1, 0.96))
+        written += _save(f2, fig_dir, "f2_usability")
     plt.close(f2)
 
     # F3: generalization gap (OOS − in-sample) mean ARE at the comparison lambda_L2.
     gap_rows = []
     fm_cmp = at_cmp_l2(front_mean)
-    for method in [m for m in SWEEP_METHOD_ORDER if m in set(fm_cmp["method"])]:
-        for budget in requested_budgets:
-            o = fm_cmp[(fm_cmp["method"] == method)
-                       & (fm_cmp["budget_requested"] == budget)
-                       & (fm_cmp["split"] == "out_of_sample")]
-            i = fm_cmp[(fm_cmp["method"] == method)
-                       & (fm_cmp["budget_requested"] == budget)
-                       & (fm_cmp["split"] == "in_sample")]
-            if o.empty or i.empty:
-                continue
-            gap_rows.append({
-                "method": method,
-                "budget_requested": int(budget),
-                "gap_mean": float(o["mean_are_mean"].iloc[0]) - float(i["mean_are_mean"].iloc[0]),
-                "gap_lo": float("nan"), "gap_hi": float("nan"),
-            })
+    if "out_of_sample" in set(fm_cmp.get("split", pd.Series(dtype=str))):
+        for method in [m for m in SWEEP_METHOD_ORDER if m in set(fm_cmp["method"])]:
+            for budget in requested_budgets:
+                o = fm_cmp[
+                    (fm_cmp["method"] == method)
+                    & (fm_cmp["budget_requested"] == budget)
+                    & (fm_cmp["split"] == "out_of_sample")
+                ]
+                i = fm_cmp[
+                    (fm_cmp["method"] == method)
+                    & (fm_cmp["budget_requested"] == budget)
+                    & (fm_cmp["split"] == "in_sample")
+                ]
+                if o.empty or i.empty:
+                    continue
+                gap_rows.append(
+                    {
+                        "method": method,
+                        "budget_requested": int(budget),
+                        "gap_mean": float(o["mean_are_mean"].iloc[0])
+                        - float(i["mean_are_mean"].iloc[0]),
+                        "gap_lo": float("nan"),
+                        "gap_hi": float("nan"),
+                    }
+                )
     gap_df = pd.DataFrame(gap_rows)
-    f3, ax3 = plt.subplots(figsize=(7, 4.5))
-    _plot_methods(ax3, gap_df, x_col="budget_requested",
-                  mean_col="gap_mean", lo_col="gap_lo", hi_col="gap_hi", scale=100.0)
-    _budget_axis(ax3, requested_budgets)
-    # Symlog y: the gap is signed (a plain log can't be used), and L1's coupled
-    # prune+shrink blows its gap out by ~3 orders of magnitude over the others.
-    # A symmetric-log axis keeps the inter-method structure readable near zero
-    # while still showing L1's excursion; linthresh = the largest non-L1 gap, so
-    # the other three sit in the linear (fully resolved) band.
-    nonl1 = gap_df[gap_df["method"] != "informed_l1"]["gap_mean"].abs() * 100.0
-    linthresh = float(nonl1.max()) if len(nonl1) and nonl1.max() > 0 else 1.0
-    ax3.set_yscale("symlog", linthresh=linthresh)
-    ax3.axhline(0.0, color="#94A3B8", lw=1, ls="--")
-    ax3.set(title="Generalization gap (out-of-sample − in-sample mean ARE)",
-            xlabel="Requested budget", ylabel="ARE gap (pp, symlog)")
-    ax3.legend(title="Method")
-    f3.tight_layout()
-    written += _save(f3, fig_dir, "f3_generalization_gap")
-    plt.close(f3)
+    if not gap_df.empty:
+        f3, ax3 = plt.subplots(figsize=(7, 4.5))
+        _plot_methods(
+            ax3,
+            gap_df,
+            x_col="budget_requested",
+            mean_col="gap_mean",
+            lo_col="gap_lo",
+            hi_col="gap_hi",
+            scale=100.0,
+        )
+        _budget_axis(ax3, requested_budgets)
+        # Symlog y: the gap is signed (a plain log can't be used), and L1's coupled
+        # prune+shrink blows its gap out by ~3 orders of magnitude over the others.
+        # A symmetric-log axis keeps the inter-method structure readable near zero
+        # while still showing L1's excursion; linthresh = the largest non-L1 gap, so
+        # the other three sit in the linear (fully resolved) band.
+        nonl1 = gap_df[gap_df["method"] != "informed_l1"]["gap_mean"].abs() * 100.0
+        linthresh = float(nonl1.max()) if len(nonl1) and nonl1.max() > 0 else 1.0
+        ax3.set_yscale("symlog", linthresh=linthresh)
+        ax3.axhline(0.0, color="#94A3B8", lw=1, ls="--")
+        ax3.set(
+            title="Generalization gap (out-of-sample − in-sample mean ARE)",
+            xlabel="Requested budget",
+            ylabel="ARE gap (pp, symlog)",
+        )
+        add_legend(ax3)
+        f3.tight_layout()
+        written += _save(f3, fig_dir, "f3_generalization_gap")
+        plt.close(f3)
 
     # F4: out-of-sample ARE by held-out family at an anchor budget. Uses the
     # fixed-family holdout + out-of-sample split (consistent with F1) at the
@@ -720,8 +1054,11 @@ def write_figures(report: dict, out_dir: Path) -> list[Path]:
         anchor = requested_budgets[len(requested_budgets) // 2]
     if anchor is not None:
         fam = aggregate.by_family_at_budget(
-            df, budget_requested=int(anchor),
-            holdout_type="fixed_family", split="out_of_sample", metric="mean_are",
+            df,
+            budget_requested=int(anchor),
+            holdout_type="fixed_family",
+            split="out_of_sample",
+            metric="mean_are",
         )
         fam = fam[fam["l2_lambda"] == COMPARISON_L2]
         families = sorted(fam["family"].unique())
@@ -732,9 +1069,13 @@ def write_figures(report: dict, out_dir: Path) -> list[Path]:
             width = 0.8 / max(len(methods), 1)
             for k, method in enumerate(methods):
                 d = fam[fam["method"] == method].set_index("family").reindex(families)
-                ax4.bar(x + (k - (len(methods) - 1) / 2) * width,
-                        d["mean_are"].to_numpy(dtype=float) * 100, width,
-                        label=_label(method), color=METHOD_COLORS.get(method, "#444"))
+                ax4.bar(
+                    x + (k - (len(methods) - 1) / 2) * width,
+                    d["mean_are"].to_numpy(dtype=float) * 100,
+                    width,
+                    label=_label(method),
+                    color=METHOD_COLORS.get(method, "#444"),
+                )
             # Log y only when the held-out families span more than ~1.5 decades,
             # so a single hard family doesn't flatten the rest.
             vals = fam["mean_are"].to_numpy(dtype=float) * 100
@@ -744,45 +1085,63 @@ def write_figures(report: dict, out_dir: Path) -> list[Path]:
                 ax4.set_yscale("log")
             ax4.set_xticks(x)
             ax4.set_xticklabels(families, rotation=45, ha="right")
-            ax4.set(title=f"Out-of-sample ARE by held-out family (budget {int(anchor):,})",
-                    ylabel="Mean ARE (%, log)" if use_log else "Mean ARE (%)")
+            ax4.set(
+                title=f"Out-of-sample ARE by held-out family (budget {int(anchor):,})",
+                ylabel="Mean ARE (%, log)" if use_log else "Mean ARE (%)",
+            )
             ax4.legend(title="Method")
             ax4.grid(True, axis="y", which="both", alpha=0.4)
             f4.tight_layout()
             written += _save(f4, fig_dir, "f4_by_family")
             plt.close(f4)
 
-    # F5: cost-accuracy — runtime vs OOS median ARE at the comparison lambda_L2.
-    # Median (not mean) on y to match the paper's headline metric.
+    # F5: cost-accuracy — runtime vs headline-split median ARE at the comparison lambda_L2.
+    # Median (not mean) on y because the raw ARE mean is dominated by near-zero targets.
     runtime = at_cmp_l2(aggregate.run_metric(df, metric="runtime_s"))
-    f5, ax5 = plt.subplots(figsize=(7, 4.5))
-    for method in [m for m in SWEEP_METHOD_ORDER if m in set(fmed_oos["method"])]:
-        rt = runtime[runtime["method"] == method].set_index("budget_requested")
-        acc = fmed_oos[fmed_oos["method"] == method].set_index("budget_requested")
-        bs = sorted(set(rt.index) & set(acc.index))
-        if not bs:
-            continue
-        xs = [rt.loc[b, "runtime_s_mean"] for b in bs]
-        ys = [acc.loc[b, "median_are_mean"] * 100 for b in bs]
-        ax5.plot(xs, ys, marker=METHOD_MARKERS.get(method, "o"), ms=8, lw=1.2,
-                 color=METHOD_COLORS.get(method, "#444"), label=_label(method))
-        # Label only the budget endpoints per method: survey-weight runtime is
-        # ~constant (dense calibration dominates), so all-point labels collide.
-        ends = {0: (4, 6), len(bs) - 1: (4, -10)}
-        for idx, (b, xv, yv) in enumerate(zip(bs, xs, ys, strict=True)):
-            if idx in ends:
-                ax5.annotate(_budget_label(b), (xv, yv), textcoords="offset points",
-                             xytext=ends[idx], fontsize=8,
-                             color=METHOD_COLORS.get(method, "#444"))
-    ax5.set_xscale("log")
-    ax5.set_yscale("log")
-    ax5.set(title="Cost versus accuracy", xlabel="Runtime (s, log)",
-            ylabel="Out-of-sample median ARE (%, log)")
-    ax5.legend(title="Method")
-    ax5.grid(True, which="both", alpha=0.4)
-    f5.tight_layout()
-    written += _save(f5, fig_dir, "f5_cost_accuracy")
-    plt.close(f5)
+    if not runtime.empty and not fmed_head.empty:
+        f5, ax5 = plt.subplots(figsize=(7, 4.5))
+        for method in [m for m in SWEEP_METHOD_ORDER if m in set(fmed_head["method"])]:
+            rt = runtime[runtime["method"] == method].set_index("budget_requested")
+            acc = fmed_head[fmed_head["method"] == method].set_index("budget_requested")
+            bs = sorted(set(rt.index) & set(acc.index))
+            if not bs:
+                continue
+            xs = [rt.loc[b, "runtime_s_mean"] for b in bs]
+            ys = [acc.loc[b, "median_are_mean"] * 100 for b in bs]
+            ax5.plot(
+                xs,
+                ys,
+                marker=METHOD_MARKERS.get(method, "o"),
+                ms=8,
+                lw=1.2,
+                color=METHOD_COLORS.get(method, "#444"),
+                label=_label(method),
+            )
+            # Label only the budget endpoints per method: survey-weight runtime is
+            # ~constant (dense calibration dominates), so all-point labels collide.
+            ends = {0: (4, 6), len(bs) - 1: (4, -10)}
+            for idx, (b, xv, yv) in enumerate(zip(bs, xs, ys, strict=True)):
+                if idx in ends:
+                    ax5.annotate(
+                        _budget_label(b),
+                        (xv, yv),
+                        textcoords="offset points",
+                        xytext=ends[idx],
+                        fontsize=8,
+                        color=METHOD_COLORS.get(method, "#444"),
+                    )
+        ax5.set_xscale("log")
+        ax5.set_yscale("log")
+        ax5.set(
+            title="Cost versus accuracy",
+            xlabel="Runtime (s, log)",
+            ylabel=f"{headline_label} median ARE (%, log)",
+        )
+        add_legend(ax5)
+        ax5.grid(True, which="both", alpha=0.4)
+        f5.tight_layout()
+        written += _save(f5, fig_dir, "f5_cost_accuracy")
+        plt.close(f5)
 
     # F6: operability — the lambda_L2 penalty lifts effective sample size (spreads
     # the weights) at an accuracy cost, traced across the budget axis for the
@@ -791,17 +1150,24 @@ def write_figures(report: dict, out_dir: Path) -> list[Path]:
         lo_l2, hi_l2 = float(l2_values[0]), float(l2_values[-1])
         ess_l0 = aggregate.run_metric(df, metric="ess")
         ess_l0 = ess_l0[ess_l0["method"] == "informed_l0"]
-        are_l0 = front_mean[(front_mean["method"] == "informed_l0")
-                            & (front_mean["split"] == "out_of_sample")]
+        are_l0 = front_mean[
+            (front_mean["method"] == "informed_l0")
+            & (front_mean["split"] == headline_split)
+        ]
         op_tick_budgets = sorted(int(b) for b in ess_l0["budget_requested"].unique())
         teal = METHOD_COLORS["informed_l0"]
         # Same hue (it is one method); solid+filled for the smaller penalty,
         # dashed+open for the larger, so the pair reads in grayscale too.
         styles = {
-            lo_l2: dict(ls="-", marker="o", mfc=teal,
-                        label=rf"$\lambda_{{L_2}}$ = {lo_l2:g}"),
-            hi_l2: dict(ls="--", marker="s", mfc="white",
-                        label=rf"$\lambda_{{L_2}}$ = {hi_l2:g}"),
+            lo_l2: dict(
+                ls="-", marker="o", mfc=teal, label=rf"$\lambda_{{L_2}}$ = {lo_l2:g}"
+            ),
+            hi_l2: dict(
+                ls="--",
+                marker="s",
+                mfc="white",
+                label=rf"$\lambda_{{L_2}}$ = {hi_l2:g}",
+            ),
         }
 
         def _op_line(ax, frame, ycol, scale=1.0):
@@ -811,9 +1177,18 @@ def write_figures(report: dict, out_dir: Path) -> list[Path]:
                 if d.empty:
                     continue
                 xv = d["budget_requested"].to_numpy(dtype=float)
-                ax.plot(xv, d[f"{ycol}_mean"].to_numpy(dtype=float) * scale,
-                        color=teal, lw=2, ms=7, ls=st["ls"], marker=st["marker"],
-                        mfc=st["mfc"], mec=teal, label=st["label"])
+                ax.plot(
+                    xv,
+                    d[f"{ycol}_mean"].to_numpy(dtype=float) * scale,
+                    color=teal,
+                    lw=2,
+                    ms=7,
+                    ls=st["ls"],
+                    marker=st["marker"],
+                    mfc=st["mfc"],
+                    mec=teal,
+                    label=st["label"],
+                )
                 lo = d[f"{ycol}_lo"].to_numpy(dtype=float) * scale
                 hi = d[f"{ycol}_hi"].to_numpy(dtype=float) * scale
                 if np.isfinite(lo).all() and np.isfinite(hi).all() and np.any(hi > lo):
@@ -822,18 +1197,31 @@ def write_figures(report: dict, out_dir: Path) -> list[Path]:
         f6, (ax_ess, ax_are) = plt.subplots(1, 2, figsize=(11, 4.5))
         _op_line(ax_ess, ess_l0, "ess")
         # are_l0 carries mean_are_{mean,lo,hi}; reuse the same helper.
-        _op_line(ax_are, are_l0.rename(columns={
-            "mean_are_mean": "are_mean", "mean_are_lo": "are_lo", "mean_are_hi": "are_hi",
-        }), "are", scale=100.0)
+        _op_line(
+            ax_are,
+            are_l0.rename(
+                columns={
+                    "mean_are_mean": "are_mean",
+                    "mean_are_lo": "are_lo",
+                    "mean_are_hi": "are_hi",
+                }
+            ),
+            "are",
+            scale=100.0,
+        )
         for ax in (ax_ess, ax_are):
             _budget_axis(ax, op_tick_budgets)
             ax.set_xlabel("Requested budget")
             ax.grid(True, which="both", alpha=0.4)
         ax_ess.set(title="Effective sample size", ylabel="ESS")
-        ax_are.set(title="Out-of-sample mean ARE", ylabel="Out-of-sample ARE (%, log)")
+        ax_are.set(
+            title=f"{headline_label} mean ARE", ylabel=f"{headline_label} ARE (%, log)"
+        )
         ax_are.set_yscale("log")
-        ax_ess.legend()
-        f6.suptitle(r"Operability: the $\lambda_{L_2}$ penalty trades weight concentration for accuracy")
+        add_legend(ax_ess, title=r"$\lambda_{L_2}$")
+        f6.suptitle(
+            r"Operability: the $\lambda_{L_2}$ penalty trades weight concentration for accuracy"
+        )
         f6.tight_layout(rect=(0, 0, 1, 0.96))
         written += _save(f6, fig_dir, "f6_operability")
         plt.close(f6)
@@ -844,11 +1232,17 @@ def write_figures(report: dict, out_dir: Path) -> list[Path]:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     g = parser.add_mutually_exclusive_group(required=True)
-    g.add_argument("--sweep", type=Path, help="Sweep run dir (contains metrics_long.csv).")
+    g.add_argument(
+        "--sweep", type=Path, help="Sweep run dir (contains metrics_long.csv)."
+    )
     g.add_argument("--long", type=Path, help="Path to a metrics_long.csv directly.")
-    parser.add_argument("--out", type=Path, default=None, help="Output dir (default: <sweep>/report).")
+    parser.add_argument(
+        "--out", type=Path, default=None, help="Output dir (default: <sweep>/report)."
+    )
     parser.add_argument("--anchor-budget", type=int, default=None)
-    parser.add_argument("--paper-figures", action="store_true", help="Copy figures into paper/figures.")
+    parser.add_argument(
+        "--paper-figures", action="store_true", help="Copy figures into paper/figures."
+    )
     return parser.parse_args()
 
 
@@ -860,7 +1254,9 @@ def main() -> None:
     out_dir = args.out or (long_csv.parent / "report")
 
     report = write_reports(long_csv, out_dir, anchor_budget=args.anchor_budget)
-    print(f"Wrote tables: {json.dumps({k: str(v) for k, v in report['table_paths'].items()}, indent=2)}")
+    print(
+        f"Wrote tables: {json.dumps({k: str(v) for k, v in report['table_paths'].items()}, indent=2)}"
+    )
     print(f"Wrote summary: {report['summary']}")
 
     written = write_figures(report, out_dir)

@@ -185,8 +185,8 @@ export function LedgerSlide() {
             ]}
           />
           <p className="mt-7 text-base text-slate-400">
-            Roughly 22k candidate facts, with 9k at district level; this build calibrates to 4,393
-            active US targets.
+            Current run: 37,053 Ledger facts compile to 31,534 active targets, including 23,450
+            congressional-district targets.
           </p>
         </div>
         <FactAnatomy />
@@ -308,10 +308,10 @@ export function BaselinesSlide() {
               retained count.
             </p>
           </ContentCard>
-          <ContentCard title="L1 (convex sparse)" accent="teal">
+          <ContentCard title="L0 + refit" accent="teal">
             <p className="text-lg leading-snug text-slate-600">
-              A convex L1 penalty on weight magnitude; soft-thresholding drives small weights to
-              exact zeros.
+              Keep the L0-selected records, remove the gates, and refit ordinary calibration weights on
+              that subset.
             </p>
           </ContentCard>
           <ContentCard title="Random + reweight" accent="slate">
@@ -415,19 +415,19 @@ export function ExperimentDesignSlide() {
     <Slide>
       <div className="flex h-full flex-col justify-center">
         <SlideTitle kicker="Experiment design">
-          One frozen input, four samplers, held-out target families
+          One frozen input, the full Populace target surface
         </SlideTitle>
         <div className="mt-9 grid grid-cols-4 gap-5">
           <StatNumber value="75,112" label="households" sublabel="Populace US 2024 candidate file" />
-          <StatNumber value="4" label="samplers" sublabel="L0, L1, random, survey-weight" />
+          <StatNumber value="4" label="method arms" sublabel="L0, L0 + refit, random, survey-weight" />
           <StatNumber value="2k–40k" label="budget sweep" sublabel="aggressive compression upward" />
-          <StatNumber value="206" label="held out" sublabel="family-level out-of-sample targets" />
+          <StatNumber value="31,534" label="targets" sublabel="all fit and scored" />
         </div>
         <ContentCard className="mt-8" accent="teal">
           <p className="text-2xl leading-snug text-slate-700">
-            All four methods share the calibrator, loss, and weight bounds; only record selection
-            differs. Medicaid, SNAP, state income tax, and validation-only CBO targets stay out of every
-            fit and are scored after calibration.
+            All methods share the candidate frame, Populace production loss, target weights, and
+            scoring path; only record selection differs. The headline experiment fits and scores the
+            full materialized surface, including validation and district targets.
           </p>
         </ContentCard>
         <p className="mt-4 text-base text-slate-400">
@@ -455,16 +455,14 @@ export function CalibrationObjectiveSlide() {
               Held fixed across every method
             </div>
             <div className="space-y-2.5">
-              {["Informed L0", "L1 (convex sparse)", "Random + reweight", "Survey-weight sampling"].map(
-                (m) => (
-                  <div
-                    key={m}
-                    className="rounded-md border border-slate-200 bg-slate-50 px-4 py-2.5 text-lg font-medium text-pe-dark"
-                  >
-                    {m}
-                  </div>
-                ),
-              )}
+              {["Informed L0", "L0 + refit", "Random + reweight", "Survey-weight sampling"].map((m) => (
+                <div
+                  key={m}
+                  className="rounded-md border border-slate-200 bg-slate-50 px-4 py-2.5 text-lg font-medium text-pe-dark"
+                >
+                  {m}
+                </div>
+              ))}
             </div>
             <p className="mt-5 text-lg leading-snug text-slate-500">
               Same targets, same loss, same weight bounds. Only the sampler changes, so the comparison
@@ -482,21 +480,22 @@ export function MainFrontierSlide() {
     <Slide>
       <div className="grid h-full grid-cols-[0.78fr_1.22fr] items-center gap-10">
         <div>
-          <SlideTitle kicker="Main result">Graceful degradation under compression</SlideTitle>
+          <SlideTitle kicker="Main result">Random + reweight is the benchmark to beat</SlideTitle>
           <p className="mt-8 text-2xl leading-snug text-slate-600">
-            At the smallest budgets, informed selection spends the budget on the records the targets
-            need, and leads. As the budget grows the baselines catch up: on the median they draw level
-            and overtake, while informed L0 keeps the lower mean throughout.
+            On the current full Populace target surface, the target-informed subset is not yet the
+            most accurate way to prune. Random sampling followed by reweighting has the lowest
+            production loss at every budget except the smallest.
           </p>
           <p className="mt-6 text-xl leading-snug text-slate-500">
-            The crossover region is itself the finding. L1 anchors the convex point of comparison.
+            The useful signal is narrower: post-selection refit closes much of the gap from raw L0, but
+            selection quality and weight concentration still have to improve.
           </p>
         </div>
         <Figure
-          src="/figures/f1_frontier.png"
+          src="/figures/f0_objective_frontier.png"
           width={2168}
           height={886}
-          alt="Out-of-sample median and mean ARE versus retained records for the four samplers"
+          alt="Full-surface Populace objective loss versus retained records for the four samplers"
         />
       </div>
     </Slide>
@@ -508,19 +507,19 @@ export function GeneralizationSlide() {
     <Slide>
       <div className="grid h-full grid-cols-[1.1fr_0.9fr] items-center gap-10">
         <Figure
-          src="/figures/f3_generalization_gap.png"
-          width={1367}
-          height={868}
-          alt="Out-of-sample minus in-sample error across the budget sweep for the four methods"
+          src="/figures/f1_frontier.png"
+          width={2168}
+          height={886}
+          alt="Full-surface median and mean absolute relative error versus retained records for the four samplers"
         />
         <div>
-          <SlideTitle kicker="Generalization">Hold out whole families, not random cells</SlideTitle>
+          <SlideTitle kicker="Diagnostics">Median and mean tell different stories</SlideTitle>
           <BulletList
             className="mt-9"
             items={[
-              "Random target splits leak through nested totals.",
-              "Whole-family holdout tests reproduction of unseen domains.",
-              "Informed selection carries over with the smaller in-sample to out-of-sample gap.",
+              "The Populace loss is the headline score; raw ARE is supplemental.",
+              "Median ARE shows typical target fit across the full surface.",
+              "Mean ARE is dominated by denominator-degenerate IRS cells, so we name those targets separately instead of hiding the tail.",
             ]}
           />
         </div>
@@ -534,37 +533,34 @@ export function OperabilitySlide() {
     <Slide>
       <div className="grid h-full grid-cols-[0.78fr_1.22fr] items-center gap-10">
         <div>
-          <SlideTitle kicker="Operability">Trading accuracy for usable weights</SlideTitle>
+          <SlideTitle kicker="Concentration">The selected subset carries too much weight</SlideTitle>
           <p className="mt-7 text-xl leading-snug text-slate-600">
-            We lead with the median, because a few near-zero-denominator targets inflate the mean. And we
-            report effective sample size as a primary result: matching a demanding target system can
-            concentrate weight on a few records.
+            Effective sample size is a primary result, not a footnote. The L0 selector finds records that
+            matter for the targets, but the current subset relies on a small number of very high-weight
+            records.
           </p>
           <div className="mt-6 space-y-2.5">
             <p className="border-l-[3px] border-pe-teal pl-4 text-lg leading-snug text-slate-600">
-              <span className="font-bold text-pe-dark">L0 penalty:</span> sets the retained-record budget
-              by pricing open gates.
+              <span className="font-bold text-pe-dark">At 10k records:</span> L0 + refit reaches ESS 393.
             </p>
             <p className="border-l-[3px] border-slate-400 pl-4 text-lg leading-snug text-slate-600">
-              <span className="font-bold text-pe-dark">L2 penalty:</span> softly discourages high
-              fitted-weight ratios across the retained records.
+              <span className="font-bold text-pe-dark">Random + reweight:</span> ESS 1,624 at the same budget.
             </p>
             <p className="border-l-[3px] border-pe-amber pl-4 text-lg leading-snug text-slate-600">
-              <span className="font-bold text-pe-dark">Max weight ratio:</span> hard cap on how much any
-              one record can inflate relative to its starting weight.
+              <span className="font-bold text-pe-dark">Survey-weight sampling:</span> ESS 4,129, with the
+              lowest concentration.
             </p>
           </div>
           <p className="mt-5 text-lg leading-snug text-slate-500">
-            Sweeping the L2 penalty traces an effective-sample-size against accuracy frontier: cheap to buy
-            at large budgets, costly at tight ones. Value shifts from accuracy toward operability and
-            robustness.
+            The next methodological work is selection with concentration controls, not just lower target
+            loss.
           </p>
         </div>
         <Figure
-          src="/figures/f6_operability.png"
-          width={2175}
+          src="/figures/f2_usability.png"
+          width={2168}
           height={886}
-          alt="Effective sample size bought against out-of-sample accuracy cost as the L2 penalty varies, across budgets"
+          alt="Effective sample size and largest fitted weight versus retained records for the four samplers"
         />
       </div>
     </Slide>
@@ -589,13 +585,14 @@ export function FutureWorkSlide() {
           </ContentCard>
           <ContentCard title="Congressional-district production builds" accent="amber">
             <p className="text-xl leading-snug text-slate-600">
-              Score the method on the full subnational target surface it is designed for, not just
-              national and state.
+              Use the full-surface run to choose deployable district files, then rerun fiscal release
+              scoring against the same target ledger.
             </p>
           </ContentCard>
-          <ContentCard title="Broader held-out targets" accent="slate">
+          <ContentCard title="Targeted robustness" accent="slate">
             <p className="text-xl leading-snug text-slate-600">
-              Bring district age, SNAP, and SOI facts into the held-out design.
+              Add family holdouts, raking-compatible margin subsets, and concentration-penalty sweeps as
+              diagnostics around the production target surface.
             </p>
           </ContentCard>
         </div>
@@ -608,8 +605,8 @@ export function TakeawaySlide() {
   return (
     <SectionSlide
       section="In closing"
-      title="Target-informed pruning is both a calibration method and a sampling method"
-      subtitle="It keeps records that help reproduce the targets, and turns dataset size and weight concentration into tunable, reportable controls — a proof of concept on national and state targets, built for the subnational case."
+      title="Target-informed pruning is a useful control, not yet an accuracy win"
+      subtitle="The full-surface run makes the benchmark clear: beat random + reweight on Populace loss while keeping effective sample size high enough for a deployable dataset."
     />
   );
 }

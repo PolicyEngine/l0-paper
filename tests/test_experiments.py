@@ -27,6 +27,7 @@ from l0_paper.experiments.conditions import (
     calibrate_dense,
     run_dense_then_sample,
     run_l0,
+    run_l0_post_refit,
     run_l1,
     run_random_then_reweight,
     sample_from_dense,
@@ -69,8 +70,14 @@ def test_run_l0_prunes_at_budget():
     frame, targets = _toy()
     events = []
     result = run_l0(
-        frame, targets, target_records=60, seed=0, epochs=120,
-        learning_rate=0.15, mass="free", progress_callback=events.append,
+        frame,
+        targets,
+        target_records=60,
+        seed=0,
+        epochs=120,
+        learning_rate=0.15,
+        mass="free",
+        progress_callback=events.append,
     )
     assert result.method == "informed_l0"
     assert result.n_selected < result.n_records
@@ -82,11 +89,50 @@ def test_run_l0_prunes_at_budget():
     assert any(event.get("budget_search") for event in events)
 
 
+def test_run_l0_post_refit_keeps_selected_records():
+    frame, targets = _toy()
+    l0 = run_l0(
+        frame,
+        targets,
+        target_records=50,
+        seed=0,
+        epochs=80,
+        learning_rate=0.15,
+        mass="free",
+    )
+
+    refit = run_l0_post_refit(
+        frame,
+        targets,
+        l0,
+        seed=0,
+        epochs=60,
+        learning_rate=0.15,
+        mass="free",
+    )
+
+    threshold = 1e-6 * float(np.mean(l0.initial_weights))
+    assert refit.method == "informed_l0_refit"
+    assert refit.weights.shape == l0.weights.shape
+    assert set(np.flatnonzero(refit.weights)) == set(
+        np.flatnonzero(l0.weights > threshold)
+    )
+    assert refit.n_selected == np.count_nonzero(refit.weights)
+    assert refit.runtime_s >= l0.runtime_s
+    assert refit.sampling["strategy"] == "post_l0_refit"
+    assert np.isfinite(refit.final_loss)
+
+
 def test_dense_then_sample_matched_budget():
     frame, targets = _toy()
     result = run_dense_then_sample(
-        frame, targets, n_sample=40, seed=0, epochs=120,
-        learning_rate=0.15, mass="free",
+        frame,
+        targets,
+        n_sample=40,
+        seed=0,
+        epochs=120,
+        learning_rate=0.15,
+        mass="free",
     )
     assert result.method == "dense_sample"
     assert result.l0_lambda == 0.0
@@ -99,8 +145,13 @@ def test_dense_then_sample_matched_budget():
 def test_run_random_then_reweight_matched_budget():
     frame, targets = _toy()
     result = run_random_then_reweight(
-        frame, targets, n_sample=40, seed=0, epochs=120,
-        learning_rate=0.15, mass="free",
+        frame,
+        targets,
+        n_sample=40,
+        seed=0,
+        epochs=120,
+        learning_rate=0.15,
+        mass="free",
     )
     assert result.method == "random_reweight"
     assert result.l0_lambda == 0.0
@@ -131,7 +182,9 @@ def test_run_l1_all_zero_bracket_fails_cleanly(monkeypatch):
     def overpruned_calibrate(*_args, **_kwargs):
         raise ValueError("L1 penalty zeroed every weight: lower l1_lambda.")
 
-    monkeypatch.setattr("l0_paper.experiments.conditions.calibrate", overpruned_calibrate)
+    monkeypatch.setattr(
+        "l0_paper.experiments.conditions.calibrate", overpruned_calibrate
+    )
 
     with pytest.raises(ValueError, match="L1 lambda bracket zeroed every weight"):
         run_l1(frame, targets, target_records=40, budget_iters=1)
@@ -148,7 +201,13 @@ def test_random_reweight_fills_table_row():
     frame, targets = _toy()
     fit, held = holdout.split_targets(targets, holdout_frac=0.34, seed=1)
     run = run_random_then_reweight(
-        frame, fit, n_sample=40, seed=0, epochs=80, learning_rate=0.15, mass="free",
+        frame,
+        fit,
+        n_sample=40,
+        seed=0,
+        epochs=80,
+        learning_rate=0.15,
+        mass="free",
     )
     summary = artifacts.method_summary(
         run,
@@ -156,7 +215,9 @@ def test_random_reweight_fills_table_row():
         metrics.score(frame, run.weights, held),
     )
     tex = tables.render_sampling_comparison({"random_reweight": summary}, budget=40)
-    random_row = next(line for line in tex.splitlines() if line.startswith("Random + reweight"))
+    random_row = next(
+        line for line in tex.splitlines() if line.startswith("Random + reweight")
+    )
     assert "\\tbc" not in random_row
 
 
@@ -177,8 +238,13 @@ def test_weighted_sample_can_draw_without_replacement():
 def test_metrics_score_reports_are_and_weights():
     frame, targets = _toy()
     result = run_l0(
-        frame, targets, target_records=60, seed=0, epochs=120,
-        learning_rate=0.15, mass="free",
+        frame,
+        targets,
+        target_records=60,
+        seed=0,
+        epochs=120,
+        learning_rate=0.15,
+        mass="free",
     )
     scored = metrics.score(frame, result.weights, targets, label="in_sample")
     assert scored["n_targets"] == len(targets)
@@ -214,10 +280,13 @@ def test_zero_value_targets_report_absolute_error_not_are():
 def test_identifiability_floor_flags_degenerate_targets():
     """A target below a single household's contribution is denominator-degenerate."""
     frame, truths = make_toy_frame(seed=0, n=120)
-    tiny = Target(name="tiny_income", entity="household",
-                  measure="income", value=1.0)
-    total = Target(name="total_income", entity="household",
-                   measure="income", value=truths["income"])
+    tiny = Target(name="tiny_income", entity="household", measure="income", value=1.0)
+    total = Target(
+        name="total_income",
+        entity="household",
+        measure="income",
+        value=truths["income"],
+    )
     targets = TargetSet((tiny, total))
 
     floors = metrics.identifiability_floors(frame, targets)
@@ -238,10 +307,13 @@ def test_score_reports_degenerate_removal_sensitivity():
     """``score`` emits the targeted-removal mean alongside the tail-sensitive mean."""
     frame, truths = make_toy_frame(seed=0, n=120)
     weights = frame.weights_for("household").values
-    tiny = Target(name="tiny_income", entity="household",
-                  measure="income", value=1.0)
-    total = Target(name="total_income", entity="household",
-                   measure="income", value=truths["income"])
+    tiny = Target(name="tiny_income", entity="household", measure="income", value=1.0)
+    total = Target(
+        name="total_income",
+        entity="household",
+        measure="income",
+        value=truths["income"],
+    )
     targets = TargetSet((tiny, total))
     degenerate = metrics.degenerate_target_names(frame, targets)
 
@@ -261,24 +333,34 @@ def test_target_diagnostics_persistence_and_attribution(tmp_path):
     """Per-target rows round-trip and the attribution names the worst offender."""
     frame, truths = make_toy_frame(seed=0, n=120)
     weights = frame.weights_for("household").values
-    tiny = Target(name="tiny_income", entity="household",
-                  measure="income", value=1.0)
-    total = Target(name="total_income", entity="household",
-                   measure="income", value=truths["income"])
+    tiny = Target(name="tiny_income", entity="household", measure="income", value=1.0)
+    total = Target(
+        name="total_income",
+        entity="household",
+        measure="income",
+        value=truths["income"],
+    )
     targets = list(TargetSet((tiny, total)))
     degenerate = metrics.degenerate_target_names(frame, targets)
 
     diagnostics = metrics.target_diagnostics(frame, weights, targets)
     rows = aggregate.target_diagnostic_rows(
-        method="informed_l0", seed=0, budget_requested=40, split="out_of_sample",
-        diagnostics=diagnostics, degenerate_names=degenerate,
+        method="informed_l0",
+        seed=0,
+        budget_requested=40,
+        split="out_of_sample",
+        diagnostics=diagnostics,
+        degenerate_names=degenerate,
     )
     path = aggregate.write_target_diagnostics_csv(tmp_path / "diag.csv", rows)
     loaded = aggregate.load_target_diagnostics(path)
     assert set(loaded["target_name"]) == {tiny.row_name, total.row_name}
 
     top = aggregate.top_are_contributors(
-        loaded, method="informed_l0", budget_requested=40, split="out_of_sample",
+        loaded,
+        method="informed_l0",
+        budget_requested=40,
+        split="out_of_sample",
     )
     assert top.iloc[0]["target_name"] == tiny.row_name
     assert bool(top.iloc[0]["is_degenerate"])
@@ -292,16 +374,23 @@ def test_target_diagnostics_store_scale_and_loss_weight():
     targets = list(
         TargetSet(
             (
-                Target(name="total_income", entity="household", measure="income",
-                       value=truths["income"]),
-                Target(name="tiny_income", entity="household", measure="income",
-                       value=1.0),
+                Target(
+                    name="total_income",
+                    entity="household",
+                    measure="income",
+                    value=truths["income"],
+                ),
+                Target(
+                    name="tiny_income", entity="household", measure="income", value=1.0
+                ),
             )
         )
     )
     omega = np.array([3.0, 1.0])
     rows = metrics.target_diagnostics(frame, weights, targets, loss_weights=omega)
-    assert [r["scale"] for r in rows] == [max(abs(r["target_value"]), 1.0) for r in rows]
+    assert [r["scale"] for r in rows] == [
+        max(abs(r["target_value"]), 1.0) for r in rows
+    ]
     assert [r["loss_weight"] for r in rows] == [3.0, 1.0]
 
 
@@ -338,20 +427,47 @@ def test_crunch_objective_caps_weights_and_drops_degenerate():
 
 def test_rows_from_run_emits_degenerate_metrics():
     rows = aggregate.rows_from_run(
-        method="informed_l0", seed=0, budget_requested=1000, budget_achieved=995,
-        holdout_type="fixed_family", fold=-1,
-        in_sample={"mean_are": 0.5, "median_are": 0.1, "max_are": 9.0, "n": 10,
-                   "mean_are_ex_degenerate": 0.08, "n_degenerate": 3,
-                   "by_family": {}, "by_geography": {},
-                   "ess": 50.0, "max_weight": 100.0, "n_selected": 995,
-                   "sum_weight": 1.0, "mean_weight": 1.0, "p50_weight": 1.0,
-                   "p90_weight": 1.0, "p99_weight": 1.0},
-        out_of_sample={"mean_are": 0.2, "median_are": 0.1, "max_are": 0.4, "n": 5,
-                       "by_family": {}, "by_geography": {}},
-        run=SimpleNamespace(runtime_s=12.0, l0_lambda=1e-3, l2_lambda=1e-4, final_loss=0.4),
+        method="informed_l0",
+        seed=0,
+        budget_requested=1000,
+        budget_achieved=995,
+        holdout_type="fixed_family",
+        fold=-1,
+        in_sample={
+            "mean_are": 0.5,
+            "median_are": 0.1,
+            "max_are": 9.0,
+            "n": 10,
+            "mean_are_ex_degenerate": 0.08,
+            "n_degenerate": 3,
+            "by_family": {},
+            "by_geography": {},
+            "ess": 50.0,
+            "max_weight": 100.0,
+            "n_selected": 995,
+            "sum_weight": 1.0,
+            "mean_weight": 1.0,
+            "p50_weight": 1.0,
+            "p90_weight": 1.0,
+            "p99_weight": 1.0,
+        },
+        out_of_sample={
+            "mean_are": 0.2,
+            "median_are": 0.1,
+            "max_are": 0.4,
+            "n": 5,
+            "by_family": {},
+            "by_geography": {},
+        },
+        run=SimpleNamespace(
+            runtime_s=12.0, l0_lambda=1e-3, l2_lambda=1e-4, final_loss=0.4
+        ),
     )
-    overall_in = {(r["metric"], r["value"]) for r in rows
-                  if r["scope"] == "overall" and r["split"] == "in_sample"}
+    overall_in = {
+        (r["metric"], r["value"])
+        for r in rows
+        if r["scope"] == "overall" and r["split"] == "in_sample"
+    }
     assert ("mean_are_ex_degenerate", 0.08) in overall_in
     assert ("n_degenerate", 3.0) in overall_in
 
@@ -455,14 +571,24 @@ def test_summarize_run_writes_readable_tables(tmp_path):
                     "ess": 25,
                     "max_weight": 1000,
                     "by_family": {
-                        "irs_soi": {"n": 2, "mean_are": 0.1, "median_are": 0.05, "max_are": 0.2}
+                        "irs_soi": {
+                            "n": 2,
+                            "mean_are": 0.1,
+                            "median_are": 0.05,
+                            "max_are": 0.2,
+                        }
                     },
                 },
                 "out_of_sample": {
                     "mean_are": 0.2,
                     "median_are": 0.15,
                     "by_family": {
-                        "cbo": {"n": 1, "mean_are": 0.2, "median_are": 0.15, "max_are": 0.2}
+                        "cbo": {
+                            "n": 1,
+                            "mean_are": 0.2,
+                            "median_are": 0.15,
+                            "max_are": 0.2,
+                        }
                     },
                 },
             }
@@ -484,9 +610,23 @@ def test_method_summary_and_table_rendering():
     frame, targets = _toy()
     fit, held = holdout.split_targets(targets, holdout_frac=0.34, seed=1)
 
-    l0 = run_l0(frame, fit, target_records=60, seed=0, epochs=120, learning_rate=0.15, mass="free")
+    l0 = run_l0(
+        frame,
+        fit,
+        target_records=60,
+        seed=0,
+        epochs=120,
+        learning_rate=0.15,
+        mass="free",
+    )
     dense = run_dense_then_sample(
-        frame, fit, n_sample=l0.n_selected, seed=0, epochs=120, learning_rate=0.15, mass="free",
+        frame,
+        fit,
+        n_sample=l0.n_selected,
+        seed=0,
+        epochs=120,
+        learning_rate=0.15,
+        mass="free",
     )
 
     summaries = {}
@@ -668,13 +808,19 @@ def test_production_us_fiscal_target_loss_imports_populace_helper():
     # Reuses Populace's production rule: sqrt(value) within the amount basis.
     assert np.isclose(weights[1] / weights[0], 2.0)
     # production_us_fiscal inherits Populace's production cap (1.0), not the generic 10.0
-    assert target_loss.resolve_target_loss_cap(
-        target_loss.PRODUCTION_US_FISCAL,
-        None,
-    ) == 1.0
+    assert (
+        target_loss.resolve_target_loss_cap(
+            target_loss.PRODUCTION_US_FISCAL,
+            None,
+        )
+        == 1.0
+    )
     assert target_loss.resolve_target_loss_cap(target_loss.UNIFORM, None) == 10.0
     # an explicit cap always wins over the per-weighting default
-    assert target_loss.resolve_target_loss_cap(target_loss.PRODUCTION_US_FISCAL, 10.0) == 10.0
+    assert (
+        target_loss.resolve_target_loss_cap(target_loss.PRODUCTION_US_FISCAL, 10.0)
+        == 10.0
+    )
     assert target_loss.target_loss_weight_summary(weights)["kind"] == "provided"
 
 
@@ -709,10 +855,14 @@ def test_deal_families_into_folds_is_leak_free_and_covers():
 
 def test_deal_families_into_folds_balances_and_is_deterministic():
     families = [f for fam in ("a", "b", "c", "d", "e", "f") for f in (fam, fam)]  # 6x2
-    folds = holdout.deal_families_into_folds(families, n_folds=3, seed=0, balance_by="target_count")
+    folds = holdout.deal_families_into_folds(
+        families, n_folds=3, seed=0, balance_by="target_count"
+    )
     assert sorted(len(fold) for fold in folds) == [4, 4, 4]  # evenly balanced
     # Deterministic for a fixed seed.
-    again = holdout.deal_families_into_folds(families, n_folds=3, seed=0, balance_by="target_count")
+    again = holdout.deal_families_into_folds(
+        families, n_folds=3, seed=0, balance_by="target_count"
+    )
     assert folds == again
 
 
@@ -726,8 +876,7 @@ def test_deal_families_into_folds_rejects_too_many_folds():
 def test_family_grouped_folds_excludes_validation_only_and_rotates():
     families = ["soi", "soi", "soi", "pep", "pep", "jct", "jct", "cbo", "cbo", "snap"]
     targets = [
-        Target(name=f"{fam}_{i}", entity="household",
-                measure="is_renter", value=1.0)
+        Target(name=f"{fam}_{i}", entity="household", measure="is_renter", value=1.0)
         for i, fam in enumerate(families)
     ]
     registry = SimpleNamespace(
@@ -759,10 +908,21 @@ def test_calibrate_dense_then_sample_matches_run_dense_then_sample():
     """The cached dense fit + sample reproduces the single-shot path exactly."""
     frame, targets = _toy()
     direct = run_dense_then_sample(
-        frame, targets, n_sample=40, seed=0, epochs=80, learning_rate=0.15, mass="free",
+        frame,
+        targets,
+        n_sample=40,
+        seed=0,
+        epochs=80,
+        learning_rate=0.15,
+        mass="free",
     )
     dense, _runtime = calibrate_dense(
-        frame, targets, seed=0, epochs=80, learning_rate=0.15, mass="free",
+        frame,
+        targets,
+        seed=0,
+        epochs=80,
+        learning_rate=0.15,
+        mass="free",
     )
     cached = sample_from_dense(dense, n_sample=40, seed=0)
 
@@ -781,26 +941,64 @@ def _synthetic_long_rows():
         for budget in (1000, 2000):
             for seed in (0, 1, 2):
                 in_stats = {
-                    "mean_are": base, "median_are": base * 0.5, "max_are": base * 3, "n": 100,
-                    "by_family": {"soi": {"mean_are": base, "median_are": base, "max_are": base, "n": 80},
-                                  "snap": {"mean_are": base * 2, "median_are": base, "max_are": base * 4, "n": 20}},
-                    "by_geography": {"national": {"mean_are": base, "median_are": base, "max_are": base, "n": 10}},
-                    "ess": 500.0, "max_weight": 1000.0, "n_selected": budget,
-                    "sum_weight": 1e6, "mean_weight": 2.0,
-                    "p50_weight": 1.0, "p90_weight": 2.0, "p99_weight": 3.0,
+                    "mean_are": base,
+                    "median_are": base * 0.5,
+                    "max_are": base * 3,
+                    "n": 100,
+                    "by_family": {
+                        "soi": {
+                            "mean_are": base,
+                            "median_are": base,
+                            "max_are": base,
+                            "n": 80,
+                        },
+                        "snap": {
+                            "mean_are": base * 2,
+                            "median_are": base,
+                            "max_are": base * 4,
+                            "n": 20,
+                        },
+                    },
+                    "by_geography": {
+                        "national": {
+                            "mean_are": base,
+                            "median_are": base,
+                            "max_are": base,
+                            "n": 10,
+                        }
+                    },
+                    "ess": 500.0,
+                    "max_weight": 1000.0,
+                    "n_selected": budget,
+                    "sum_weight": 1e6,
+                    "mean_weight": 2.0,
+                    "p50_weight": 1.0,
+                    "p90_weight": 2.0,
+                    "p99_weight": 3.0,
                 }
                 # Small per-seed jitter keeps the L0-vs-random difference negative
                 # with low (non-zero) variance, so across 3 seeds the paired CI
                 # excludes zero and the t-test has something to chew on.
                 bump = 0.0005 if method == "informed_l0" else 0.001
                 out_stats = {**in_stats, "mean_are": base + 0.05 + bump * seed}
-                run = SimpleNamespace(runtime_s=10.0 * (1 if method == "informed_l0" else 0.1),
-                                      l0_lambda=1e-3, final_loss=0.5)
-                rows.extend(aggregate.rows_from_run(
-                    method=method, seed=seed, budget_requested=budget, budget_achieved=budget - 5,
-                    holdout_type="fixed_family", fold=-1,
-                    in_sample=in_stats, out_of_sample=out_stats, run=run,
-                ))
+                run = SimpleNamespace(
+                    runtime_s=10.0 * (1 if method == "informed_l0" else 0.1),
+                    l0_lambda=1e-3,
+                    final_loss=0.5,
+                )
+                rows.extend(
+                    aggregate.rows_from_run(
+                        method=method,
+                        seed=seed,
+                        budget_requested=budget,
+                        budget_achieved=budget - 5,
+                        holdout_type="fixed_family",
+                        fold=-1,
+                        in_sample=in_stats,
+                        out_of_sample=out_stats,
+                        run=run,
+                    )
+                )
     return rows
 
 
@@ -850,31 +1048,58 @@ def _synthetic_rotation_rows():
                 "p90_weight": 1.0,
                 "p99_weight": 1.0,
             }
-            rows.extend(aggregate.rows_from_run(
-                method="informed_l0",
-                seed=seed,
-                budget_requested=1000,
-                budget_achieved=995 + fold,
-                holdout_type="rotation",
-                fold=fold,
-                in_sample=in_stats,
-                out_of_sample=out_stats,
-                run=SimpleNamespace(runtime_s=1.0, l0_lambda=1e-3, final_loss=0.1),
-            ))
+            rows.extend(
+                aggregate.rows_from_run(
+                    method="informed_l0",
+                    seed=seed,
+                    budget_requested=1000,
+                    budget_achieved=995 + fold,
+                    holdout_type="rotation",
+                    fold=fold,
+                    in_sample=in_stats,
+                    out_of_sample=out_stats,
+                    run=SimpleNamespace(runtime_s=1.0, l0_lambda=1e-3, final_loss=0.1),
+                )
+            )
     return rows
 
 
 def test_rows_from_run_emit_overall_family_geo_and_run_rows():
     rows = aggregate.rows_from_run(
-        method="informed_l0", seed=0, budget_requested=1000, budget_achieved=995,
-        holdout_type="fixed_family", fold=-1,
-        in_sample={"mean_are": 0.1, "median_are": 0.05, "max_are": 0.3, "n": 10,
-                   "by_family": {"soi": {"mean_are": 0.1, "median_are": 0.1, "max_are": 0.1, "n": 8}},
-                   "by_geography": {"national": {"mean_are": 0.1, "median_are": 0.1, "max_are": 0.1, "n": 2}},
-                   "ess": 50.0, "max_weight": 100.0, "n_selected": 995,
-                   "sum_weight": 1.0, "mean_weight": 1.0, "p50_weight": 1.0, "p90_weight": 1.0, "p99_weight": 1.0},
-        out_of_sample={"mean_are": 0.2, "median_are": 0.1, "max_are": 0.4, "n": 5,
-                       "by_family": {}, "by_geography": {}},
+        method="informed_l0",
+        seed=0,
+        budget_requested=1000,
+        budget_achieved=995,
+        holdout_type="fixed_family",
+        fold=-1,
+        in_sample={
+            "mean_are": 0.1,
+            "median_are": 0.05,
+            "max_are": 0.3,
+            "n": 10,
+            "by_family": {
+                "soi": {"mean_are": 0.1, "median_are": 0.1, "max_are": 0.1, "n": 8}
+            },
+            "by_geography": {
+                "national": {"mean_are": 0.1, "median_are": 0.1, "max_are": 0.1, "n": 2}
+            },
+            "ess": 50.0,
+            "max_weight": 100.0,
+            "n_selected": 995,
+            "sum_weight": 1.0,
+            "mean_weight": 1.0,
+            "p50_weight": 1.0,
+            "p90_weight": 1.0,
+            "p99_weight": 1.0,
+        },
+        out_of_sample={
+            "mean_are": 0.2,
+            "median_are": 0.1,
+            "max_are": 0.4,
+            "n": 5,
+            "by_family": {},
+            "by_geography": {},
+        },
         run=SimpleNamespace(runtime_s=12.0, l0_lambda=1e-3, final_loss=0.4),
     )
     scopes = {(r["scope"], r["split"], r["metric"]) for r in rows}
@@ -895,8 +1120,12 @@ def test_frontier_and_paired_aggregation():
     assert (oos["n_seeds"] == 3).all()
     # informed_l0 sits below random_reweight out-of-sample at every budget.
     for budget in (1000, 2000):
-        l0 = oos[(oos["method"] == "informed_l0") & (oos["budget_requested"] == budget)]["mean_are_mean"].iloc[0]
-        rw = oos[(oos["method"] == "random_reweight") & (oos["budget_requested"] == budget)]["mean_are_mean"].iloc[0]
+        l0 = oos[
+            (oos["method"] == "informed_l0") & (oos["budget_requested"] == budget)
+        ]["mean_are_mean"].iloc[0]
+        rw = oos[
+            (oos["method"] == "random_reweight") & (oos["budget_requested"] == budget)
+        ]["mean_are_mean"].iloc[0]
         assert l0 < rw
         assert oos["budget_achieved"].notna().all()
 
@@ -950,17 +1179,43 @@ def test_macro_average_upweights_small_families():
 def _l0_only_rows(l2_values):
     rows = []
     for l2, ess, oos in l2_values:
-        in_stats = {"mean_are": 0.1, "median_are": 0.05, "max_are": 1.0, "n": 50,
-                    "by_family": {}, "by_geography": {}, "ess": ess, "max_weight": 1e6 / (1 + l2 * 1e6),
-                    "n_selected": 10000, "sum_weight": 1.0, "mean_weight": 1.0,
-                    "p50_weight": 1.0, "p90_weight": 1.0, "p99_weight": 1.0}
-        out_stats = {"mean_are": oos, "median_are": oos * 0.5, "max_are": oos * 2, "n": 30,
-                     "by_family": {}, "by_geography": {}}
+        in_stats = {
+            "mean_are": 0.1,
+            "median_are": 0.05,
+            "max_are": 1.0,
+            "n": 50,
+            "by_family": {},
+            "by_geography": {},
+            "ess": ess,
+            "max_weight": 1e6 / (1 + l2 * 1e6),
+            "n_selected": 10000,
+            "sum_weight": 1.0,
+            "mean_weight": 1.0,
+            "p50_weight": 1.0,
+            "p90_weight": 1.0,
+            "p99_weight": 1.0,
+        }
+        out_stats = {
+            "mean_are": oos,
+            "median_are": oos * 0.5,
+            "max_are": oos * 2,
+            "n": 30,
+            "by_family": {},
+            "by_geography": {},
+        }
         rows += aggregate.rows_from_run(
-            method="informed_l0", seed=0, budget_requested=10000, budget_achieved=9900,
-            l2_lambda=l2, holdout_type="fixed_family", fold=-1,
-            in_sample=in_stats, out_of_sample=out_stats,
-            run=SimpleNamespace(runtime_s=1.0, l0_lambda=1e-3, l2_lambda=l2, final_loss=0.1),
+            method="informed_l0",
+            seed=0,
+            budget_requested=10000,
+            budget_achieved=9900,
+            l2_lambda=l2,
+            holdout_type="fixed_family",
+            fold=-1,
+            in_sample=in_stats,
+            out_of_sample=out_stats,
+            run=SimpleNamespace(
+                runtime_s=1.0, l0_lambda=1e-3, l2_lambda=l2, final_loss=0.1
+            ),
         )
     return rows
 
@@ -972,10 +1227,14 @@ def test_operability_table_traces_l2_frontier():
     assert op.loc[op["l2_lambda"] == 0.0, "ess"].iloc[0] == 1000.0
     assert op.loc[op["l2_lambda"] == 1e-3, "ess"].iloc[0] == 3000.0
     # Accuracy degrades and max weight falls as l2 (and ESS) rise -- the trade-off.
-    assert (op.loc[op["l2_lambda"] == 1e-3, "oos_mean_are"].iloc[0]
-            > op.loc[op["l2_lambda"] == 0.0, "oos_mean_are"].iloc[0])
-    assert (op.loc[op["l2_lambda"] == 1e-3, "max_weight"].iloc[0]
-            < op.loc[op["l2_lambda"] == 0.0, "max_weight"].iloc[0])
+    assert (
+        op.loc[op["l2_lambda"] == 1e-3, "oos_mean_are"].iloc[0]
+        > op.loc[op["l2_lambda"] == 0.0, "oos_mean_are"].iloc[0]
+    )
+    assert (
+        op.loc[op["l2_lambda"] == 1e-3, "max_weight"].iloc[0]
+        < op.loc[op["l2_lambda"] == 0.0, "max_weight"].iloc[0]
+    )
 
 
 def test_paired_method_diff_handles_l0_only_sweep():
@@ -991,8 +1250,12 @@ def test_mean_ci_and_extreme_counts():
     assert one == (0.5, 0.5, 0.5)
 
     counts = aggregate.extreme_are_counts(
-        [{"absolute_relative_error": 0.5}, {"absolute_relative_error": 2.0},
-         {"absolute_relative_error": None}, {"absolute_relative_error": 10.0}]
+        [
+            {"absolute_relative_error": 0.5},
+            {"absolute_relative_error": 2.0},
+            {"absolute_relative_error": None},
+            {"absolute_relative_error": 10.0},
+        ]
     )
     assert counts["n_scored"] == 3.0
     assert counts["n_are_gt_1"] == 2.0

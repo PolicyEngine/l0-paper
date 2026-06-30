@@ -13,6 +13,7 @@ interface SlideshowViewerProps {
 function SlideshowViewerClient({ config }: SlideshowViewerProps) {
   const searchParams = useSearchParams();
   const slides = useMemo(() => config.slides, [config.slides]);
+  const isExport = searchParams.get("export") === "1";
   const [currentSlide, setCurrentSlide] = useState(() => {
     const initialSlide = Number.parseInt(searchParams.get("slide") || "0", 10);
     return Math.max(0, Math.min(initialSlide, slides.length - 1));
@@ -82,7 +83,7 @@ function SlideshowViewerClient({ config }: SlideshowViewerProps) {
       >
         <div className="slide-active">{currentSlideElement}</div>
 
-        {!isFullscreen && (
+        {!isFullscreen && !isExport && (
           <div className="pointer-events-none fixed bottom-0 left-0 right-0 z-50 flex h-18 items-center justify-end gap-4 px-8 text-white">
             <button
               aria-label="Previous slide"
