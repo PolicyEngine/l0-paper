@@ -9,6 +9,8 @@ import {
   GeneralizationSlide,
   L0MathSlide,
   LedgerSlide,
+  LocalAreaModelingSlide,
+  LongwiseGeographySlide,
   LouizosFoundationSlide,
   MainFrontierSlide,
   NestedTargetsSlide,
@@ -44,6 +46,8 @@ export const l0Ima2026Config: SlideshowConfig = {
     RoadmapSlide,
     // 1 · Motivation
     PolicyGoalSlide,
+    LocalAreaModelingSlide,
+    LongwiseGeographySlide,
     NestedTargetsSlide,
     BuildBigThenPruneSlide,
     // 2 · Data engine

@@ -39,6 +39,10 @@ _COMMANDS: dict[str, tuple[str, str]] = {
         "l0_paper.cli.merge_runs",
         "Merge compatible sweep shard directories into one run.",
     ),
+    "fixed-lambda": (
+        "l0_paper.cli.fixed_lambda",
+        "Fixed-penalty L0 pilot matched to its achieved retained count.",
+    ),
     "paper": ("l0_paper.cli.paper", "Run the current-paper reproduction workflow."),
     "build-candidate": (
         "l0_paper.cli.build_candidate",

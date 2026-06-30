@@ -72,7 +72,7 @@ def run_l0(
     fit_targets: TargetSet,
     *,
     weight_entity: str = "household",
-    target_records: int,
+    target_records: int | None,
     seed: int = 0,
     epochs: int = DEFAULT_EPOCHS,
     learning_rate: float = DEFAULT_LEARNING_RATE,
@@ -87,7 +87,11 @@ def run_l0(
     target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
     progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> RunResult:
-    """Condition A: informed L0 sampling with Hard-Concrete gates at a budget.
+    """Condition A: informed L0 sampling with Hard-Concrete gates.
+
+    When ``target_records`` is provided, Populace searches for an L0 penalty that
+    reaches the requested retained-record count. When it is ``None``, the supplied
+    ``l0_lambda`` is used directly as a fixed sparsity penalty.
 
     ``l2_lambda`` is passed through to Populace's soft concentration penalty.
     """
@@ -158,6 +162,7 @@ def run_l0_post_refit(
     max_weight_ratio: float | None = None,
     target_loss_weights: np.ndarray | None = None,
     target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
+    progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> RunResult:
     """Post-selection refit for an informed-L0 subset.
 
@@ -222,6 +227,7 @@ def run_l0_post_refit(
         seed=fit_seed,
         target_loss_weights=target_loss_weights,
         target_loss_cap=target_loss_cap,
+        progress_callback=progress_callback,
     )
 
     def _to_full(values: np.ndarray) -> np.ndarray:
@@ -454,6 +460,7 @@ def calibrate_dense(
     max_weight_ratio: float | None = None,
     target_loss_weights: np.ndarray | None = None,
     target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
+    progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> tuple[Any, float]:
     """Dense calibration (gates off); returns ``(calibration_result, runtime_s)``.
 
@@ -477,6 +484,7 @@ def calibrate_dense(
         seed=seed,
         target_loss_weights=target_loss_weights,
         target_loss_cap=target_loss_cap,
+        progress_callback=progress_callback,
     )
     return dense, time.perf_counter() - start
 
@@ -559,6 +567,7 @@ def run_dense_then_sample(
     sample_seed: int | None = None,
     replace: bool = True,
     reweight: str = "equal_mass",
+    progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> RunResult:
     """Condition B: dense calibration (gates off), then weighted random sampling."""
     dense, dense_runtime = calibrate_dense(
@@ -572,6 +581,7 @@ def run_dense_then_sample(
         max_weight_ratio=max_weight_ratio,
         target_loss_weights=target_loss_weights,
         target_loss_cap=target_loss_cap,
+        progress_callback=progress_callback,
     )
     return sample_from_dense(
         dense,
@@ -601,6 +611,7 @@ def run_random_then_reweight(
     target_loss_weights: np.ndarray | None = None,
     target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
     sample_seed: int | None = None,
+    progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> RunResult:
     """Condition C: uniform random subset, then gradient-descent reweight.
 
@@ -655,6 +666,7 @@ def run_random_then_reweight(
         seed=seed,
         target_loss_weights=target_loss_weights,
         target_loss_cap=target_loss_cap,
+        progress_callback=progress_callback,
     )
 
     # Map the subset's fitted weights back onto the full candidate universe

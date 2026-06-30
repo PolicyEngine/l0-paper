@@ -52,7 +52,8 @@ export function RoadmapSlide() {
         <BulletList
           className="mt-10 max-w-5xl"
           items={[
-            "The goal: granular, live policy analysis across geographies.",
+            "The institutional setting: PolicyEngine in the United States and United Kingdom.",
+            "The modeling problem: local-area weights worked in the UK, but not as a direct US template.",
             "The data engine: Ledger facts and the Populace sampling frame.",
             "Why a faithful candidate dataset grows too large to ship.",
             "L0 regularization, from Louizos et al. to record selection.",
@@ -77,8 +78,9 @@ export function PolicyGoalSlide() {
             Policy questions arrive at every level of geography
           </SlideTitle>
           <p className="mt-8 max-w-2xl text-2xl leading-snug text-slate-600">
-            PolicyEngine runs live tax-and-benefit simulations. The same reform question is asked
-            nationally, by state, and by congressional district.
+            PolicyEngine runs live tax-and-benefit simulations in the United States and the
+            United Kingdom. Analysts ask the same reform question nationally, by state or region,
+            and by local constituency.
           </p>
           <p className="mt-6 max-w-2xl text-xl leading-snug text-slate-500">
             Each answer needs microdata that represents that geography, not a national average
@@ -86,6 +88,84 @@ export function PolicyGoalSlide() {
           </p>
         </div>
         <GeographyHierarchy subnote="Levels shown are the United States; the same nesting applies to any country with its own subnational divisions." />
+      </div>
+    </Slide>
+  );
+}
+
+export function LocalAreaModelingSlide() {
+  return (
+    <Slide>
+      <div className="flex h-full flex-col justify-center">
+        <SlideTitle kicker="Why US pruning is different">
+          The UK local-area approach did not transfer cleanly
+        </SlideTitle>
+        <div className="mt-9 grid grid-cols-3 gap-5">
+          <ContentCard title="PolicyEngine scope" accent="teal">
+            <p className="text-xl leading-snug text-slate-600">
+              PolicyEngine maintains open-source microsimulation models for the US and UK, with
+              applications that need national and local estimates from the same policy logic.
+            </p>
+          </ContentCard>
+          <ContentCard title="UK first implementation" accent="slate">
+            <p className="text-xl leading-snug text-slate-600">
+              Our first local-area system kept one national microdataset and built a matrix of
+              weights by parliamentary constituency and local authority.
+            </p>
+          </ContentCard>
+          <ContentCard title="The limitation" accent="amber">
+            <p className="text-xl leading-snug text-slate-600">
+              Separate area-weight columns can disagree across overlapping geographies. The
+              inconsistency gets worse as users ask for more geographic breakdowns.
+            </p>
+          </ContentCard>
+        </div>
+        <p className="mt-8 max-w-6xl text-2xl leading-snug text-slate-600">
+          In the US, users need state, county, congressional-district, and state-legislative
+          views. Policy also varies locally, mostly by state and sometimes by county, so local
+          geography has to live on the records themselves.
+        </p>
+      </div>
+    </Slide>
+  );
+}
+
+export function LongwiseGeographySlide() {
+  return (
+    <Slide>
+      <div className="flex h-full flex-col justify-center">
+        <SlideTitle kicker="US design choice">
+          Go longwise: assign records to the finest geography
+        </SlideTitle>
+        <div className="mt-9 grid grid-cols-4 gap-4">
+          <ContentCard title="1. Place households" accent="teal">
+            <p className="text-lg leading-snug text-slate-600">
+              Assign each household a Census block, the finest local identifier in the build.
+            </p>
+          </ContentCard>
+          <ContentCard title="2. Derive geographies" accent="slate">
+            <p className="text-lg leading-snug text-slate-600">
+              Build state, county, congressional-district, and legislative-district views from the
+              block assignment.
+            </p>
+          </ContentCard>
+          <ContentCard title="3. Oversaturate support" accent="amber">
+            <p className="text-lg leading-snug text-slate-600">
+              Synthesize many candidate households because the source survey lacks true local
+              identifiers.
+            </p>
+          </ContentCard>
+          <ContentCard title="4. Calibrate and prune" accent="teal">
+            <p className="text-lg leading-snug text-slate-600">
+              Use targets to decide which synthetic placements survive in a deployable dataset.
+            </p>
+          </ContentCard>
+        </div>
+        <p className="mt-8 max-w-6xl text-2xl leading-snug text-slate-600">
+          The block assignment makes every geography internally consistent, but it creates a large
+          candidate universe with many plausible household-to-place assignments. L0 is a way to prune
+          that universe using the same target loss that calibrates it.
+        </p>
       </div>
     </Slide>
   );
