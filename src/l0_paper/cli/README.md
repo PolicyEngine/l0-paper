@@ -199,6 +199,27 @@ Every sweep cell writes a compressed full-length weight artifact under
 `weights/` plus `weights_manifest.csv`, so later report metrics can be
 reconstructed against the frozen precalibration frame and registry.
 
+For the full production target surface, the fast frontier probe is
+`l0 fixed-lambda`: it lets L0 choose the retained record count, then matches the
+sample-first baselines to that count. Prefer `--l0-lambda-share` over raw
+`--l0-lambda` for these runs. The share is scaled by the candidate pool:
+
+```text
+objective = target_loss + l0_lambda_share * expected_open_records / candidate_records
+```
+
+The command converts that to Populace's raw per-record `l0_lambda` internally and
+records both values in `fixed_lambda_manifest.json`.
+
+```bash
+uv run --extra data l0 fixed-lambda \
+    --reuse-precalibration runs/full-surface/precalibration \
+    --out runs/fixed-lambda-share-0p5 \
+    --l0-lambda-share 0.5 \
+    --epochs 1500 \
+    --methods informed_l0 informed_l0_refit random_reweight dense_sample
+```
+
 Holdout note: the production-surface frontier should usually use
 `--full-target-surface`, fitting every compiled target and reporting the
 penalty-free Populace calibration loss. Holdout is a separate robustness

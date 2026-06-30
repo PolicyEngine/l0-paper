@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 
 from l0_paper import precalibration
-from l0_paper.cli import _COMMANDS, paper, sweep
+from l0_paper.cli import _COMMANDS, fixed_lambda, paper, sweep
 from l0_paper.cli.demo import run_demo
 from l0_paper.cli.merge_runs import merge_runs
 from l0_paper.experiments import aggregate, crunch
@@ -119,6 +119,36 @@ def test_paper_full_target_surface_overrides_holdout_defaults():
     assert args.holdout_frac == 0.0
     assert args.fit_validation_only is True
     assert args.rotation_folds == 0
+
+
+def test_fixed_lambda_share_converts_to_raw_populace_penalty():
+    raw, share = fixed_lambda._resolve_l0_lambda(
+        raw_l0_lambda=None, l0_lambda_share=0.5, candidate_records=200
+    )
+
+    assert raw == pytest.approx(0.0025)
+    assert share == pytest.approx(0.5)
+
+
+def test_fixed_lambda_raw_reports_equivalent_share():
+    raw, share = fixed_lambda._resolve_l0_lambda(
+        raw_l0_lambda=1e-3, l0_lambda_share=None, candidate_records=200
+    )
+
+    assert raw == pytest.approx(1e-3)
+    assert share == pytest.approx(0.2)
+
+
+def test_fixed_lambda_requires_one_l0_penalty_scale(tmp_path):
+    base_args = ["--reuse-precalibration", str(tmp_path), "--out", str(tmp_path / "out")]
+
+    with pytest.raises(SystemExit):
+        fixed_lambda._parse_args(base_args)
+
+    with pytest.raises(SystemExit):
+        fixed_lambda._parse_args(
+            [*base_args, "--l0-lambda", "0.001", "--l0-lambda-share", "0.5"]
+        )
 
 
 def test_paper_parses_congressional_district_target_options(tmp_path):

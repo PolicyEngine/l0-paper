@@ -4,7 +4,10 @@
 This is the quick research loop for the full target-surface question: choose one
 ``lambda_L0``, let Populace's hard-concrete calibrator decide the retained record
 count, then compare post-L0 refit and sample-first reweighting at that achieved
-count. It deliberately skips the outer budget bisection used by ``l0 sweep``.
+count. Prefer ``--l0-lambda-share`` for the full target surface: it sets the
+sparsity penalty as a share of the candidate pool, then converts to Populace's
+raw per-record ``l0_lambda``. The command deliberately skips the outer budget
+bisection used by ``l0 sweep``.
 """
 
 from __future__ import annotations
@@ -84,7 +87,21 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Frozen precalibration directory built by `l0 paper --skip-sweep`.",
     )
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--l0-lambda", type=float, required=True)
+    l0_group = parser.add_mutually_exclusive_group(required=True)
+    l0_group.add_argument(
+        "--l0-lambda",
+        type=float,
+        help="Raw Populace per-record L0 penalty.",
+    )
+    l0_group.add_argument(
+        "--l0-lambda-share",
+        type=float,
+        help=(
+            "Candidate-pool-normalized L0 penalty. The objective is "
+            "target_loss + share * expected_open_records / candidate_records, "
+            "so the raw Populace l0_lambda is share / candidate_records."
+        ),
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
     parser.add_argument("--learning-rate", type=float, default=DEFAULT_LEARNING_RATE)
@@ -135,8 +152,14 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Run identifier recorded in the manifest.",
     )
     args = parser.parse_args(argv)
-    if args.l0_lambda <= 0.0 or not np.isfinite(args.l0_lambda):
+    if args.l0_lambda is not None and (
+        args.l0_lambda <= 0.0 or not np.isfinite(args.l0_lambda)
+    ):
         parser.error("--l0-lambda must be positive and finite")
+    if args.l0_lambda_share is not None and (
+        args.l0_lambda_share <= 0.0 or not np.isfinite(args.l0_lambda_share)
+    ):
+        parser.error("--l0-lambda-share must be positive and finite")
     if args.epochs < 1:
         parser.error("--epochs must be >= 1")
     if args.progress_every < 1:
@@ -144,6 +167,28 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     if "informed_l0_refit" in args.methods and "informed_l0" not in args.methods:
         parser.error("--methods informed_l0_refit requires informed_l0")
     return args
+
+
+def _resolve_l0_lambda(
+    *,
+    raw_l0_lambda: float | None,
+    l0_lambda_share: float | None,
+    candidate_records: int,
+) -> tuple[float, float]:
+    """Return raw Populace lambda and candidate-pool-normalized share."""
+    if candidate_records < 1:
+        raise ValueError("candidate_records must be positive")
+    if raw_l0_lambda is not None:
+        raw = float(raw_l0_lambda)
+        if raw <= 0.0 or not np.isfinite(raw):
+            raise ValueError("raw_l0_lambda must be positive and finite")
+        return raw, raw * candidate_records
+    if l0_lambda_share is not None:
+        share = float(l0_lambda_share)
+        if share <= 0.0 or not np.isfinite(share):
+            raise ValueError("l0_lambda_share must be positive and finite")
+        return share / candidate_records, share
+    raise ValueError("one of raw_l0_lambda or l0_lambda_share is required")
 
 
 def _progress_logger(label: str, *, every: int):
@@ -327,6 +372,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
     precal_dir = args.reuse_precalibration.expanduser().resolve()
     frame, registry = load_precalibration_dataset(precal_dir)
+    candidate_records = int(frame.n(args.weight_entity))
+    l0_lambda_raw, l0_lambda_share = _resolve_l0_lambda(
+        raw_l0_lambda=args.l0_lambda,
+        l0_lambda_share=args.l0_lambda_share,
+        candidate_records=candidate_records,
+    )
     precal_manifest = json.loads(
         (precal_dir / PRECALIBRATION_MANIFEST_JSON).read_text()
     )
@@ -340,9 +391,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     run_id = args.run_id or f"fixed-lambda-{datetime.now(UTC):%Y%m%dT%H%M%SZ}"
 
     print(
-        f"Fixed-lambda pilot: {frame.n(args.weight_entity):,} "
+        f"Fixed-lambda pilot: {candidate_records:,} "
         f"{args.weight_entity} records, {len(targets):,} target(s), "
-        f"lambda_L0={args.l0_lambda:g}, epochs={args.epochs:,}, "
+        f"lambda_L0_raw={l0_lambda_raw:g}, "
+        f"lambda_L0_share={l0_lambda_share:g}, epochs={args.epochs:,}, "
         f"methods={args.methods}.",
         flush=True,
     )
@@ -376,7 +428,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         learning_rate=args.learning_rate,
         mass=args.mass,
         max_weight_ratio=args.max_weight_ratio,
-        l0_lambda=args.l0_lambda,
+        l0_lambda=l0_lambda_raw,
         l2_lambda=args.l2_lambda,
         init_mean=args.init_mean,
         temperature=args.temperature,
@@ -537,6 +589,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             "manifest": precal_manifest,
         },
         "args": _jsonable(vars(args)),
+        "l0_penalty": {
+            "raw_l0_lambda": float(l0_lambda_raw),
+            "l0_lambda_share": float(l0_lambda_share),
+            "scale": (
+                "target_loss + l0_lambda_share * "
+                "expected_open_records / candidate_records"
+            ),
+            "candidate_records": int(candidate_records),
+        },
         "frontier_split": {
             "full_target_surface": True,
             "fit": len(targets),
