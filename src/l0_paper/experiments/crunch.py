@@ -8,11 +8,12 @@ weighting, and the choice of mean vs. median are *reporting* decisions made here
 rather than baked into a run.
 
 In particular the calibration objective -- the capped, weighted MAPE of Equation 8
-*less the penalties* -- can be evaluated out of sample at any cap without re-running
-the experiment. Populace's US-fiscal production build caps at ``c = 1``
-(``US_FISCAL_TARGET_LOSS_CAP``); the paper's runs optimised at ``c = 10``. The
-*optimisation* cap shapes the fitted weights, so a production-faithful fit still needs
-a rerun, but the *reported* objective can be crunched at either cap from one file.
+*less the penalties* -- can be evaluated at any cap without re-running the
+experiment. Populace's US-fiscal production build caps at ``c = 1``
+(``US_FISCAL_TARGET_LOSS_CAP``), which is also the paper's default production
+surface run. The *optimisation* cap shapes the fitted weights, so cap
+sensitivities still require a rerun when they are interpreted as alternative fits;
+the *reported* objective can be crunched at any cap from one diagnostics file.
 """
 
 from __future__ import annotations
@@ -20,19 +21,19 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from populace.calibrate import default_target_loss_scales, relative_error_loss
+
 #: Default grouping for :func:`summarize` -- one summary row per method/split/budget
 #: (and per L2 penalty, when the sweep varied it).
 GROUP = ("method", "split", "l2_lambda", "budget_requested")
 
 
-def _scale(target_value: np.ndarray, floor: float = 1.0) -> np.ndarray:
+def _scale(target_value: np.ndarray) -> np.ndarray:
     """The objective's denominator ``s_j = max(|t_j|, floor)`` (Equation 8)."""
-    return np.maximum(np.abs(np.asarray(target_value, dtype=float)), float(floor))
+    return default_target_loss_scales(np.asarray(target_value, dtype=np.float64))
 
 
-def capped_relative_error(
-    df: pd.DataFrame, *, cap: float | None, scale_floor: float = 1.0
-) -> np.ndarray:
+def capped_relative_error(df: pd.DataFrame, *, cap: float | None) -> np.ndarray:
     """Per-target capped relative error ``min(|a - t| / max(|t|, floor), cap)``.
 
     This is the per-target term of the calibration objective (Equation 8). The
@@ -41,7 +42,7 @@ def capped_relative_error(
     """
     t = df["target_value"].to_numpy(dtype=float)
     a = df["achieved_value"].to_numpy(dtype=float)
-    s = df["scale"].to_numpy(dtype=float) if "scale" in df.columns else _scale(t, scale_floor)
+    s = df["scale"].to_numpy(dtype=float) if "scale" in df.columns else _scale(t)
     rel = np.abs(a - t) / s
     if cap is not None:
         rel = np.minimum(rel, float(cap))
@@ -51,9 +52,9 @@ def capped_relative_error(
 def raw_relative_error(df: pd.DataFrame) -> np.ndarray:
     """Per-target raw relative error ``|a - t| / |t|`` (NaN for zero-valued targets).
 
-    The uncapped, unweighted, ``|t|``-denominator metric the paper currently leads
-    with; near-zero denominators are exactly the targets that inflate its mean, which
-    is why the objective uses a floored, capped denominator instead.
+    The uncapped, unweighted, ``|t|``-denominator diagnostic. Near-zero denominators
+    are exactly the targets that inflate its mean, which is why the paper leads
+    with the floored, capped objective instead.
     """
     t = df["target_value"].to_numpy(dtype=float)
     a = df["achieved_value"].to_numpy(dtype=float)
@@ -76,21 +77,39 @@ def _weighted_mean(values: np.ndarray, weights: np.ndarray | None) -> float:
     return float((values * w).sum() / total) if total > 0 else float("nan")
 
 
+def _loss_weights(df: pd.DataFrame) -> np.ndarray | None:
+    if "loss_weight" not in df.columns:
+        return None
+    weights = df["loss_weight"].to_numpy(dtype=float)
+    return None if np.all(np.isnan(weights)) else weights
+
+
 def objective(df: pd.DataFrame, *, cap: float = 1.0) -> float:
     """Capped weighted MAPE (Equation 8, penalty-free) over the rows in ``df``.
 
     Uses ``loss_weight`` (the per-target ``omega_j``) when the column is present,
-    else falls back to an unweighted mean. Evaluate on the ``out_of_sample`` rows
-    for the objective-consistent headline. ``cap`` defaults to the production cap
-    (1.0); pass ``cap=10`` to match the paper's optimisation cap.
+    else falls back to an unweighted mean. Use the full-surface ``in_sample`` rows
+    for the main no-holdout experiment, or ``out_of_sample`` rows for supplemental
+    holdout diagnostics. ``cap`` defaults to the production cap (1.0).
     """
-    rel = capped_relative_error(df, cap=cap)
-    weights = df["loss_weight"].to_numpy(dtype=float) if "loss_weight" in df.columns else None
-    # Uniform-weighted runs store no omega (the column is all-NaN); fall back to an
-    # unweighted mean rather than propagating NaN.
-    if weights is not None and np.all(np.isnan(weights)):
-        weights = None
-    return _weighted_mean(rel, weights)
+    target = df["target_value"].to_numpy(dtype=np.float64)
+    achieved = df["achieved_value"].to_numpy(dtype=np.float64)
+    scales = (
+        df["scale"].to_numpy(dtype=np.float64)
+        if "scale" in df.columns
+        else _scale(target)
+    )
+    if cap is None:
+        return _weighted_mean(capped_relative_error(df, cap=None), _loss_weights(df))
+    return float(
+        relative_error_loss(
+            achieved,
+            target,
+            target_loss_weights=_loss_weights(df),
+            target_loss_scales=scales,
+            target_loss_cap=float(cap),
+        )
+    )
 
 
 def fraction_within(df: pd.DataFrame, *, threshold: float) -> float:

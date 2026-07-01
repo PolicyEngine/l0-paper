@@ -15,15 +15,18 @@ __pycache__/
 dist/
 build/
 
+# Presentation local state
+/presentation/.next/
+/presentation/node_modules/
+/presentation/tsconfig.tsbuildinfo
+slides.pdf
+
 # Experiment outputs (results, metrics CSVs, per-target diagnostics, figures)
 artifacts/
 benchmarks/results/
 runs/
 demo-run/
 results/
-
-# Local working / decision docs (runbooks, plans -- not part of the codebase)
-/NEXT_STEPS.md
 
 # Generated calibration-target bundles (regenerate with `l0 build-targets`)
 /data/

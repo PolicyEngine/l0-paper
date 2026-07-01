@@ -3,13 +3,17 @@ title-meta: "$L_0$ regularization for subnational microsimulation calibration"
 author-meta: "María Juaristi; Nikhil Woodruff; Ben Ogorek; Max Ghenis"
 date: ""
 bibliography: bibliography/references.bib
-cite-method: natbib
-biblio-style: plainnat
 format:
+  html:
+    cite-method: citeproc
+    link-citations: true
+    link-bibliography: true
   pdf:
     documentclass: article
     classoption: 11pt
     pdf-engine: pdflatex
+    cite-method: natbib
+    biblio-style: plainnat
     include-in-header:
       - preamble.tex
     keep-tex: true
@@ -52,10 +56,10 @@ open source at \url{https://github.com/PolicyEngine/populace}; earlier prototype
 The administrative targets are source-backed facts from PolicyEngine Ledger, open source at
 \url{https://github.com/PolicyEngine/arch-data}. The \texttt{l0-python} PyTorch package that implements
 the Hard Concrete optimizer is available at \url{https://github.com/PolicyEngine/l0-python}. The
-candidate universe used here is the public Hugging Face dataset
-\texttt{policyengine/populace-us}, snapshot \texttt{be80a14f}, file
-\texttt{populace\_us\_2024.h5}, with H5 SHA-256 beginning \texttt{f0af2519}. The
-current reproduction workflow relies on public code and generated data artifacts.
+candidate universe used here is a generated three-year pooled ASEC support artifact from \populace{}
+commit \texttt{558e46c1}, with base H5 SHA-256 beginning \texttt{ec290055}; the target facts have
+SHA-256 beginning \texttt{82cd9e87}. The current reproduction workflow relies on public code and
+generated data artifacts.
 
 \section*{Use of generative AI}
 The authors used Claude (Anthropic) and Codex (OpenAI) for code assistance and manuscript drafting.

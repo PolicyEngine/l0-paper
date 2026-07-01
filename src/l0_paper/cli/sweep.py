@@ -53,11 +53,19 @@ from time import perf_counter
 import numpy as np
 
 from l0_paper.experiments import aggregate, holdout, metrics, target_loss
-from l0_paper.experiments.artifacts import _jsonable, write_run_manifest
+from l0_paper.experiments.artifacts import (
+    _jsonable,
+    save_weight_npz,
+    write_run_manifest,
+)
 from l0_paper.experiments.conditions import (
     DEFAULT_EPOCHS,
+    DEFAULT_INIT_MEAN,
+    DEFAULT_TEMPERATURE,
+    RunResult,
     calibrate_dense,
     run_l0,
+    run_l0_post_refit,
     run_l1,
     run_random_then_reweight,
     sample_from_dense,
@@ -69,6 +77,25 @@ TARGET_DIAGNOSTICS_CSV = "target_diagnostics_long.csv"
 SWEEP_MANIFEST_JSON = "sweep_manifest.json"
 SHARD_CHECKPOINT_DIR = "shard_checkpoints"
 SHARD_MANIFEST_JSON = "shard_manifest.json"
+WEIGHTS_DIR = "weights"
+WEIGHTS_MANIFEST_CSV = "weights_manifest.csv"
+WEIGHTS_MANIFEST_COLUMNS = (
+    "method",
+    "seed",
+    "budget_requested",
+    "budget_achieved",
+    "l2_lambda",
+    "holdout_type",
+    "fold",
+    "artifact_path",
+    "weight_entity",
+    "candidate_records",
+    "n_selected",
+    "runtime_s",
+    "l0_lambda",
+    "final_loss",
+    "target_loss_cap",
+)
 
 CellKey = tuple[str, int, int, int, float]
 MethodKey = tuple[str, int, int, int, float, str]
@@ -81,7 +108,9 @@ class SplitShardResult:
     label: str
     rows: list[dict]
     diag_rows: list[dict]
+    weight_rows: list[dict]
     dense_runtimes: dict[str, float]
+
 
 _RESUME_COMPAT_ARG_KEYS = (
     "weight_entity",
@@ -89,6 +118,8 @@ _RESUME_COMPAT_ARG_KEYS = (
     "learning_rate",
     "mass",
     "max_weight_ratio",
+    "init_mean",
+    "temperature",
     "budget_iters",
     "target_loss_weighting",
     "target_loss_cap",
@@ -101,16 +132,29 @@ _RESUME_COMPAT_ARG_KEYS = (
     "rotation_seed",
     "sample_reweight",
     "sample_replace",
+    "full_target_surface",
+    "save_weights",
 )
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--reuse-precalibration", type=Path, required=True,
-                        help="Frozen pre-calibration artifact directory (built by l0 poc).")
-    parser.add_argument("--out", type=Path, required=True, help="Sweep output directory.")
-    parser.add_argument("--budgets", type=int, nargs="+", required=True,
-                        help="Record budgets (target_records) to sweep.")
+    parser.add_argument(
+        "--reuse-precalibration",
+        type=Path,
+        required=True,
+        help="Frozen pre-calibration artifact directory (built by l0 poc).",
+    )
+    parser.add_argument(
+        "--out", type=Path, required=True, help="Sweep output directory."
+    )
+    parser.add_argument(
+        "--budgets",
+        type=int,
+        nargs="+",
+        required=True,
+        help="Record budgets (target_records) to sweep.",
+    )
     parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
     parser.add_argument("--weight-entity", default="household")
 
@@ -118,59 +162,122 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
     parser.add_argument("--learning-rate", type=float, default=0.02)
     parser.add_argument("--mass", choices=("conserve", "free"), default="conserve")
-    parser.add_argument("--max-weight-ratio", type=float, default=None,
-                        help="Informed-L0 per-record hard cap: no calibrated weight may "
-                             "exceed max_weight_ratio * its INITIAL weight (clamped each "
-                             "step). Default None (uncapped). NB: with uniform-reset "
-                             "weights a small cap (e.g. 5) forbids the ~100x concentration "
-                             "the fiscal targets need and breaks L0 -- treat the cap as a "
-                             "swept axis, not a fixed default.")
-    parser.add_argument("--l2-lambdas", type=float, nargs="+", default=[0.0],
-                        help="Soft weight-concentration penalties to sweep for the "
-                             "informed-L0/Hard-Concrete condition only. Dense and "
-                             "random-reweight baselines remain unpenalized.")
-    parser.add_argument("--budget-iters", type=int, default=10,
-                        help="L0 budget-bisection iterations. Each is a FULL optimization "
-                             "re-run to hit target_records, so this is the dominant L0 "
-                             "cost multiplier. Lower (e.g. 4-5) is ~2x faster with looser "
-                             "budget matching -- fine since the frontier plots vs achieved "
-                             "budget.")
-    parser.add_argument("--target-loss-weighting",
-                        choices=target_loss.TARGET_LOSS_WEIGHTINGS,
-                        default=target_loss.PRODUCTION_US_FISCAL,
-                        help="Target-row weights used inside Populace's calibration "
-                             "loss. Default 'production_us_fiscal' imports Populace's "
-                             "production _fiscal_target_loss_weights helper; 'uniform' "
-                             "preserves the historical unweighted experiment loss.")
-    parser.add_argument("--target-loss-cap", type=float, default=None,
-                        help="Per-target cap in the calibration loss. Defaults by "
-                             "weighting: production_us_fiscal -> 1.0, uniform -> "
-                             "10.0. Pass 10.0 to reproduce the current paper runs.")
+    parser.add_argument(
+        "--init-mean",
+        type=float,
+        default=DEFAULT_INIT_MEAN,
+        help="Initial expected open probability for each Hard-Concrete L0 gate. "
+        "The historical default is 0.999; shorter full-surface pilots may need "
+        "a lower value so gates can reach exact zero within the epoch budget.",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=DEFAULT_TEMPERATURE,
+        help="Hard-Concrete gate temperature for informed_l0.",
+    )
+    parser.add_argument(
+        "--max-weight-ratio",
+        type=float,
+        default=None,
+        help="Informed-L0 per-record hard cap: no calibrated weight may "
+        "exceed max_weight_ratio * its INITIAL weight (clamped each "
+        "step). Default None (uncapped). NB: with uniform-reset "
+        "weights a small cap (e.g. 5) forbids the ~100x concentration "
+        "the fiscal targets need and breaks L0 -- treat the cap as a "
+        "swept axis, not a fixed default.",
+    )
+    parser.add_argument(
+        "--l2-lambdas",
+        type=float,
+        nargs="+",
+        default=[0.0],
+        help="Soft weight-concentration penalties to sweep for the "
+        "informed-L0/Hard-Concrete condition only. Dense and "
+        "random-reweight baselines remain unpenalized.",
+    )
+    parser.add_argument(
+        "--budget-iters",
+        type=int,
+        default=10,
+        help="L0 budget-bisection iterations. Each is a FULL optimization "
+        "re-run to hit target_records, so this is the dominant L0 "
+        "cost multiplier. Lower (e.g. 4-5) is ~2x faster with looser "
+        "budget matching -- fine since the frontier plots vs achieved "
+        "budget.",
+    )
+    parser.add_argument(
+        "--target-loss-weighting",
+        choices=target_loss.TARGET_LOSS_WEIGHTINGS,
+        default=target_loss.PRODUCTION_US_FISCAL,
+        help="Target-row weights used inside Populace's calibration "
+        "loss. Default 'production_us_fiscal' imports Populace's "
+        "production _fiscal_target_loss_weights helper; 'uniform' "
+        "preserves the historical unweighted experiment loss.",
+    )
+    parser.add_argument(
+        "--target-loss-cap",
+        type=float,
+        default=None,
+        help="Per-target cap in the calibration loss. Defaults by "
+        "weighting: production_us_fiscal -> 1.0, uniform -> "
+        "10.0. Pass 10.0 to reproduce the current paper runs.",
+    )
 
     # Fixed frontier holdout (family-level, leak-free).
-    parser.add_argument("--holdout-families", nargs="*",
-                        default=["cms_medicaid", "usda_snap", "state_income_tax"],
-                        help="Families held out of every method's fit for the frontier. "
-                             "Default is a representative leak-free basket spanning three "
-                             "domains (healthcare / transfer / state-tax), each with a "
-                             "sibling family kept in the fit (cms_aca+cms_medicare; snap's "
-                             "sibling tanf; federal irs_soi), so generalisation is tested "
-                             "without orphaning a domain. cbo (validation-only) is always "
-                             "added unless --fit-validation-only is set.")
-    parser.add_argument("--holdout-frac", type=float, default=0.0,
-                        help="Extra random holdout fraction on top of the family split.")
-    parser.add_argument("--fit-validation-only", action="store_true",
-                        help="Include Populace validation-only families (e.g. cbo) in the fit.")
+    parser.add_argument(
+        "--holdout-families",
+        nargs="*",
+        default=["cms_medicaid", "usda_snap", "state_income_tax"],
+        help="Families held out of every method's fit for the frontier. "
+        "Default is a representative leak-free basket spanning three "
+        "domains (healthcare / transfer / state-tax), each with a "
+        "sibling family kept in the fit (cms_aca+cms_medicare; snap's "
+        "sibling tanf; federal irs_soi), so generalisation is tested "
+        "without orphaning a domain. cbo (validation-only) is always "
+        "added unless --fit-validation-only is set.",
+    )
+    parser.add_argument(
+        "--holdout-frac",
+        type=float,
+        default=0.0,
+        help="Extra random holdout fraction on top of the family split.",
+    )
+    parser.add_argument(
+        "--fit-validation-only",
+        action="store_true",
+        help="Include Populace validation-only families (e.g. cbo) in the fit.",
+    )
+    parser.add_argument(
+        "--full-target-surface",
+        action="store_true",
+        help="Fit every compiled target, including validation-only families, with "
+        "no family/random holdout or rotation panel. This is the production "
+        "surface frontier; holdout metrics become supplemental experiments.",
+    )
 
     # Rotation robustness panel (family-grouped k-fold at one anchor budget).
-    parser.add_argument("--rotation-folds", type=int, default=0,
-                        help="If >1, run a family-grouped k-fold rotation at --rotation-budget.")
-    parser.add_argument("--rotation-budget", type=int, default=None,
-                        help="Anchor budget for the rotation panel (default: median of --budgets).")
-    parser.add_argument("--rotation-balance", choices=("target_count", "family"),
-                        default="target_count")
-    parser.add_argument("--rotation-seed", type=int, default=0,
-                        help="Seed for the family->fold partition (fixed across calibration seeds).")
+    parser.add_argument(
+        "--rotation-folds",
+        type=int,
+        default=0,
+        help="If >1, run a family-grouped k-fold rotation at --rotation-budget.",
+    )
+    parser.add_argument(
+        "--rotation-budget",
+        type=int,
+        default=None,
+        help="Anchor budget for the rotation panel (default: median of --budgets).",
+    )
+    parser.add_argument(
+        "--rotation-balance", choices=("target_count", "family"), default="target_count"
+    )
+    parser.add_argument(
+        "--rotation-seed",
+        type=int,
+        default=0,
+        help="Seed for the family->fold partition (fixed across calibration seeds).",
+    )
 
     # Sampling. The survey-weight baseline is PPS (draw probability proportional to
     # the dense weight) with ``equal_mass`` reweighting under sampling **with
@@ -182,22 +289,40 @@ def _parse_args() -> argparse.Namespace:
     # not survey-weight sampling and is kept only for contrast. Without replacement,
     # equal_mass under-weights high-w records at large n (the sample drifts toward
     # uniform), which is why replacement is the default.
-    parser.add_argument("--sample-reweight", choices=("equal_mass", "renorm_kept"),
-                        default="equal_mass")
-    parser.add_argument("--sample-replace", action=argparse.BooleanOptionalAction,
-                        default=True,
-                        help="PPS sampling with replacement (default; the unbiased "
-                             "Hansen-Hurwitz integerisation with equal_mass). Pass "
-                             "--no-sample-replace for distinct-record draws (biased low "
-                             "on high-weight records at large budgets).")
+    parser.add_argument(
+        "--sample-reweight", choices=("equal_mass", "renorm_kept"), default="equal_mass"
+    )
+    parser.add_argument(
+        "--sample-replace",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="PPS sampling with replacement (default; the unbiased "
+        "Hansen-Hurwitz integerisation with equal_mass). Pass "
+        "--no-sample-replace for distinct-record draws (biased low "
+        "on high-weight records at large budgets).",
+    )
 
     parser.add_argument(
-        "--methods", nargs="+",
-        choices=["informed_l0", "informed_l1", "random_reweight", "dense_sample"],
-        default=["informed_l0", "informed_l1", "random_reweight", "dense_sample"],
-        help="Which calibration conditions to run. Default all four. Use e.g. "
-             "--methods informed_l0 to run L0 only (the expensive condition); the "
-             "cheap baselines can be added in a later run at matched budgets.",
+        "--methods",
+        nargs="+",
+        choices=[
+            "informed_l0",
+            "informed_l0_refit",
+            "informed_l1",
+            "random_reweight",
+            "dense_sample",
+        ],
+        default=[
+            "informed_l0",
+            "informed_l0_refit",
+            "informed_l1",
+            "random_reweight",
+            "dense_sample",
+        ],
+        help="Which calibration conditions to run. Default all five. Use e.g. "
+        "--methods informed_l0 to run L0 selection only (the expensive "
+        "condition); informed_l0_refit and the cheap baselines can be added "
+        "in a later run at matched budgets.",
     )
     parser.add_argument("--run-id", default=None)
     parser.add_argument(
@@ -205,8 +330,8 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help="Number of parallel seed/fold/L2 shards to run. The parent process "
-             "owns checkpoint writes. Keep BLAS/PyTorch thread env vars low "
-             "(for example OMP_NUM_THREADS=1) when using jobs > 1.",
+        "owns checkpoint writes. Keep BLAS/PyTorch thread env vars low "
+        "(for example OMP_NUM_THREADS=1) when using jobs > 1.",
     )
     parser.add_argument(
         "--resume",
@@ -215,7 +340,20 @@ def _parse_args() -> argparse.Namespace:
         help="Resume from existing metrics_long.csv in --out by skipping completed "
         "budget/seed/fold cells (default: yes). Pass --no-resume to overwrite.",
     )
+    parser.add_argument(
+        "--save-weights",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Persist one compressed full-length weight vector per method cell so "
+        "later metrics can be reconstructed against the frozen target surface "
+        "(default: yes).",
+    )
     args = parser.parse_args()
+    if args.full_target_surface:
+        args.holdout_families = []
+        args.holdout_frac = 0.0
+        args.fit_validation_only = True
+        args.rotation_folds = 0
     if args.jobs < 1:
         parser.error("--jobs must be >= 1")
     return args
@@ -248,6 +386,17 @@ def _atomic_write_target_diagnostics_csv(path: Path, rows: list[dict]) -> Path:
     return path
 
 
+def _atomic_write_weights_manifest_csv(path: Path, rows: list[dict]) -> Path:
+    tmp = path.with_name(f".{path.name}.tmp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tmp.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(WEIGHTS_MANIFEST_COLUMNS))
+        writer.writeheader()
+        writer.writerows(rows)
+    tmp.replace(path)
+    return path
+
+
 def _atomic_write_manifest(path: Path, manifest: dict) -> Path:
     tmp = path.with_name(f".{path.name}.tmp")
     write_run_manifest(tmp, manifest)
@@ -274,8 +423,28 @@ def _merge_unique_rows(target: list[dict], incoming: list[dict]) -> int:
 
 def _safe_shard_name(label: str) -> str:
     return "".join(
-        char if char.isalnum() or char in ("-", "_", ".") else "_"
-        for char in label
+        char if char.isalnum() or char in ("-", "_", ".") else "_" for char in label
+    )
+
+
+def _safe_number_token(value: float) -> str:
+    token = f"{float(value):.12g}"
+    return token.replace("-", "m").replace(".", "p").replace("+", "")
+
+
+def _weight_artifact_name(
+    *,
+    method: str,
+    seed: int,
+    budget_requested: int,
+    l2_lambda: float,
+    holdout_type: str,
+    fold: int,
+) -> str:
+    return (
+        f"{_safe_shard_name(holdout_type)}_fold-{fold}_seed-{seed}_"
+        f"budget-{budget_requested}_l2-{_safe_number_token(l2_lambda)}_"
+        f"{_safe_shard_name(method)}.npz"
     )
 
 
@@ -285,6 +454,7 @@ def _write_shard_checkpoint(
     label: str,
     rows: list[dict],
     diag_rows: list[dict],
+    weight_rows: list[dict],
 ) -> None:
     """Persist one worker's local rows after a completed budget cell."""
     shard_dir.mkdir(parents=True, exist_ok=True)
@@ -294,6 +464,10 @@ def _write_shard_checkpoint(
         _atomic_write_target_diagnostics_csv(
             shard_dir / TARGET_DIAGNOSTICS_CSV, diag_rows
         )
+    if weight_rows:
+        _atomic_write_weights_manifest_csv(
+            shard_dir / WEIGHTS_MANIFEST_CSV, weight_rows
+        )
     manifest = {
         "schema_version": 1,
         "label": label,
@@ -302,8 +476,12 @@ def _write_shard_checkpoint(
         "target_diagnostics_csv": (
             str(shard_dir / TARGET_DIAGNOSTICS_CSV) if diag_rows else None
         ),
+        "weights_manifest_csv": (
+            str(shard_dir / WEIGHTS_MANIFEST_CSV) if weight_rows else None
+        ),
         "n_rows": len(rows),
         "n_target_diagnostic_rows": len(diag_rows),
+        "n_weight_artifact_rows": len(weight_rows),
     }
     _atomic_write_manifest(shard_dir / SHARD_MANIFEST_JSON, manifest)
 
@@ -312,20 +490,24 @@ def _merge_shard_checkpoints(
     rows: list[dict],
     diag_rows: list[dict],
     shard_root: Path,
-) -> tuple[int, int, int]:
+    weight_rows: list[dict] | None = None,
+) -> tuple[int, int, int] | tuple[int, int, int, int]:
     """Merge completed worker-local checkpoints into the in-memory run state."""
+    include_weights = weight_rows is not None
+    if weight_rows is None:
+        weight_rows = []
     if not shard_root.is_dir():
-        return (0, 0, 0)
+        return (0, 0, 0, 0) if include_weights else (0, 0, 0)
 
     shards = 0
     added_rows = 0
     added_diag_rows = 0
+    added_weight_rows = 0
     for manifest_path in sorted(shard_root.glob(f"*/{SHARD_MANIFEST_JSON}")):
         manifest = _load_existing_manifest(manifest_path)
         metrics_rows = _read_csv_rows(manifest_path.parent / METRICS_CSV)
-        diagnostic_rows = _read_csv_rows(
-            manifest_path.parent / TARGET_DIAGNOSTICS_CSV
-        )
+        diagnostic_rows = _read_csv_rows(manifest_path.parent / TARGET_DIAGNOSTICS_CSV)
+        shard_weight_rows = _read_csv_rows(manifest_path.parent / WEIGHTS_MANIFEST_CSV)
         if manifest.get("n_rows") != len(metrics_rows):
             raise SystemExit(
                 "l0 sweep: shard checkpoint row-count mismatch in "
@@ -339,9 +521,20 @@ def _merge_shard_checkpoints(
                 f"(manifest={manifest.get('n_target_diagnostic_rows')!r}, "
                 f"loaded={len(diagnostic_rows)})."
             )
+        expected_weight_rows = manifest.get("n_weight_artifact_rows", 0)
+        if expected_weight_rows != len(shard_weight_rows):
+            raise SystemExit(
+                "l0 sweep: shard weight-artifact row-count mismatch in "
+                f"{manifest_path.parent} "
+                f"(manifest={expected_weight_rows!r}, "
+                f"loaded={len(shard_weight_rows)})."
+            )
         shards += 1
         added_rows += _merge_unique_rows(rows, metrics_rows)
         added_diag_rows += _merge_unique_rows(diag_rows, diagnostic_rows)
+        added_weight_rows += _merge_unique_rows(weight_rows, shard_weight_rows)
+    if include_weights:
+        return (shards, added_rows, added_diag_rows, added_weight_rows)
     return (shards, added_rows, added_diag_rows)
 
 
@@ -350,12 +543,18 @@ def _validate_resume_checkpoint(
     manifest: dict,
     rows: list[dict],
     diag_rows: list[dict],
+    weight_rows: list[dict] | None = None,
     metrics_path: Path,
     diagnostics_path: Path,
+    weights_manifest_path: Path | None = None,
     manifest_path: Path,
 ) -> None:
     """Reject resume state whose manifest does not certify the loaded CSVs."""
-    if not rows and not diag_rows:
+    if weight_rows is None:
+        weight_rows = []
+    if weights_manifest_path is None:
+        weights_manifest_path = metrics_path.with_name(WEIGHTS_MANIFEST_CSV)
+    if not rows and not diag_rows and not weight_rows:
         return
     if not manifest:
         raise SystemExit(
@@ -365,12 +564,20 @@ def _validate_resume_checkpoint(
         )
     expected_rows = manifest.get("n_rows")
     expected_diag_rows = manifest.get("n_target_diagnostic_rows")
-    if expected_rows != len(rows) or expected_diag_rows != len(diag_rows):
+    expected_weight_rows = manifest.get("n_weight_artifact_rows", 0)
+    if (
+        expected_rows != len(rows)
+        or expected_diag_rows != len(diag_rows)
+        or expected_weight_rows != len(weight_rows)
+    ):
         raise SystemExit(
             "l0 sweep: refusing to resume from an incomplete checkpoint "
             f"(manifest n_rows={expected_rows!r}, loaded metrics={len(rows)}; "
             f"manifest n_target_diagnostic_rows={expected_diag_rows!r}, "
-            f"loaded diagnostics={len(diag_rows)} from {diagnostics_path}). "
+            f"loaded diagnostics={len(diag_rows)} from {diagnostics_path}; "
+            f"manifest n_weight_artifact_rows={expected_weight_rows!r}, "
+            f"loaded weight artifacts={len(weight_rows)} from "
+            f"{weights_manifest_path}). "
             "Pass --no-resume to overwrite or repair the output directory."
         )
 
@@ -423,6 +630,71 @@ def _method_key_from_row(row: dict) -> MethodKey:
         budget=int(float(row["budget_requested"])),
         l2_lambda=float(row.get("l2_lambda") or 0.0),
         method=str(row["method"]),
+    )
+
+
+def _weight_artifact_path(row: dict, root: Path | None) -> Path:
+    path = Path(str(row["artifact_path"]))
+    if path.is_absolute():
+        return path
+    if root is None:
+        return path
+    return root / path
+
+
+def _weight_artifacts_by_method(
+    weight_rows: list[dict] | None,
+) -> dict[MethodKey, dict]:
+    artifacts: dict[MethodKey, dict] = {}
+    for row in weight_rows or []:
+        try:
+            artifacts[_method_key_from_row(row)] = row
+        except (KeyError, TypeError, ValueError):
+            continue
+    return artifacts
+
+
+def _run_result_from_weight_artifact(row: dict, root: Path | None) -> RunResult:
+    path = _weight_artifact_path(row, root)
+    if not path.is_file():
+        raise FileNotFoundError(f"Missing weight artifact for completed L0 run: {path}")
+    with np.load(path, allow_pickle=False) as payload:
+        weights = np.asarray(payload["weights"], dtype=np.float64)
+        initial_weights = np.asarray(payload["initial_weights"], dtype=np.float64)
+        trajectory = np.asarray(payload["solver_loss_trajectory"], dtype=np.float64)
+        metadata = {}
+        if "metadata_json" in payload.files:
+            metadata = json.loads(str(payload["metadata_json"].item()))
+    return RunResult(
+        method=str(row.get("method", metadata.get("method", "informed_l0"))),
+        weight_entity=str(
+            row.get("weight_entity", metadata.get("weight_entity", "household"))
+        ),
+        weights=weights,
+        initial_weights=initial_weights,
+        n_records=int(
+            row.get("candidate_records")
+            or metadata.get("candidate_records")
+            or weights.size
+        ),
+        n_selected=int(
+            row.get("n_selected")
+            or metadata.get("n_selected")
+            or np.count_nonzero(weights)
+        ),
+        l0_lambda=float(row.get("l0_lambda") or metadata.get("l0_lambda") or 0.0),
+        l2_lambda=float(row.get("l2_lambda") or metadata.get("l2_lambda") or 0.0),
+        max_weight_ratio=metadata.get("max_weight_ratio"),
+        loss_trajectory=trajectory,
+        initial_loss=float(metadata.get("initial_loss") or float("nan")),
+        final_loss=float(
+            row.get("final_loss") or metadata.get("final_loss") or float("nan")
+        ),
+        runtime_s=float(row.get("runtime_s") or metadata.get("runtime_s") or 0.0),
+        seed=int(row.get("seed") or metadata.get("seed") or 0),
+        options=dict(metadata.get("solver_options") or {}),
+        calibration_result=None,
+        sampling=metadata.get("sampling"),
     )
 
 
@@ -492,10 +764,7 @@ def _progress_prefix(
     budget: int,
     l2_lambda: float,
 ) -> str:
-    return (
-        f"[{holdout_type} fold={fold} seed={seed} budget={budget} "
-        f"l2={l2_lambda:g}]"
-    )
+    return f"[{holdout_type} fold={fold} seed={seed} budget={budget} l2={l2_lambda:g}]"
 
 
 def _l0_budget_progress_logger(
@@ -599,6 +868,7 @@ def _build_manifest(
     rotation_meta: dict,
     rows: list[dict],
     diag_rows: list[dict],
+    weight_rows: list[dict],
     completed_cells: set[CellKey],
     out: Path,
 ) -> dict:
@@ -633,6 +903,8 @@ def _build_manifest(
             {
                 **baseline_optimizer,
                 "max_weight_ratio": args.max_weight_ratio,
+                "init_mean": args.init_mean,
+                "temperature": args.temperature,
                 "budget_iters": args.budget_iters,
                 "l2_lambdas": args.l2_lambdas,
                 "l2_applies_to": "informed_l0_only",
@@ -640,6 +912,7 @@ def _build_manifest(
         ),
         "baseline_optimizer": _jsonable(baseline_optimizer),
         "frontier_split": {
+            "full_target_surface": bool(args.full_target_surface),
             "fit": len(fit_targets),
             "holdout": len(holdout_targets),
             "holdout_families": holdout_families,
@@ -652,9 +925,14 @@ def _build_manifest(
         "target_diagnostics_csv": (
             str(out / TARGET_DIAGNOSTICS_CSV) if diag_rows else None
         ),
+        "weights_dir": str(out / WEIGHTS_DIR) if args.save_weights else None,
+        "weights_manifest_csv": (
+            str(out / WEIGHTS_MANIFEST_CSV) if weight_rows else None
+        ),
         "shard_checkpoint_dir": str(out / SHARD_CHECKPOINT_DIR),
         "n_rows": len(rows),
         "n_target_diagnostic_rows": len(diag_rows),
+        "n_weight_artifact_rows": len(weight_rows),
         "completed_cells": len(completed_cells),
     }
 
@@ -677,6 +955,11 @@ def _score_and_emit(
     fit_loss_weights: np.ndarray | None = None,
     holdout_loss_weights: np.ndarray | None = None,
     diag_rows: list[dict] | None = None,
+    weight_rows: list[dict] | None = None,
+    weight_artifact_dir: Path | None = None,
+    weight_artifact_root: Path | None = None,
+    reference_weight_rows: list[dict] | None = None,
+    target_loss_cap: float | None = None,
 ) -> None:
     """Score one run in/out-of-sample and append its long-format rows.
 
@@ -689,11 +972,17 @@ def _score_and_emit(
     objective can be recomputed downstream (:mod:`l0_paper.experiments.crunch`).
     """
     in_sample = metrics.score(
-        frame, run.weights, fit_targets, label="in_sample",
+        frame,
+        run.weights,
+        fit_targets,
+        label="in_sample",
         degenerate_names=degenerate_fit,
     )
     out_of_sample = metrics.score(
-        frame, run.weights, holdout_targets, label="out_of_sample",
+        frame,
+        run.weights,
+        holdout_targets,
+        label="out_of_sample",
         degenerate_names=degenerate_holdout,
     )
     holdout_diag = metrics.target_diagnostics(
@@ -721,19 +1010,82 @@ def _score_and_emit(
         )
         diag_rows.extend(
             aggregate.target_diagnostic_rows(
-                method=method, l2_lambda=l2_lambda, seed=seed,
+                method=method,
+                l2_lambda=l2_lambda,
+                seed=seed,
                 budget_requested=budget_requested,
-                split="in_sample", diagnostics=fit_diag,
+                split="in_sample",
+                diagnostics=fit_diag,
                 degenerate_names=degenerate_fit,
             )
         )
         diag_rows.extend(
             aggregate.target_diagnostic_rows(
-                method=method, l2_lambda=l2_lambda, seed=seed,
+                method=method,
+                l2_lambda=l2_lambda,
+                seed=seed,
                 budget_requested=budget_requested,
-                split="out_of_sample", diagnostics=holdout_diag,
+                split="out_of_sample",
+                diagnostics=holdout_diag,
                 degenerate_names=degenerate_holdout,
             )
+        )
+    if weight_rows is not None and weight_artifact_dir is not None:
+        artifact_path = weight_artifact_dir / _weight_artifact_name(
+            method=method,
+            seed=seed,
+            budget_requested=budget_requested,
+            l2_lambda=l2_lambda,
+            holdout_type=holdout_type,
+            fold=fold,
+        )
+        metadata = {
+            "method": method,
+            "seed": seed,
+            "budget_requested": budget_requested,
+            "budget_achieved": run.n_selected,
+            "l2_lambda": l2_lambda,
+            "holdout_type": holdout_type,
+            "fold": fold,
+            "weight_entity": run.weight_entity,
+            "candidate_records": run.n_records,
+            "n_selected": run.n_selected,
+            "l0_lambda": run.l0_lambda,
+            "runtime_s": run.runtime_s,
+            "final_loss": run.final_loss,
+            "target_loss_cap": target_loss_cap,
+            "solver_options": run.options,
+            "sampling": run.sampling,
+            "fit_target_count": len(fit_targets),
+            "holdout_target_count": len(holdout_targets),
+        }
+        save_weight_npz(artifact_path, run, metadata=metadata)
+        artifact_record_path = artifact_path
+        if weight_artifact_root is not None:
+            try:
+                artifact_record_path = artifact_path.relative_to(weight_artifact_root)
+            except ValueError:
+                artifact_record_path = artifact_path
+        weight_rows.append(
+            {
+                "method": method,
+                "seed": int(seed),
+                "budget_requested": int(budget_requested),
+                "budget_achieved": int(run.n_selected),
+                "l2_lambda": float(l2_lambda),
+                "holdout_type": holdout_type,
+                "fold": int(fold),
+                "artifact_path": str(artifact_record_path),
+                "weight_entity": run.weight_entity,
+                "candidate_records": int(run.n_records),
+                "n_selected": int(run.n_selected),
+                "runtime_s": float(run.runtime_s),
+                "l0_lambda": float(run.l0_lambda),
+                "final_loss": float(run.final_loss),
+                "target_loss_cap": (
+                    "" if target_loss_cap is None else float(target_loss_cap)
+                ),
+            }
         )
 
 
@@ -754,6 +1106,11 @@ def _sweep_split(
     l2_lambda: float,
     target_loss_weighting: str,
     diag_rows: list[dict] | None = None,
+    weight_rows: list[dict] | None = None,
+    weight_artifact_dir: Path | None = None,
+    weight_artifact_root: Path | None = None,
+    reference_weight_rows: list[dict] | None = None,
+    target_loss_cap: float | None = None,
     completed_methods: set[MethodKey] | None = None,
     budget_achieved_by_method: dict[MethodKey, int] | None = None,
     checkpoint: Callable[[str], None] | None = None,
@@ -778,17 +1135,25 @@ def _sweep_split(
     degenerate_holdout = metrics.degenerate_target_names(
         frame, holdout_targets, weight_entity=weight_entity
     )
-    target_loss_weights = target_loss.target_loss_weights(
-        fit_targets,
-        weighting=target_loss_weighting,
+    target_loss_weights = (
+        target_loss.target_loss_weights(
+            fit_targets,
+            weighting=target_loss_weighting,
+        )
+        if len(fit_targets)
+        else None
     )
     # Per-target omega for the held-out targets too, so the stored diagnostics carry
     # the production weight on both splits and the weighted objective can be crunched
     # out-of-sample (the optimizer never weighted the holdout; this applies the same
     # production scheme to it for reporting).
-    holdout_loss_weights = target_loss.target_loss_weights(
-        holdout_targets,
-        weighting=target_loss_weighting,
+    holdout_loss_weights = (
+        target_loss.target_loss_weights(
+            holdout_targets,
+            weighting=target_loss_weighting,
+        )
+        if len(holdout_targets)
+        else None
     )
     split_baseline_optimizer = {
         **baseline_optimizer,
@@ -798,6 +1163,9 @@ def _sweep_split(
         **l0_optimizer,
         "target_loss_weights": target_loss_weights,
     }
+    weight_artifacts = _weight_artifacts_by_method(
+        [*(reference_weight_rows or []), *(weight_rows or [])]
+    )
 
     dense_runtimes: dict[str, float] = {}
     for seed in seeds:
@@ -831,8 +1199,7 @@ def _sweep_split(
         dense = None
         dense_runtime = 0.0
         needs_dense = want_survey and any(
-            "dense_sample" in pending
-            for pending in pending_methods_by_budget.values()
+            "dense_sample" in pending for pending in pending_methods_by_budget.values()
         )
         if needs_dense:
             print(
@@ -875,16 +1242,17 @@ def _sweep_split(
                 l2_lambda=l2_lambda,
                 method="informed_l0",
             )
+            progress_prefix = _progress_prefix(
+                holdout_type=holdout_type,
+                fold=fold,
+                seed=seed,
+                budget=budget,
+                l2_lambda=l2_lambda,
+            )
             matched = budget_achieved_by_method.get(l0_key, budget)
+            l0_selection = None
             if "informed_l0" in pending_methods:
                 budget_search_start = perf_counter()
-                progress_prefix = _progress_prefix(
-                    holdout_type=holdout_type,
-                    fold=fold,
-                    seed=seed,
-                    budget=budget,
-                    l2_lambda=l2_lambda,
-                )
                 print(
                     f"  {progress_prefix} L0 budget search: target={budget:,}, "
                     f"iters={split_l0_optimizer['budget_iters']}, "
@@ -892,7 +1260,10 @@ def _sweep_split(
                     flush=True,
                 )
                 l0 = run_l0(
-                    frame, fit_targets, target_records=budget, seed=seed,
+                    frame,
+                    fit_targets,
+                    target_records=budget,
+                    seed=seed,
                     progress_callback=_l0_budget_progress_logger(
                         holdout_type=holdout_type,
                         fold=fold,
@@ -904,11 +1275,14 @@ def _sweep_split(
                     **split_l0_optimizer,
                 )
                 matched = l0.n_selected
+                l0_selection = l0
                 runs.append(l0)
-                print(f"  [{holdout_type} fold={fold} seed={seed} budget={budget} "
-                      f"l2={l2_lambda:g}] "
-                      f"L0 retained {matched:,} (l0_lambda={l0.l0_lambda:.3e})",
-                      flush=True)
+                print(
+                    f"  [{holdout_type} fold={fold} seed={seed} budget={budget} "
+                    f"l2={l2_lambda:g}] "
+                    f"L0 retained {matched:,} (l0_lambda={l0.l0_lambda:.3e})",
+                    flush=True,
+                )
             elif l0_key in budget_achieved_by_method:
                 print(
                     f"  [{holdout_type} fold={fold} seed={seed} budget={budget} "
@@ -918,39 +1292,90 @@ def _sweep_split(
                 )
             else:
                 # No L0 to set the budget; match the requested budget directly.
-                print(f"  [{holdout_type} fold={fold} seed={seed} budget={budget} "
-                      f"l2={l2_lambda:g}] "
-                      f"baselines at requested budget {matched:,} (no L0).",
-                      flush=True)
+                print(
+                    f"  [{holdout_type} fold={fold} seed={seed} budget={budget} "
+                    f"l2={l2_lambda:g}] "
+                    f"baselines at requested budget {matched:,} (no L0).",
+                    flush=True,
+                )
             if "dense_sample" in pending_methods:
-                runs.append(sample_from_dense(
-                    dense, n_sample=matched, seed=seed, dense_runtime=dense_runtime,
-                    max_weight_ratio=split_baseline_optimizer.get("max_weight_ratio"),
-                    target_loss_cap=split_baseline_optimizer["target_loss_cap"],
-                    **sample_kwargs,
-                ))
+                runs.append(
+                    sample_from_dense(
+                        dense,
+                        n_sample=matched,
+                        seed=seed,
+                        dense_runtime=dense_runtime,
+                        max_weight_ratio=split_baseline_optimizer.get(
+                            "max_weight_ratio"
+                        ),
+                        target_loss_cap=split_baseline_optimizer["target_loss_cap"],
+                        **sample_kwargs,
+                    )
+                )
+            if "informed_l0_refit" in pending_methods:
+                if l0_selection is None:
+                    l0_artifact = weight_artifacts.get(l0_key)
+                    if l0_artifact is None:
+                        raise SystemExit(
+                            "informed_l0_refit requires a completed informed_l0 "
+                            f"weight artifact for {progress_prefix}."
+                        )
+                    l0_selection = _run_result_from_weight_artifact(
+                        l0_artifact, weight_artifact_root
+                    )
+                runs.append(
+                    run_l0_post_refit(
+                        frame,
+                        fit_targets,
+                        l0_selection,
+                        seed=seed,
+                        **split_baseline_optimizer,
+                    )
+                )
             if "informed_l1" in pending_methods:
                 # Convex-sparse selector: proximal L1 at the matched budget, its own
                 # bisection on l1_lambda hitting the same retained count as L0.
-                runs.append(run_l1(
-                    frame, fit_targets, target_records=matched, seed=seed,
-                    **split_baseline_optimizer,
-                ))
+                runs.append(
+                    run_l1(
+                        frame,
+                        fit_targets,
+                        target_records=matched,
+                        seed=seed,
+                        **split_baseline_optimizer,
+                    )
+                )
             if "random_reweight" in pending_methods:
-                runs.append(run_random_then_reweight(
-                    frame, fit_targets, n_sample=matched, seed=seed,
-                    **split_baseline_optimizer,
-                ))
+                runs.append(
+                    run_random_then_reweight(
+                        frame,
+                        fit_targets,
+                        n_sample=matched,
+                        seed=seed,
+                        **split_baseline_optimizer,
+                    )
+                )
             for run in runs:
                 _score_and_emit(
-                    rows, run=run, frame=frame, fit_targets=fit_targets,
-                    holdout_targets=holdout_targets, method=run.method, seed=seed,
-                    budget_requested=budget, l2_lambda=l2_lambda,
-                    holdout_type=holdout_type, fold=fold,
-                    degenerate_fit=degenerate_fit, degenerate_holdout=degenerate_holdout,
+                    rows,
+                    run=run,
+                    frame=frame,
+                    fit_targets=fit_targets,
+                    holdout_targets=holdout_targets,
+                    method=run.method,
+                    seed=seed,
+                    budget_requested=budget,
+                    l2_lambda=l2_lambda,
+                    holdout_type=holdout_type,
+                    fold=fold,
+                    degenerate_fit=degenerate_fit,
+                    degenerate_holdout=degenerate_holdout,
                     fit_loss_weights=target_loss_weights,
                     holdout_loss_weights=holdout_loss_weights,
                     diag_rows=diag_rows,
+                    weight_rows=weight_rows,
+                    weight_artifact_dir=weight_artifact_dir,
+                    weight_artifact_root=weight_artifact_root,
+                    target_loss_cap=target_loss_cap,
                 )
                 run_key = _method_key(
                     holdout_type=holdout_type,
@@ -992,6 +1417,10 @@ def _sweep_split_shard(
     l2_lambda: float,
     target_loss_weighting: str,
     collect_diagnostics: bool,
+    collect_weights: bool,
+    weight_artifact_dir: Path | None = None,
+    weight_artifact_root: Path | None = None,
+    reference_weight_rows: list[dict] | None = None,
     completed_methods: set[MethodKey],
     budget_achieved_by_method: dict[MethodKey, int],
     checkpoint_dir: Path | None = None,
@@ -999,6 +1428,7 @@ def _sweep_split_shard(
     """Run one independent seed/fold/L2 shard with local row buffers."""
     shard_rows: list[dict] = []
     shard_diag_rows: list[dict] | None = [] if collect_diagnostics else None
+    shard_weight_rows: list[dict] | None = [] if collect_weights else None
     checkpoint_callback = None
     if checkpoint_dir is not None:
         shard_dir = checkpoint_dir / _safe_shard_name(label)
@@ -1009,6 +1439,7 @@ def _sweep_split_shard(
                 label=label,
                 rows=shard_rows,
                 diag_rows=shard_diag_rows or [],
+                weight_rows=shard_weight_rows or [],
             )
 
     dense_runtimes = _sweep_split(
@@ -1027,21 +1458,30 @@ def _sweep_split_shard(
         l2_lambda=l2_lambda,
         target_loss_weighting=target_loss_weighting,
         diag_rows=shard_diag_rows,
+        weight_rows=shard_weight_rows,
+        weight_artifact_dir=weight_artifact_dir,
+        weight_artifact_root=weight_artifact_root,
+        reference_weight_rows=reference_weight_rows,
+        target_loss_cap=baseline_optimizer.get("target_loss_cap"),
         completed_methods=set(completed_methods),
         budget_achieved_by_method=dict(budget_achieved_by_method),
         checkpoint=checkpoint_callback,
     )
-    if checkpoint_dir is not None and (shard_rows or shard_diag_rows):
+    if checkpoint_dir is not None and (
+        shard_rows or shard_diag_rows or shard_weight_rows
+    ):
         _write_shard_checkpoint(
             checkpoint_dir / _safe_shard_name(label),
             label=label,
             rows=shard_rows,
             diag_rows=shard_diag_rows or [],
+            weight_rows=shard_weight_rows or [],
         )
     return SplitShardResult(
         label=label,
         rows=shard_rows,
         diag_rows=shard_diag_rows or [],
+        weight_rows=shard_weight_rows or [],
         dense_runtimes=dense_runtimes,
     )
 
@@ -1064,6 +1504,9 @@ def _run_sweep_split(
     target_loss_weighting: str,
     jobs: int,
     diag_rows: list[dict] | None = None,
+    weight_rows: list[dict] | None = None,
+    weight_artifact_dir: Path | None = None,
+    weight_artifact_root: Path | None = None,
     completed_methods: set[MethodKey] | None = None,
     budget_achieved_by_method: dict[MethodKey, int] | None = None,
     checkpoint: Callable[[str], None] | None = None,
@@ -1094,6 +1537,11 @@ def _run_sweep_split(
             l2_lambda=l2_lambda,
             target_loss_weighting=target_loss_weighting,
             diag_rows=diag_rows,
+            weight_rows=weight_rows,
+            weight_artifact_dir=weight_artifact_dir,
+            weight_artifact_root=weight_artifact_root,
+            reference_weight_rows=weight_rows,
+            target_loss_cap=baseline_optimizer.get("target_loss_cap"),
             completed_methods=completed_methods,
             budget_achieved_by_method=budget_achieved_by_method,
             checkpoint=checkpoint,
@@ -1127,6 +1575,10 @@ def _run_sweep_split(
                 l2_lambda=l2_lambda,
                 target_loss_weighting=target_loss_weighting,
                 collect_diagnostics=diag_rows is not None,
+                collect_weights=weight_rows is not None,
+                weight_artifact_dir=weight_artifact_dir,
+                weight_artifact_root=weight_artifact_root,
+                reference_weight_rows=weight_rows,
                 completed_methods=completed_methods,
                 budget_achieved_by_method=budget_achieved_by_method,
                 checkpoint_dir=shard_checkpoint_root,
@@ -1138,15 +1590,20 @@ def _run_sweep_split(
             rows.extend(result.rows)
             if diag_rows is not None:
                 diag_rows.extend(result.diag_rows)
+            if weight_rows is not None:
+                weight_rows.extend(result.weight_rows)
             completed_methods.update(_completed_method_keys(result.rows, methods))
             budget_achieved_by_method.update(_budget_achieved_by_method(result.rows))
             dense_runtimes.update(result.dense_runtimes)
             print(
                 f"  [{result.label}] shard merged: {len(result.rows):,} "
-                f"metric rows, {len(result.diag_rows):,} diagnostic rows.",
+                f"metric rows, {len(result.diag_rows):,} diagnostic rows, "
+                f"{len(result.weight_rows):,} weight artifacts.",
                 flush=True,
             )
-            if checkpoint is not None and (result.rows or result.diag_rows):
+            if checkpoint is not None and (
+                result.rows or result.diag_rows or result.weight_rows
+            ):
                 checkpoint(f"{result.label} shard")
     return dense_runtimes
 
@@ -1165,7 +1622,9 @@ def main() -> None:
     )
 
     validation_only = (
-        set() if args.fit_validation_only else holdout.validation_only_families(registry)
+        set()
+        if args.fit_validation_only
+        else holdout.validation_only_families(registry)
     )
     holdout_families = sorted(set(args.holdout_families or ()) | validation_only)
 
@@ -1185,28 +1644,40 @@ def main() -> None:
 
     metrics_path = out / METRICS_CSV
     diagnostics_path = out / TARGET_DIAGNOSTICS_CSV
+    weights_manifest_path = out / WEIGHTS_MANIFEST_CSV
+    weights_dir = out / WEIGHTS_DIR
     manifest_path = out / SWEEP_MANIFEST_JSON
     shard_checkpoint_root = out / SHARD_CHECKPOINT_DIR
     existing_manifest = _load_existing_manifest(manifest_path) if args.resume else {}
     rows: list[dict] = _read_csv_rows(metrics_path) if args.resume else []
     # Per-target OOS diagnostics for the headline split.
     diag_rows: list[dict] = _read_csv_rows(diagnostics_path) if args.resume else []
+    weight_rows: list[dict] = (
+        _read_csv_rows(weights_manifest_path)
+        if args.resume and args.save_weights
+        else []
+    )
     _validate_resume_checkpoint(
         manifest=existing_manifest,
         rows=rows,
         diag_rows=diag_rows,
+        weight_rows=weight_rows,
         metrics_path=metrics_path,
         diagnostics_path=diagnostics_path,
+        weights_manifest_path=weights_manifest_path,
         manifest_path=manifest_path,
     )
     if args.resume:
-        shards, shard_rows, shard_diag_rows = _merge_shard_checkpoints(
-            rows, diag_rows, shard_checkpoint_root
+        shards, shard_rows, shard_diag_rows, shard_weight_rows = (
+            _merge_shard_checkpoints(
+                rows, diag_rows, shard_checkpoint_root, weight_rows=weight_rows
+            )
         )
         if shards:
             print(
                 f"Recovered {shard_rows:,} metric rows and "
-                f"{shard_diag_rows:,} diagnostic rows from {shards} "
+                f"{shard_diag_rows:,} diagnostic rows and "
+                f"{shard_weight_rows:,} weight artifact rows from {shards} "
                 f"parallel shard checkpoint(s) in {shard_checkpoint_root}.",
                 flush=True,
             )
@@ -1234,6 +1705,7 @@ def main() -> None:
         print(
             f"Resuming from {metrics_path}: {len(rows):,} metric rows, "
             f"{len(diag_rows):,} diagnostic rows, "
+            f"{len(weight_rows):,} weight artifact rows, "
             f"{len(completed_methods):,} completed method(s), "
             f"{len(completed_cells):,} completed cell(s).",
             flush=True,
@@ -1253,18 +1725,32 @@ def main() -> None:
     )
 
     # --- Frontier: one fixed leak-free family split, swept over budgets x seeds. ---
-    if holdout_families:
+    if args.full_target_surface:
+        fit_targets = registry.to_target_set()
+        holdout_targets = holdout.split_targets(fit_targets, holdout_frac=0.0)[1]
+    elif holdout_families:
         fit_targets, holdout_targets = holdout.split_registry_by_family(
-            registry, holdout_families=holdout_families,
-            extra_holdout_frac=args.holdout_frac, seed=args.rotation_seed,
+            registry,
+            holdout_families=holdout_families,
+            extra_holdout_frac=args.holdout_frac,
+            seed=args.rotation_seed,
         )
     else:
         fit_targets, holdout_targets = holdout.split_targets(
-            registry.to_target_set(), holdout_frac=args.holdout_frac or 0.2, seed=args.rotation_seed,
+            registry.to_target_set(),
+            holdout_frac=args.holdout_frac,
+            seed=args.rotation_seed,
         )
-    print(f"Frontier split: {len(fit_targets)} fit, {len(holdout_targets)} held out "
-          f"(families: {holdout_families or 'random'}). "
-          f"Candidate records: {frame.n(args.weight_entity):,}.")
+    split_label = (
+        "full target surface"
+        if args.full_target_surface
+        else f"families: {holdout_families or 'random'}"
+    )
+    print(
+        f"Frontier split: {len(fit_targets)} fit, {len(holdout_targets)} held out "
+        f"({split_label}). "
+        f"Candidate records: {frame.n(args.weight_entity):,}."
+    )
     print(f"Methods: {args.methods}")
     print(f"Jobs: {args.jobs}")
     frontier_target_loss_weights = target_loss.target_loss_weights(
@@ -1291,6 +1777,10 @@ def main() -> None:
             _atomic_write_target_diagnostics_csv(diagnostics_path, diag_rows)
         elif diagnostics_path.exists():
             diagnostics_path.unlink()
+        if weight_rows:
+            _atomic_write_weights_manifest_csv(weights_manifest_path, weight_rows)
+        elif weights_manifest_path.exists():
+            weights_manifest_path.unlink()
         long_csv = _atomic_write_long_csv(metrics_path, rows)
         manifest = _build_manifest(
             args=args,
@@ -1310,13 +1800,15 @@ def main() -> None:
             rotation_meta=rotation_meta,
             rows=rows,
             diag_rows=diag_rows,
+            weight_rows=weight_rows,
             completed_cells=completed_cells,
             out=out,
         )
         written_manifest = _atomic_write_manifest(manifest_path, manifest)
         print(
             f"Checkpoint {label}: {len(rows):,} metric rows, "
-            f"{len(diag_rows):,} diagnostic rows -> {long_csv}; "
+            f"{len(diag_rows):,} diagnostic rows, "
+            f"{len(weight_rows):,} weight artifacts -> {long_csv}; "
             f"manifest -> {written_manifest}",
             flush=True,
         )
@@ -1326,7 +1818,9 @@ def main() -> None:
     audit_rows = [
         {"split": split_name, **row}
         for split_name, tset in (("fit", fit_targets), ("holdout", holdout_targets))
-        for row in metrics.degenerate_audit(frame, tset, weight_entity=args.weight_entity)
+        for row in metrics.degenerate_audit(
+            frame, tset, weight_entity=args.weight_entity
+        )
     ]
     if audit_rows:
         audit_path = out / "degenerate_targets.csv"
@@ -1344,13 +1838,25 @@ def main() -> None:
             "l2_lambda": l2_lambda,
         }
         dense_runtimes = _run_sweep_split(
-            rows, frame=frame, fit_targets=fit_targets, holdout_targets=holdout_targets,
-            budgets=args.budgets, seeds=args.seeds, l0_optimizer=l0_optimizer,
+            rows,
+            frame=frame,
+            fit_targets=fit_targets,
+            holdout_targets=holdout_targets,
+            budgets=args.budgets,
+            seeds=args.seeds,
+            l0_optimizer=l0_optimizer,
             baseline_optimizer=baseline_optimizer,
-            sample_kwargs=sample_kwargs, holdout_type="fixed_family", fold=-1,
-            methods=args.methods, l2_lambda=l2_lambda,
-            target_loss_weighting=args.target_loss_weighting, jobs=args.jobs,
+            sample_kwargs=sample_kwargs,
+            holdout_type="fixed_family",
+            fold=-1,
+            methods=args.methods,
+            l2_lambda=l2_lambda,
+            target_loss_weighting=args.target_loss_weighting,
+            jobs=args.jobs,
             diag_rows=diag_rows,
+            weight_rows=weight_rows if args.save_weights else None,
+            weight_artifact_dir=weights_dir if args.save_weights else None,
+            weight_artifact_root=out if args.save_weights else None,
             completed_methods=completed_methods,
             budget_achieved_by_method=budget_achieved,
             shard_checkpoint_root=shard_checkpoint_root,
@@ -1362,11 +1868,15 @@ def main() -> None:
     if args.rotation_folds and args.rotation_folds > 1:
         anchor = args.rotation_budget or sorted(args.budgets)[len(args.budgets) // 2]
         folds = holdout.family_grouped_folds(
-            registry, n_folds=args.rotation_folds, seed=args.rotation_seed,
+            registry,
+            n_folds=args.rotation_folds,
+            seed=args.rotation_seed,
             balance_by=args.rotation_balance,
             exclude_validation_only=not args.fit_validation_only,
         )
-        print(f"Rotation panel: {len(folds)}-fold family-grouped holdout at budget {anchor}.")
+        print(
+            f"Rotation panel: {len(folds)}-fold family-grouped holdout at budget {anchor}."
+        )
         rotation_meta = {
             "n_folds": len(folds),
             "anchor_budget": anchor,
@@ -1391,12 +1901,24 @@ def main() -> None:
                     "l2_lambda": l2_lambda,
                 }
                 _run_sweep_split(
-                    rows, frame=frame, fit_targets=fold_fit, holdout_targets=fold_holdout,
-                    budgets=[anchor], seeds=args.seeds, l0_optimizer=l0_optimizer,
+                    rows,
+                    frame=frame,
+                    fit_targets=fold_fit,
+                    holdout_targets=fold_holdout,
+                    budgets=[anchor],
+                    seeds=args.seeds,
+                    l0_optimizer=l0_optimizer,
                     baseline_optimizer=baseline_optimizer,
-                    sample_kwargs=sample_kwargs, holdout_type="rotation", fold=fold_idx,
-                    methods=args.methods, l2_lambda=l2_lambda,
-                    target_loss_weighting=args.target_loss_weighting, jobs=args.jobs,
+                    sample_kwargs=sample_kwargs,
+                    holdout_type="rotation",
+                    fold=fold_idx,
+                    methods=args.methods,
+                    l2_lambda=l2_lambda,
+                    target_loss_weighting=args.target_loss_weighting,
+                    jobs=args.jobs,
+                    weight_rows=weight_rows if args.save_weights else None,
+                    weight_artifact_dir=weights_dir if args.save_weights else None,
+                    weight_artifact_root=out if args.save_weights else None,
                     completed_methods=completed_methods,
                     budget_achieved_by_method=budget_achieved,
                     shard_checkpoint_root=shard_checkpoint_root,

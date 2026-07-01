@@ -10,9 +10,9 @@ This is the one-command wrapper around the paper pipeline:
 
 The defaults encode the manuscript run: budgets 2k/5k/10k/20k/40k, seeds 0--2,
 fixed holdout families ``cms_medicaid``, ``usda_snap``, and
-``state_income_tax``, validation-only families held out, target-loss cap
-``c=10``, the three reported methods, and the L2 operability contrast
-``lambda_L2 in {0, 1e-4}``.
+``state_income_tax``, validation-only families held out, Populace production
+target-loss weighting and cap, the reported method arms, and the L2
+operability contrast ``lambda_L2 in {0, 1e-4}``.
 """
 
 from __future__ import annotations
@@ -26,12 +26,18 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from l0_paper.experiments import target_loss
+from l0_paper.experiments.conditions import DEFAULT_INIT_MEAN, DEFAULT_TEMPERATURE
 from l0_paper.precalibration import MANIFEST_JSON, _sha256
 
 PAPER_BUDGETS = (2_000, 5_000, 10_000, 20_000, 40_000)
 PAPER_SEEDS = (0, 1, 2)
 PAPER_HOLDOUT_FAMILIES = ("cms_medicaid", "usda_snap", "state_income_tax")
-PAPER_METHODS = ("informed_l0", "random_reweight", "dense_sample")
+PAPER_METHODS = (
+    "informed_l0",
+    "informed_l0_refit",
+    "random_reweight",
+    "dense_sample",
+)
 PAPER_L2_LAMBDAS = (0.0, 1e-4)
 DEFAULT_OUT = Path("runs/weighted-loss-3seed")
 DEFAULT_RUN_ID = "weighted-loss-3seed"
@@ -96,14 +102,30 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT,
-                        help=f"Workflow output directory (default: {DEFAULT_OUT}).")
-    parser.add_argument("--consumer-facts", type=Path, default=DEFAULT_CONSUMER_FACTS,
-                        help=f"consumer_facts.jsonl path (default: {DEFAULT_CONSUMER_FACTS}).")
-    parser.add_argument("--reuse-precalibration", type=Path, default=None,
-                        help="Existing frozen precalibration directory. Skips facts/base-frame build.")
-    parser.add_argument("--base-h5", type=Path, default=None,
-                        help="Candidate frame for precalibration (default: Populace HF frame).")
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=DEFAULT_OUT,
+        help=f"Workflow output directory (default: {DEFAULT_OUT}).",
+    )
+    parser.add_argument(
+        "--consumer-facts",
+        type=Path,
+        default=DEFAULT_CONSUMER_FACTS,
+        help=f"consumer_facts.jsonl path (default: {DEFAULT_CONSUMER_FACTS}).",
+    )
+    parser.add_argument(
+        "--reuse-precalibration",
+        type=Path,
+        default=None,
+        help="Existing frozen precalibration directory. Skips facts/base-frame build.",
+    )
+    parser.add_argument(
+        "--base-h5",
+        type=Path,
+        default=None,
+        help="Candidate frame for precalibration (default: Populace HF frame).",
+    )
     parser.add_argument(
         "--smoke",
         action="store_true",
@@ -112,30 +134,81 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
 
     # Optional target bundle build.
-    parser.add_argument("--build-targets", action="store_true",
-                        help="Build --consumer-facts first by running l0 build-targets.")
+    parser.add_argument(
+        "--build-targets",
+        action="store_true",
+        help="Build --consumer-facts first by running l0 build-targets.",
+    )
     target_src = parser.add_mutually_exclusive_group()
-    target_src.add_argument("--target-base", type=Path,
-                            help="Existing default-source consumer_facts.jsonl for l0 build-targets --base.")
-    target_src.add_argument("--build-target-base", action="store_true",
-                            help="Let l0 build-targets build the default-source base bundle.")
-    parser.add_argument("--arch-repo", type=Path, default=None,
-                        help="arch-data checkout for --build-targets (default: sibling ../arch-data).")
-    parser.add_argument("--target-year", type=int, default=2023,
-                        help="Base source year for l0 build-targets (default: 2023).")
-    parser.add_argument("--target-workdir", type=Path, default=None,
-                        help="Scratch directory for l0 build-targets.")
+    target_src.add_argument(
+        "--target-base",
+        type=Path,
+        help="Existing default-source consumer_facts.jsonl for l0 build-targets --base.",
+    )
+    target_src.add_argument(
+        "--build-target-base",
+        action="store_true",
+        help="Let l0 build-targets build the default-source base bundle.",
+    )
+    parser.add_argument(
+        "--arch-repo",
+        type=Path,
+        default=None,
+        help="arch-data checkout for --build-targets (default: sibling ../arch-data).",
+    )
+    parser.add_argument(
+        "--target-year",
+        type=int,
+        default=2023,
+        help="Base source year for l0 build-targets (default: 2023).",
+    )
+    parser.add_argument(
+        "--target-workdir",
+        type=Path,
+        default=None,
+        help="Scratch directory for l0 build-targets.",
+    )
 
     # Precalibration build settings.
     parser.add_argument("--period", type=int, default=2024)
-    parser.add_argument("--reset-weights", choices=("uniform", "keep"), default="uniform")
+    parser.add_argument(
+        "--reset-weights", choices=("uniform", "keep"), default="uniform"
+    )
     parser.add_argument("--weight-entity", default="household")
-    parser.add_argument("--subsample", type=int, default=None,
-                        help="Optional household subsample for smoke runs. Omit for paper reproduction.")
-    parser.add_argument("--allow-partial-facts", action="store_true",
-                        help="Tolerate partial facts; for smoke runs, not paper reproduction.")
-    parser.add_argument("--keep-unsupported-targets", action="store_true",
-                        help="Keep unsupported ledger-filter targets and fail if materialization cannot handle them.")
+    parser.add_argument(
+        "--subsample",
+        type=int,
+        default=None,
+        help="Optional household subsample for smoke runs. Omit for paper reproduction.",
+    )
+    parser.add_argument(
+        "--allow-partial-facts",
+        action="store_true",
+        help="Tolerate partial facts; for smoke runs, not paper reproduction.",
+    )
+    parser.add_argument(
+        "--keep-unsupported-targets",
+        action="store_true",
+        help="Keep unsupported ledger-filter targets and fail if materialization cannot handle them.",
+    )
+    parser.add_argument(
+        "--include-congressional-district-targets",
+        action="store_true",
+        help="Opt into Populace's expanded congressional-district target surface.",
+    )
+    parser.add_argument(
+        "--congressional-district-vintage-crosswalk",
+        type=Path,
+        default=None,
+        help="CD vintage crosswalk artifact for translating old-vintage CD facts.",
+    )
+    parser.add_argument(
+        "--target-materialization-cache-dir",
+        type=Path,
+        default=None,
+        help="Optional Populace target-materialization cache directory. Useful for "
+        "full-surface CD runs with expensive reform targets.",
+    )
 
     # Sweep defaults.
     parser.add_argument("--budgets", type=int, nargs="+", default=list(PAPER_BUDGETS))
@@ -143,51 +216,111 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--learning-rate", type=float, default=0.02)
     parser.add_argument("--mass", choices=("conserve", "free"), default="conserve")
+    parser.add_argument("--init-mean", type=float, default=DEFAULT_INIT_MEAN)
+    parser.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE)
     parser.add_argument("--budget-iters", type=int, default=8)
-    parser.add_argument("--target-loss-weighting",
-                        choices=target_loss.TARGET_LOSS_WEIGHTINGS,
-                        default=target_loss.PRODUCTION_US_FISCAL)
-    parser.add_argument("--target-loss-cap", type=float, default=10.0)
-    parser.add_argument("--l2-lambdas", type=float, nargs="+", default=list(PAPER_L2_LAMBDAS))
+    parser.add_argument(
+        "--target-loss-weighting",
+        choices=target_loss.TARGET_LOSS_WEIGHTINGS,
+        default=target_loss.PRODUCTION_US_FISCAL,
+    )
+    parser.add_argument(
+        "--target-loss-cap",
+        type=float,
+        default=None,
+        help="Per-target cap in the calibration loss. Defaults by weighting "
+        "(production_us_fiscal -> Populace production cap 1.0).",
+    )
+    parser.add_argument(
+        "--l2-lambdas", type=float, nargs="+", default=list(PAPER_L2_LAMBDAS)
+    )
     parser.add_argument("--max-weight-ratio", type=float, default=None)
-    parser.add_argument("--holdout-families", nargs="*", default=list(PAPER_HOLDOUT_FAMILIES))
+    parser.add_argument(
+        "--holdout-families", nargs="*", default=list(PAPER_HOLDOUT_FAMILIES)
+    )
     parser.add_argument("--holdout-frac", type=float, default=0.0)
     parser.add_argument("--fit-validation-only", action="store_true")
+    parser.add_argument(
+        "--full-target-surface",
+        action="store_true",
+        help="Fit every compiled Populace target, including validation-only "
+        "families, and disable holdout/rotation. This is the production-surface "
+        "frontier; holdout is treated as a separate experiment.",
+    )
     parser.add_argument("--rotation-folds", type=int, default=5)
     parser.add_argument("--rotation-budget", type=int, default=10_000)
-    parser.add_argument("--rotation-balance", choices=("target_count", "family"),
-                        default="target_count")
+    parser.add_argument(
+        "--rotation-balance", choices=("target_count", "family"), default="target_count"
+    )
     parser.add_argument("--rotation-seed", type=int, default=0)
-    parser.add_argument("--methods", nargs="+",
-                        choices=["informed_l0", "informed_l1", "random_reweight", "dense_sample"],
-                        default=list(PAPER_METHODS))
-    parser.add_argument("--jobs", type=int, default=1,
-                        help="Parallel seed/fold/L2 shards for l0 sweep. Use with "
-                             "OMP_NUM_THREADS=1/MKL_NUM_THREADS=1 to avoid CPU "
-                             "oversubscription.")
-    parser.add_argument("--sample-reweight", choices=("equal_mass", "renorm_kept"),
-                        default="equal_mass")
-    parser.add_argument("--sample-replace", action=argparse.BooleanOptionalAction,
-                        default=True)
-    parser.add_argument("--resume", action=argparse.BooleanOptionalAction,
-                        default=True,
-                        help="Resume an interrupted sweep in --out (default: yes).")
+    parser.add_argument(
+        "--methods",
+        nargs="+",
+        choices=[
+            "informed_l0",
+            "informed_l0_refit",
+            "informed_l1",
+            "random_reweight",
+            "dense_sample",
+        ],
+        default=list(PAPER_METHODS),
+    )
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="Parallel seed/fold/L2 shards for l0 sweep. Use with "
+        "OMP_NUM_THREADS=1/MKL_NUM_THREADS=1 to avoid CPU "
+        "oversubscription.",
+    )
+    parser.add_argument(
+        "--sample-reweight", choices=("equal_mass", "renorm_kept"), default="equal_mass"
+    )
+    parser.add_argument(
+        "--sample-replace", action=argparse.BooleanOptionalAction, default=True
+    )
+    parser.add_argument(
+        "--resume",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Resume an interrupted sweep in --out (default: yes).",
+    )
     parser.add_argument("--run-id", default=DEFAULT_RUN_ID)
 
     # Outputs.
-    parser.add_argument("--skip-sweep", action="store_true",
-                        help="Only prepare/reuse the precalibration artifact.")
-    parser.add_argument("--skip-figures", action="store_true",
-                        help="Run the sweep but do not render report figures/tables.")
-    parser.add_argument("--paper-figures", action=argparse.BooleanOptionalAction,
-                        default=True,
-                        help="Copy rendered PNG figures into paper/figures (default: yes).")
-    parser.add_argument("--rebuild-pdf", action="store_true",
-                        help="Render the paper PDF after rendering figures.")
-    parser.add_argument("--pdf-builder", choices=("quarto", "latexmk"), default="quarto",
-                        help="PDF builder for --rebuild-pdf (default: quarto).")
-    parser.add_argument("--pdf-output", type=Path, default=DEFAULT_PAPER_PDF,
-                        help=f"Path to copy the rendered PDF to (default: {DEFAULT_PAPER_PDF}).")
+    parser.add_argument(
+        "--skip-sweep",
+        action="store_true",
+        help="Only prepare/reuse the precalibration artifact.",
+    )
+    parser.add_argument(
+        "--skip-figures",
+        action="store_true",
+        help="Run the sweep but do not render report figures/tables.",
+    )
+    parser.add_argument(
+        "--paper-figures",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Copy rendered PNG figures into paper/figures (default: yes).",
+    )
+    parser.add_argument(
+        "--rebuild-pdf",
+        action="store_true",
+        help="Render the paper PDF after rendering figures.",
+    )
+    parser.add_argument(
+        "--pdf-builder",
+        choices=("quarto", "latexmk"),
+        default="quarto",
+        help="PDF builder for --rebuild-pdf (default: quarto).",
+    )
+    parser.add_argument(
+        "--pdf-output",
+        type=Path,
+        default=DEFAULT_PAPER_PDF,
+        help=f"Path to copy the rendered PDF to (default: {DEFAULT_PAPER_PDF}).",
+    )
     args = parser.parse_args(argv)
     if args.smoke:
         _apply_smoke_defaults(
@@ -195,6 +328,11 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             out_was_provided=out_was_provided,
             run_id_was_provided=run_id_was_provided,
         )
+    if args.full_target_surface:
+        args.holdout_families = []
+        args.holdout_frac = 0.0
+        args.fit_validation_only = True
+        args.rotation_folds = 0
     if args.jobs < 1:
         parser.error("--jobs must be >= 1")
     return args
@@ -263,6 +401,13 @@ def _prepare_precalibration(args: argparse.Namespace, facts: Path) -> Path:
         subsample_seed=args.seeds[0],
         allow_partial_facts=args.allow_partial_facts,
         drop_unsupported_filters=not args.keep_unsupported_targets,
+        include_congressional_district_targets=(
+            args.include_congressional_district_targets
+        ),
+        congressional_district_vintage_crosswalk=(
+            args.congressional_district_vintage_crosswalk
+        ),
+        target_materialization_cache_dir=args.target_materialization_cache_dir,
     )
     return artifact.directory
 
@@ -293,6 +438,11 @@ def _validate_implicit_precalibration_reuse(
     args: argparse.Namespace, facts: Path, manifest_path: Path
 ) -> None:
     manifest = json.loads(manifest_path.read_text())
+    crosswalk_sha = (
+        _sha256(args.congressional_district_vintage_crosswalk.expanduser().resolve())
+        if args.congressional_district_vintage_crosswalk is not None
+        else None
+    )
     expected = {
         "period": args.period,
         "weight_entity": args.weight_entity,
@@ -301,6 +451,15 @@ def _validate_implicit_precalibration_reuse(
         "subsample_seed": args.seeds[0] if args.subsample is not None else None,
         "allow_partial_facts": args.allow_partial_facts,
         "drop_unsupported_filters": not args.keep_unsupported_targets,
+        "include_congressional_district_targets": (
+            args.include_congressional_district_targets
+        ),
+        "congressional_district_vintage_crosswalk_sha256": crosswalk_sha,
+        "target_materialization_cache_dir": (
+            str(args.target_materialization_cache_dir.expanduser().resolve())
+            if args.target_materialization_cache_dir is not None
+            else None
+        ),
         "ledger_facts_sha256": _sha256(facts.expanduser().resolve()),
     }
     expected["base_h5_sha256"] = (
@@ -312,7 +471,7 @@ def _validate_implicit_precalibration_reuse(
     mismatches = [
         f"{key}: manifest={manifest.get(key)!r}, requested={value!r}"
         for key, value in expected.items()
-        if manifest.get(key) != value
+        if _manifest_value(manifest, key) != value
     ]
     if mismatches:
         details = "; ".join(mismatches[:4])
@@ -325,27 +484,54 @@ def _validate_implicit_precalibration_reuse(
         )
 
 
+def _manifest_value(manifest: dict, key: str):
+    if key == "include_congressional_district_targets":
+        return bool(manifest.get(key, False))
+    if key == "congressional_district_vintage_crosswalk_sha256":
+        return manifest.get(key)
+    return manifest.get(key)
+
+
 def _run_sweep(args: argparse.Namespace, precal_dir: Path) -> None:
     from l0_paper.cli import sweep
 
     sweep_args: list[object] = [
-        "--reuse-precalibration", precal_dir,
-        "--out", args.out,
-        "--weight-entity", args.weight_entity,
-        "--epochs", args.epochs,
-        "--learning-rate", args.learning_rate,
-        "--mass", args.mass,
-        "--budget-iters", args.budget_iters,
-        "--target-loss-weighting", args.target_loss_weighting,
-        "--target-loss-cap", args.target_loss_cap,
-        "--holdout-frac", args.holdout_frac,
-        "--rotation-folds", args.rotation_folds,
-        "--rotation-budget", args.rotation_budget,
-        "--rotation-balance", args.rotation_balance,
-        "--rotation-seed", args.rotation_seed,
-        "--sample-reweight", args.sample_reweight,
-        "--run-id", args.run_id,
-        "--jobs", args.jobs,
+        "--reuse-precalibration",
+        precal_dir,
+        "--out",
+        args.out,
+        "--weight-entity",
+        args.weight_entity,
+        "--epochs",
+        args.epochs,
+        "--learning-rate",
+        args.learning_rate,
+        "--mass",
+        args.mass,
+        "--init-mean",
+        args.init_mean,
+        "--temperature",
+        args.temperature,
+        "--budget-iters",
+        args.budget_iters,
+        "--target-loss-weighting",
+        args.target_loss_weighting,
+        "--holdout-frac",
+        args.holdout_frac,
+        "--rotation-folds",
+        args.rotation_folds,
+        "--rotation-budget",
+        args.rotation_budget,
+        "--rotation-balance",
+        args.rotation_balance,
+        "--rotation-seed",
+        args.rotation_seed,
+        "--sample-reweight",
+        args.sample_reweight,
+        "--run-id",
+        args.run_id,
+        "--jobs",
+        args.jobs,
     ]
     _extend_option(sweep_args, "--budgets", args.budgets)
     _extend_option(sweep_args, "--seeds", args.seeds)
@@ -353,8 +539,12 @@ def _run_sweep(args: argparse.Namespace, precal_dir: Path) -> None:
     _extend_option(sweep_args, "--holdout-families", args.holdout_families)
     if args.max_weight_ratio is not None:
         sweep_args.extend(["--max-weight-ratio", args.max_weight_ratio])
+    if args.target_loss_cap is not None:
+        sweep_args.extend(["--target-loss-cap", args.target_loss_cap])
     if args.fit_validation_only:
         sweep_args.append("--fit-validation-only")
+    if args.full_target_surface:
+        sweep_args.append("--full-target-surface")
     if not args.sample_replace:
         sweep_args.append("--no-sample-replace")
     sweep_args.append("--resume" if args.resume else "--no-resume")
@@ -367,8 +557,10 @@ def _render_figures(args: argparse.Namespace) -> None:
     from l0_paper.cli import figures
 
     figure_args: list[object] = [
-        "--sweep", args.out,
-        "--anchor-budget", args.rotation_budget,
+        "--sweep",
+        args.out,
+        "--anchor-budget",
+        args.rotation_budget,
     ]
     if args.paper_figures:
         figure_args.append("--paper-figures")

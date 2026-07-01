@@ -48,21 +48,21 @@ calibration method are interchangeable components rather than fixed code, and th
 studied here is one such component. The paper describes the pipeline at the level needed to follow the
 calibration step, and then describes the configuration used here.
 
-This paper is a proof of concept on \populace{}'s current target surface: it asks whether
+This paper is a proof of concept on \populace{}'s current full target surface: it asks whether
 $L_0$ selection with Hard Concrete gates can produce a sparse, calibrated dataset on the targets
-\populace{} assembles today. Local-area and subnational calibration are the production motivation for
-the method and a future application of it, rather than results this paper presents.
+\populace{} assembles today, including the congressional-district surface that motivates the build-big,
+then-prune workflow. Local-area and subnational calibration are therefore part of the target surface being
+fit, while full production release engineering remains outside the scope of the proof of concept.
 
 The empirical question is whether informed selection earns its added complexity. We ask three
-things. First, when does informed $L_0$ selection reproduce the targets more accurately than random
-sampling, survey-weight sampling, and the convex $L_1$ alternative at the same record budget, and how
-does that comparison change as the budget tightens? Second, does the retained sample generalize, in the sense that it also matches
-whole target families held out of the fit? Third, does the framework give usable control over the size
-of the output, the geographic level it focuses on, and the concentration of the fitted weights, and
-what does tightening the concentration control cost in accuracy? The answers are regime-dependent:
-informed selection's accuracy advantage over the baselines concentrates at small budgets, while its
-control over size, geography, and weight concentration is what distinguishes it at the larger budgets at
-which a dataset is shipped.
+things. First, on the actual \populace{} loss over the full target surface, does informed $L_0$ selection
+or its post-$L_0$ refit reproduce the targets more accurately than dense calibration and sampling
+baselines under the same optimizer budget? Second, what do supplemental raw-error diagnostics reveal about
+the tail of the target distribution? Third, does the framework give usable control over the size of the
+output and the concentration of the fitted weights? The current full-surface probe gives a constructive
+answer: the raw gated $L_0$ weights are not good enough by themselves, but the support selected by the
+gates becomes more accurate than matched random support and slightly lower-loss than the 1{,}500-epoch
+dense no-$L_0$ run after an ordinary calibration refit.
 
 The rest of the paper follows that structure. Section~\ref{sec:background} places the work in the
 literature on spatial microsimulation, survey calibration, and sparse selection.

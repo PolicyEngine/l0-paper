@@ -136,8 +136,40 @@ def save_method_npz(
     return path
 
 
+def save_weight_npz(
+    path: str | Path,
+    run: RunResult,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> Path:
+    """Persist the full candidate-aligned weights needed to rescore a run.
+
+    This intentionally stays lighter than :func:`save_method_npz`: per-target
+    diagnostics already live in ``target_diagnostics_long.csv``. The weight vector,
+    initial weights, loss trajectory, and JSON metadata are enough to reconstruct
+    any later Populace score against the frozen precalibration artifact.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp")
+    payload = _jsonable(metadata or {})
+    with tmp.open("wb") as handle:
+        np.savez_compressed(
+            handle,
+            weights=np.asarray(run.weights, dtype=np.float64),
+            initial_weights=np.asarray(run.initial_weights, dtype=np.float64),
+            solver_loss_trajectory=np.asarray(run.loss_trajectory, dtype=np.float64),
+            loss_trajectory=np.asarray(run.loss_trajectory, dtype=np.float64),
+            metadata_json=np.asarray(json.dumps(payload, default=_json_default)),
+        )
+    tmp.replace(path)
+    return path
+
+
 def write_run_manifest(path: str | Path, payload: dict[str, Any]) -> Path:
     """Write the run manifest JSON."""
     path = Path(path)
-    path.write_text(json.dumps(payload, indent=2, default=_json_default, allow_nan=False))
+    path.write_text(
+        json.dumps(payload, indent=2, default=_json_default, allow_nan=False)
+    )
     return path

@@ -1,22 +1,39 @@
 \section{Future work}
 \label{sec:future_work}
 
-This study is a proof of concept on \populace{}'s national and state target surface. The production
-motivation for informed selection is subnational: calibrating one dataset to congressional-district totals
-while keeping district sums consistent with state and national totals. Reaching that surface means pairing
-a much larger candidate universe---records replicated across the geographic placements district targets
-require---with the finer target system the pipeline can already construct (Appendix~\ref{app:targets}), and
-testing whether informed $L_0$ holds its small-budget edge when the targets are local and numerous. That
-setting also invites the head-to-head benchmark this paper sets up but does not run: against generalized
-regression and iterative proportional fitting (Section~\ref{sec:background}), the classical calibrators the
-sampler is expected to respect. \citet{tanton2014co} compare generalized regression with combinatorial
-optimisation for small-area reweighting, and a subnational build would place informed $L_0$ on the same
-footing.
+This study moves the proof of concept onto \populace{}'s current full target surface, including
+congressional-district targets. The next empirical step is to turn the matched probe into a frontier by
+sweeping the normalized sparsity share across retained counts. Holdout panels should remain separate
+robustness checks that ask narrower
+questions: which target families or geographies generalize when withheld, which targets dominate the loss,
+and how sensitive the result is to the production target weights and cap.
+
+A related thread varies the penalties the headline run deliberately holds fixed. The reported experiments
+set $\lambda_{L_2}=0$ and leave the weight cap off, so the comparison isolates the effect of the $L_0$
+gates on sparsification; this leaves the concentration controls as a clean axis to study on their own.
+Three experiments follow. First, evaluate the convex $L_1$ selector of Section~\ref{sec:l1_background}
+head-to-head with $L_0$ on the same surface: because a single $L_1$ penalty couples how many records
+survive with how much the survivors shrink, we expect it to be a weaker selector than the $L_0$ gates,
+and running it would show whether that coupling actually costs it. Second, sweep the soft concentration
+penalty $\lambda_{L_2}$ and the hard \texttt{max\_weight\_ratio} cap against $\lambda_{L_0}$. Third, use
+that sweep to trace the effective-sample-size against accuracy trade-off, quantifying how much calibration
+fit a build gives up to bound weight concentration.
 
 A second thread is the build-large-then-prune regime the controls are designed for, in which a pipeline
-assembles a candidate universe far larger than it can ship---millions of records rather than the 75{,}112
-used here---and prunes it to a deployable budget under the calibration targets. The compression ratios
-would be far more aggressive than the range tested here, which is where informed selection is expected to
-help most: a random draw from a tight budget is least likely to span a demanding target system, so the
-gates have the most to add. Whether their small-budget edge scales to that regime, and at what compute
-cost (Appendix~\ref{app:cost}), is what that setting tests.
+assembles a candidate universe far larger than it can ship---hundreds of thousands or millions of records
+rather than a compact survey file---and prunes it to a deployable budget under the calibration targets.
+The current three-year support file is a step in that direction. More aggressive support expansion is
+where target-informed selection has its clearest opportunity to justify its cost: a random draw from a
+tight budget is least likely to span a demanding target system, so a selector trained on the targets has
+the most to add.
+
+The full-surface design also clarifies which classical comparators are worth adding. Survey-weight
+(probability-proportional-to-size) sampling is the natural calibrate-then-reduce counterpart to random +
+reweight and belongs in the next frontier as a literature comparator, with the caveat that it selects
+records by the population mass they represent rather than by their fit to the targets. Raking, GREG,
+balanced sampling, and combinatorial optimization remain relevant reference methods, but not all are
+natural baselines for a heterogeneous
+32{,}633-target fiscal surface. The appropriate next comparison is on the simpler categorical-margin
+subsets where their assumptions hold cleanly, in the spirit of \citet{tanton2014co}'s comparison of
+generalized regression with combinatorial optimisation for small-area reweighting, while the production
+frontier continues to use the Populace loss over the complete surface.

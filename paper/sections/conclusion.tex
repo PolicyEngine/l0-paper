@@ -3,26 +3,22 @@
 
 This paper studies $L_0$ regularization as a way to subsample a large microsimulation dataset down to
 a usable size. The problem arises because a pipeline built for fidelity combines many sources and
-adds record-level variation, which produces more candidate records than a deployable dataset can
-hold. The reduction to a fixed budget is a sampling choice, and the paper treats it as one.
+adds record-level geographic variation, which produces more candidate records than a deployable dataset
+can hold. The reduction to a fixed budget is a sampling choice, and the paper treats it as one.
 
 The method uses Hard Concrete gates to select records and fit their weights in one optimization, with
-selection driven by the calibration targets. That makes the retained-record count an explicit control
-and keeps the reduced dataset calibrated to its targets. We compare the method against three matched-budget
-alternatives that share its calibrator---its convex $L_1$ analog, random sampling with reweighting, and
-survey-weight (Hansen--Hurwitz) sampling---and report how the size, geography, and weight controls behave.
+selection driven by the calibration targets. The current full-surface probe shows that the gates are most
+useful as a support selector. On the full Populace target surface, a normalized $L_0$ penalty retained
+57{,}240 of 337{,}704 candidate household records. Publishing the raw gated weights would leave too much
+loss, but refitting ordinary calibration weights on the selected support reduced the Populace objective to
+4.74\%. The same 1{,}500-epoch budget gives 5.07\% for dense no-$L_0$ calibration, 7.55\% for a matched
+random support followed by the same reweighting, and 24.24\% for a random sample of dense calibrated
+weights scaled back to total mass without refitting.
 
-Across the budget sweep, informed $L_0$ reaches lower out-of-sample error than random sampling under
-aggressive compression; the two converge as the budget grows, and on the median random sampling becomes the
-more accurate of them, while on the tail-sensitive mean informed $L_0$ stays ahead throughout. Survey-weight
-sampling is the least accurate of the classical baselines, and the convex $L_1$ analog collapses under
-forced sparsity, recovering toward informed $L_0$ only at large budgets. Informed selection's distinctive
-value is therefore operational: it sets the dataset size, the geographic emphasis, and the weight
-concentration through explicit parameters in one optimization, and it avoids the variance of a random draw
-at tight budgets.
-
-The contribution is therefore twofold: a target-informed sampling method, and an open pipeline,
-\populace{}, that makes the method a configuration choice other projects can reuse.
-Section~\ref{sec:future_work} sets out the subnational and build-large-then-prune extensions the method is
-designed for, as well as the raking, balanced-sampling, and combinatorial-optimisation comparators that
-become appropriate on target surfaces where their assumptions fit cleanly.
+The result is not the final frontier; it is the first presentable full-surface signal. It justifies a
+broader sweep over normalized sparsity penalties, seeds, and concentration controls, with dense
+calibration run to a stopping rule and survey-weight and classical calibration comparators from the
+literature added where they are appropriate. The contribution is therefore twofold: a target-informed sampling method
+that can select a sparse support with lower completed-run loss than the current random and dense baselines,
+and an open \populace{} pipeline that makes such support-selection experiments reproducible on the real
+production target surface.

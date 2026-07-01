@@ -1,28 +1,23 @@
 \begin{table}[H]
 \centering
 {\tablefont
-\resizebox{\textwidth}{!}{%
-\begin{tabular}{rrrrrrr}
+\resizebox{\ifdim\width>\linewidth \linewidth\else \width\fi}{!}{%
+\begin{tabular}{lrr}
 \toprule
- & \multicolumn{3}{c}{Median ARE (\%)} & \multicolumn{3}{c}{Mean ARE (\%)} \\
-\cmidrule(lr){2-4}\cmidrule(lr){5-7}
-Budget & Informed $L_0$ & Random + reweight & $\Delta$ (pp) & Informed $L_0$ & Random + reweight & $\Delta$ (pp) \\
+Comparison & Loss difference (pp) & Relative loss change \\
 \midrule
-2{,}000 & 47.3 & 50.1 & -2.8 {\scriptsize[-16.9, 11.3]} & 225.0 & 1{,}797.5 & -1{,}572.5 {\scriptsize[-2{,}464.6, -680.4]} \\
-5{,}000 & 41.7 & 35.8 & 5.9 {\scriptsize[2.7, 9.1]} & 481.9 & 1{,}246.3 & -764.4 {\scriptsize[-1{,}304.9, -224.0]} \\
-10{,}000 & 35.0 & 31.3 & 3.7 {\scriptsize[0.8, 6.6]} & 584.0 & 1{,}171.7 & -587.7 {\scriptsize[-1{,}380.3, 204.8]} \\
-20{,}000 & 29.0 & 27.8 & 1.1 {\scriptsize[-1.0, 3.3]} & 757.7 & 1{,}009.0 & -251.3 {\scriptsize[-582.2, 79.6]} \\
-40{,}000 & 23.3 & 25.1 & -1.8 {\scriptsize[-7.2, 3.6]} & 884.3 & 1{,}059.0 & -174.6 {\scriptsize[-401.1, 51.8]} \\
+Informed $L_0$ + refit vs. dense no-$L_0$ & $-0.33$ & $-6.4\%$ \\
+Informed $L_0$ + refit vs. random + reweight & $-2.81$ & $-37.2\%$ \\
+Informed $L_0$ + refit vs. raw gated $L_0$ & $-5.12$ & $-51.9\%$ \\
+Dense random scaled sample vs. dense no-$L_0$ & $+19.17$ & $+378.3\%$ \\
 \bottomrule
 \end{tabular}
 }
 }
-\caption{Paired out-of-sample comparison of Informed $L_0$ against Random + reweight at each budget, on the
-headline median and the tail-sensitive mean. Each $\Delta$ is the cross-seed mean of the per-seed
-difference between the methods (negative favours Informed $L_0$) with a 95\% confidence interval over the
-3 paired seeds; a paired $t$-test on these differences is reported in the text as a descriptive
-diagnostic. On the median Informed $L_0$ leads only under aggressive compression, where a small random draw
-cannot span the targets; on the mean it leads at every budget, because the mean tracks the seed-to-seed
-tail that Random + reweight cannot control. Numbers are the un-penalised ($\lambda_{L_2}=0$) rows.}
+\caption{Matched loss comparisons for the full-surface probe. Negative values favour the method named
+first. Differences are in percentage points of the capped, target-weighted Populace objective loss.}
 \label{tab:paired_comparison}
+\tablenote{This table is descriptive because the current matched full-surface run uses one seed and one
+normalized $L_0$ penalty. Dense no-$L_0$, the post-$L_0$ refit, and random + reweight all use 1{,}500
+optimizer epochs, but dense no-$L_0$ is still slowly declining at the end of that budget.}
 \end{table}

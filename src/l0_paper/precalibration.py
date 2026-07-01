@@ -21,10 +21,12 @@ The registry is written as its portable, content-addressed JSON artifact.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import pickle
 import subprocess
 from dataclasses import dataclass
+from importlib import metadata
 from pathlib import Path
 from typing import Any, Literal
 
@@ -84,6 +86,13 @@ def _populace_commit() -> str | None:
             check=True,
         ).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return None
+
+
+def _package_version(package: str) -> str | None:
+    try:
+        return metadata.version(package)
+    except metadata.PackageNotFoundError:
         return None
 
 
@@ -178,7 +187,15 @@ def _reset_uniform(frame: Frame, weight_entity: str) -> Frame:
     )
 
 
-def _compile_registry(driver, facts, *, period: int, allow_partial: bool) -> TargetRegistry:
+def _compile_registry(
+    driver,
+    facts,
+    *,
+    period: int,
+    allow_partial: bool,
+    include_congressional_district_targets: bool = False,
+    congressional_district_vintage_crosswalk: str | Path | None = None,
+) -> TargetRegistry:
     """Compile the target registry, optionally tolerating a partial facts file.
 
     The production ``compile_us_fiscal_target_registry`` adds the JCT
@@ -188,14 +205,56 @@ def _compile_registry(driver, facts, *, period: int, allow_partial: bool) -> Tar
     smoke-test the full pipeline before a complete Ledger export exists. It is a
     verification aid, not a source of paper numbers.
     """
+    if allow_partial and (
+        include_congressional_district_targets
+        or congressional_district_vintage_crosswalk is not None
+    ):
+        raise ValueError(
+            "Congressional-district targets require the complete Populace fiscal "
+            "target compiler; do not combine them with --allow-partial-facts."
+        )
+
+    compile_kwargs: dict[str, Any] = {"target_period": period}
+    compile_parameters = inspect.signature(
+        driver.compile_us_fiscal_target_registry
+    ).parameters
+    if include_congressional_district_targets:
+        if "include_congressional_district_targets" not in compile_parameters:
+            raise RuntimeError(
+                "The configured Populace checkout does not support congressional "
+                "district targets. Update Populace to a version whose "
+                "compile_us_fiscal_target_registry accepts "
+                "include_congressional_district_targets."
+            )
+        compile_kwargs["include_congressional_district_targets"] = True
+    if congressional_district_vintage_crosswalk is not None:
+        if "congressional_district_vintage_crosswalk" not in compile_parameters:
+            raise RuntimeError(
+                "The configured Populace checkout does not support congressional "
+                "district vintage crosswalks. Update Populace to a version whose "
+                "compile_us_fiscal_target_registry accepts "
+                "congressional_district_vintage_crosswalk."
+            )
+        loader = getattr(driver, "load_congressional_district_vintage_crosswalk", None)
+        if loader is None:
+            raise RuntimeError(
+                "The configured Populace checkout does not expose "
+                "load_congressional_district_vintage_crosswalk."
+            )
+        compile_kwargs["congressional_district_vintage_crosswalk"] = loader(
+            Path(congressional_district_vintage_crosswalk).expanduser()
+        )
+
     if not allow_partial:
-        return driver.compile_us_fiscal_target_registry(facts, target_period=period)
+        return driver.compile_us_fiscal_target_registry(facts, **compile_kwargs)
 
     from populace.build.ledger_targets import compile_ledger_target_references
     from populace.build.us.fiscal_targets import _dynamic_us_fiscal_target_references
 
     materialized = tuple(facts)
-    references = _dynamic_us_fiscal_target_references(materialized, target_period=period)
+    references = _dynamic_us_fiscal_target_references(
+        materialized, target_period=period
+    )
     return compile_ledger_target_references(materialized, references, country="us")
 
 
@@ -240,6 +299,9 @@ def build_precalibration_dataset(
     subsample_seed: int = 0,
     allow_partial_facts: bool = False,
     drop_unsupported_filters: bool = True,
+    include_congressional_district_targets: bool = False,
+    congressional_district_vintage_crosswalk: str | Path | None = None,
+    target_materialization_cache_dir: str | Path | None = None,
 ) -> PreCalibrationArtifact:
     """Build the pre-calibration ``(frame, registry)`` and freeze it to ``out_dir``.
 
@@ -261,6 +323,16 @@ def build_precalibration_dataset(
             ``ledger_filter`` metadata the US fiscal materializer cannot compute
             (recorded in the manifest) instead of letting materialization abort.
             See :func:`_drop_unsupported_filter_targets`.
+        include_congressional_district_targets: Opt into Populace's expanded
+            congressional-district target surface when the configured Populace
+            checkout supports it.
+        congressional_district_vintage_crosswalk: Optional CD vintage crosswalk
+            artifact used by Populace to translate old-vintage CD facts onto the
+            current district vintage before target compilation.
+        target_materialization_cache_dir: Optional Populace materialization cache
+            directory for expensive formula-owned target columns. The cache is
+            keyed by base frame, Populace commit, PolicyEngine-US version, seed,
+            target period, registry version, and CD crosswalk hash.
 
     Returns:
         A :class:`PreCalibrationArtifact` with the in-memory frame and registry.
@@ -270,10 +342,26 @@ def build_precalibration_dataset(
 
     facts_path = Path(ledger_facts).expanduser().resolve()
     facts = driver._load_ledger_facts(facts_path)
+    print(f"Loaded {len(facts):,} ledger fact(s) from {facts_path}.", flush=True)
+    crosswalk_path = (
+        Path(congressional_district_vintage_crosswalk).expanduser().resolve()
+        if congressional_district_vintage_crosswalk is not None
+        else None
+    )
     registry = _compile_registry(
-        driver, facts, period=period, allow_partial=allow_partial_facts
+        driver,
+        facts,
+        period=period,
+        allow_partial=allow_partial_facts,
+        include_congressional_district_targets=include_congressional_district_targets,
+        congressional_district_vintage_crosswalk=crosswalk_path,
     )
     target_specs = registry.specs
+    print(
+        f"Compiled Populace target registry: {len(target_specs):,} target(s), "
+        f"version={registry.version}.",
+        flush=True,
+    )
 
     dropped_unsupported: dict[str, list[str]] = {}
     if drop_unsupported_filters:
@@ -288,6 +376,7 @@ def build_precalibration_dataset(
             )
 
     base_path = _absolute_path(base_h5) if base_h5 else driver._download_base_h5()
+    base_h5_sha256 = _sha256(base_path)
     frame = driver._load_frame(base_path)
 
     if subsample is not None:
@@ -316,14 +405,54 @@ def build_precalibration_dataset(
             frame, target_specs, seed=aca_seed
         )
 
+    materialize_kwargs: dict[str, Any] = {}
+    cache_path = (
+        Path(target_materialization_cache_dir).expanduser().resolve()
+        if target_materialization_cache_dir is not None
+        else None
+    )
+    materialize_parameters = inspect.signature(
+        driver._materialize_target_frame
+    ).parameters
+    if cache_path is not None:
+        if "target_materialization_cache_dir" not in materialize_parameters:
+            raise RuntimeError(
+                "The configured Populace checkout does not support "
+                "target_materialization_cache_dir on _materialize_target_frame."
+            )
+        materialize_kwargs["target_materialization_cache_dir"] = cache_path
+        materialize_kwargs["target_materialization_cache_context"] = {
+            "base_dataset_sha256": base_h5_sha256,
+            "build_commit": _populace_commit(),
+            "policyengine_us_version": _package_version("policyengine-us"),
+            "seed": aca_seed,
+            "target_period": period,
+            "target_registry_version": registry.version,
+            "congressional_district_vintage_crosswalk_sha256": (
+                _sha256(crosswalk_path) if crosswalk_path is not None else None
+            ),
+        }
+
+    print(
+        f"Materializing target frame for {len(target_specs):,} target(s) "
+        f"on {frame.n(weight_entity):,} {weight_entity} records...",
+        flush=True,
+    )
     target_frame, registry, compilation = driver._materialize_target_frame(
-        frame, target_specs
+        frame, target_specs, **materialize_kwargs
+    )
+    print(
+        f"Materialized target frame: {len(registry):,} retained target(s), "
+        f"{len(compilation.get('dropped_target_names', []) or []):,} dropped.",
+        flush=True,
     )
 
     if reset_weights == "uniform":
         target_frame = _reset_uniform(target_frame, weight_entity)
     elif reset_weights != "keep":
-        raise ValueError(f"reset_weights must be 'uniform' or 'keep', got {reset_weights!r}.")
+        raise ValueError(
+            f"reset_weights must be 'uniform' or 'keep', got {reset_weights!r}."
+        )
 
     out = Path(out_dir).expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -342,6 +471,13 @@ def build_precalibration_dataset(
         "subsample_seed": subsample_seed if subsample is not None else None,
         "allow_partial_facts": allow_partial_facts,
         "drop_unsupported_filters": drop_unsupported_filters,
+        "include_congressional_district_targets": include_congressional_district_targets,
+        "congressional_district_vintage_crosswalk_path": (
+            str(crosswalk_path) if crosswalk_path is not None else None
+        ),
+        "congressional_district_vintage_crosswalk_sha256": (
+            _sha256(crosswalk_path) if crosswalk_path is not None else None
+        ),
         "formula_owned_dropped_count": sum(
             len(columns) for columns in formula_owned_dropped.values()
         ),
@@ -349,7 +485,7 @@ def build_precalibration_dataset(
         "unsupported_filter_dropped_count": len(dropped_unsupported),
         "unsupported_filter_dropped": dropped_unsupported,
         "base_h5_path": str(base_path),
-        "base_h5_sha256": _sha256(base_path),
+        "base_h5_sha256": base_h5_sha256,
         "ledger_facts_path": str(facts_path),
         "ledger_facts_sha256": _sha256(facts_path),
         "n_ledger_facts": len(facts),
@@ -358,6 +494,7 @@ def build_precalibration_dataset(
         "n_targets": len(registry),
         "target_families": sorted({spec.family for spec in registry.specs}),
         "aca_marketplace_applied": aca_applied,
+        "target_materialization_cache_dir": str(cache_path) if cache_path else None,
         "dropped_target_count": len(dropped),
         "dropped_target_names": dropped,
         "artifacts": {

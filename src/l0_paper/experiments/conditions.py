@@ -31,7 +31,12 @@ import pandas as pd
 
 from populace.calibrate import calibrate
 from populace.calibrate.target import TargetSet
-from populace.frame import MassChange, Weights
+from populace.frame import MassChange, WeightKind, Weights
+
+try:
+    from populace.calibrate import refit_l0_selection as _populace_refit_l0_selection
+except ImportError:  # pragma: no cover - compatibility with released Populace.
+    _populace_refit_l0_selection = None
 
 # Default Hard-Concrete / optimizer hyperparameters (Appendix table in the paper).
 DEFAULT_EPOCHS = 1000
@@ -72,7 +77,7 @@ def run_l0(
     fit_targets: TargetSet,
     *,
     weight_entity: str = "household",
-    target_records: int,
+    target_records: int | None,
     seed: int = 0,
     epochs: int = DEFAULT_EPOCHS,
     learning_rate: float = DEFAULT_LEARNING_RATE,
@@ -87,7 +92,11 @@ def run_l0(
     target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
     progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> RunResult:
-    """Condition A: informed L0 sampling with Hard-Concrete gates at a budget.
+    """Condition A: informed L0 sampling with Hard-Concrete gates.
+
+    When ``target_records`` is provided, Populace searches for an L0 penalty that
+    reaches the requested retained-record count. When it is ``None``, the supplied
+    ``l0_lambda`` is used directly as a fixed sparsity penalty.
 
     ``l2_lambda`` is passed through to Populace's soft concentration penalty.
     """
@@ -142,6 +151,198 @@ def run_l0(
         options=options,
         calibration_result=result,
         sampling=None,
+    )
+
+
+def run_l0_post_refit(
+    frame,
+    fit_targets: TargetSet,
+    l0_selection: RunResult,
+    *,
+    weight_entity: str = "household",
+    seed: int | None = None,
+    epochs: int = DEFAULT_EPOCHS,
+    learning_rate: float = DEFAULT_LEARNING_RATE,
+    mass: str = "conserve",
+    max_weight_ratio: float | None = None,
+    target_loss_weights: np.ndarray | None = None,
+    target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
+    progress_callback: Callable[[dict[str, object]], None] | None = None,
+) -> RunResult:
+    """Post-selection refit for an informed-L0 subset.
+
+    Hard-Concrete gates decide which records survive. This refits ordinary dense
+    calibration weights on exactly those survivors, using the L0 weights as the
+    starting vector, then maps the fitted subset back onto the full candidate
+    universe. It is the post-L0 analogue of the random-then-reweight baseline.
+    """
+    start = time.perf_counter()
+    if weight_entity != l0_selection.weight_entity:
+        raise ValueError(
+            "weight_entity must match l0_selection.weight_entity "
+            f"({weight_entity!r} != {l0_selection.weight_entity!r})."
+        )
+    full_weights = np.asarray(l0_selection.weights, dtype=np.float64)
+    ids = frame.table(weight_entity)[f"{weight_entity}_id"].to_numpy()
+    if full_weights.shape != ids.shape:
+        raise ValueError(
+            "l0_selection weights must align with the candidate frame, got "
+            f"{full_weights.shape} vs {ids.shape}."
+        )
+    prune_atol = 1e-6 * float(np.mean(np.asarray(l0_selection.initial_weights)))
+    selected = full_weights > prune_atol
+    if not selected.any():
+        raise ValueError("Cannot post-refit L0 selection with no retained records.")
+
+    chosen_ids = set(ids[selected].tolist())
+    membership_column = f"person_{weight_entity}_id"
+    person_mask = frame.table("person")[membership_column].isin(chosen_ids).to_numpy()
+    subset = frame.select(person_mask)
+
+    subset_ids = subset.table(weight_entity)[f"{weight_entity}_id"].to_numpy()
+    selected_weights = (
+        pd.Series(full_weights, index=ids)
+        .reindex(subset_ids)
+        .astype(np.float64)
+        .to_numpy()
+    )
+    if not np.isfinite(selected_weights).all() or not (selected_weights > 0).any():
+        raise ValueError("Selected L0 weights are not a positive finite vector.")
+
+    fit_seed = l0_selection.seed if seed is None else seed
+    if (
+        _populace_refit_l0_selection is not None
+        and l0_selection.calibration_result is not None
+    ):
+        result = _populace_refit_l0_selection(
+            frame,
+            fit_targets,
+            l0_selection.calibration_result,
+            weight_entity=weight_entity,
+            epochs=epochs,
+            learning_rate=learning_rate,
+            mass=mass,
+            max_weight_ratio=max_weight_ratio,
+            seed=fit_seed,
+            target_loss_weights=target_loss_weights,
+            target_loss_cap=target_loss_cap,
+            progress_callback=progress_callback,
+        )
+        refit = result.refit
+        refit_ids = refit.frame.table(weight_entity)[f"{weight_entity}_id"].to_numpy()
+
+        def _native_to_full(values: np.ndarray) -> np.ndarray:
+            return (
+                pd.Series(np.asarray(values, dtype=np.float64), index=refit_ids)
+                .reindex(ids)
+                .fillna(0.0)
+                .to_numpy()
+            )
+
+        weights = _native_to_full(refit.weights)
+        initial_weights = _native_to_full(refit.initial_weights)
+        runtime = l0_selection.runtime_s + (time.perf_counter() - start)
+        options = dict(result.options)
+        options.update(
+            {
+                "populace_refit_l0_selection": True,
+                "selection_runtime_s": l0_selection.runtime_s,
+                "target_loss_cap": target_loss_cap,
+            }
+        )
+        return RunResult(
+            method="informed_l0_refit",
+            weight_entity=weight_entity,
+            weights=weights,
+            initial_weights=initial_weights,
+            n_records=weights.size,
+            n_selected=int(np.count_nonzero(weights)),
+            l0_lambda=float(l0_selection.l0_lambda),
+            l2_lambda=float(l0_selection.l2_lambda),
+            max_weight_ratio=max_weight_ratio,
+            loss_trajectory=np.asarray(refit.loss_trajectory, dtype=np.float64),
+            initial_loss=float(refit.initial_loss),
+            final_loss=float(refit.final_loss),
+            runtime_s=runtime,
+            seed=fit_seed,
+            options=options,
+            calibration_result=result,
+            sampling={
+                "strategy": "post_l0_refit",
+                "selection_method": l0_selection.method,
+                "selection_n_selected": int(l0_selection.n_selected),
+            },
+        )
+
+    subset_start = subset.weights_for(weight_entity)
+    subset = subset.with_weights(
+        weight_entity,
+        Weights(values=selected_weights, kind=WeightKind.CALIBRATED),
+        mass=MassChange(
+            factor=float(selected_weights.sum() / subset_start.values.sum()),
+            reason="initialize dense post-refit from informed L0 selected weights",
+        ),
+    )
+    result = calibrate(
+        subset,
+        fit_targets,
+        weight_entity=weight_entity,
+        epochs=epochs,
+        learning_rate=learning_rate,
+        mass=mass,
+        max_weight_ratio=max_weight_ratio,
+        target_records=None,
+        l0_lambda=0.0,
+        seed=fit_seed,
+        target_loss_weights=target_loss_weights,
+        target_loss_cap=target_loss_cap,
+        progress_callback=progress_callback,
+    )
+
+    def _to_full(values: np.ndarray) -> np.ndarray:
+        return (
+            pd.Series(np.asarray(values, dtype=np.float64), index=subset_ids)
+            .reindex(ids)
+            .fillna(0.0)
+            .to_numpy()
+        )
+
+    weights = _to_full(result.weights)
+    initial_weights = _to_full(result.initial_weights)
+    runtime = l0_selection.runtime_s + (time.perf_counter() - start)
+    options = dict(result.options)
+    options.update(
+        {
+            "post_l0_refit": True,
+            "selection_l0_lambda": l0_selection.l0_lambda,
+            "selection_runtime_s": l0_selection.runtime_s,
+            "selection_final_loss": l0_selection.final_loss,
+            "selection_n_selected": l0_selection.n_selected,
+            "target_loss_cap": target_loss_cap,
+        }
+    )
+    return RunResult(
+        method="informed_l0_refit",
+        weight_entity=weight_entity,
+        weights=weights,
+        initial_weights=initial_weights,
+        n_records=weights.size,
+        n_selected=int(np.count_nonzero(weights)),
+        l0_lambda=float(l0_selection.l0_lambda),
+        l2_lambda=float(l0_selection.l2_lambda),
+        max_weight_ratio=max_weight_ratio,
+        loss_trajectory=np.asarray(result.loss_trajectory, dtype=np.float64),
+        initial_loss=float(result.initial_loss),
+        final_loss=float(result.final_loss),
+        runtime_s=runtime,
+        seed=fit_seed,
+        options=options,
+        calibration_result=result,
+        sampling={
+            "strategy": "post_l0_refit",
+            "selection_method": l0_selection.method,
+            "selection_n_selected": int(l0_selection.n_selected),
+        },
     )
 
 
@@ -310,7 +511,9 @@ def weighted_sample(
         if achieved > 0:
             full *= total / achieved
     else:
-        raise ValueError(f"reweight must be 'equal_mass' or 'renorm_kept', got {reweight!r}.")
+        raise ValueError(
+            f"reweight must be 'equal_mass' or 'renorm_kept', got {reweight!r}."
+        )
     return full
 
 
@@ -326,6 +529,7 @@ def calibrate_dense(
     max_weight_ratio: float | None = None,
     target_loss_weights: np.ndarray | None = None,
     target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
+    progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> tuple[Any, float]:
     """Dense calibration (gates off); returns ``(calibration_result, runtime_s)``.
 
@@ -349,6 +553,7 @@ def calibrate_dense(
         seed=seed,
         target_loss_weights=target_loss_weights,
         target_loss_cap=target_loss_cap,
+        progress_callback=progress_callback,
     )
     return dense, time.perf_counter() - start
 
@@ -431,6 +636,7 @@ def run_dense_then_sample(
     sample_seed: int | None = None,
     replace: bool = True,
     reweight: str = "equal_mass",
+    progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> RunResult:
     """Condition B: dense calibration (gates off), then weighted random sampling."""
     dense, dense_runtime = calibrate_dense(
@@ -444,6 +650,7 @@ def run_dense_then_sample(
         max_weight_ratio=max_weight_ratio,
         target_loss_weights=target_loss_weights,
         target_loss_cap=target_loss_cap,
+        progress_callback=progress_callback,
     )
     return sample_from_dense(
         dense,
@@ -473,6 +680,7 @@ def run_random_then_reweight(
     target_loss_weights: np.ndarray | None = None,
     target_loss_cap: float = DEFAULT_TARGET_LOSS_CAP,
     sample_seed: int | None = None,
+    progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> RunResult:
     """Condition C: uniform random subset, then gradient-descent reweight.
 
@@ -527,6 +735,7 @@ def run_random_then_reweight(
         seed=seed,
         target_loss_weights=target_loss_weights,
         target_loss_cap=target_loss_cap,
+        progress_callback=progress_callback,
     )
 
     # Map the subset's fitted weights back onto the full candidate universe
