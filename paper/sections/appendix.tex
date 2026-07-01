@@ -14,8 +14,7 @@ the exact target system used rather than against a pipeline-wide inventory.
 Table~\ref{tab:target_sources} lists each family with its administrative source. The system holds
 32{,}633 targets across eleven families and three geographic levels: 24{,}340 congressional-district,
 7{,}815 state, and 478 national targets. The \texttt{irs\_soi} family supplies 31{,}350 of them (96\%),
-so the micro-average over all targets is dominated by IRS income-tax aggregates; the family
-macro-average (Section~\ref{sec:metrics}) is the counterweight that gives each family equal weight.
+so any error summary aggregated over all targets is dominated by IRS income-tax aggregates.
 
 \begin{table}[H]
 \centering
@@ -42,21 +41,9 @@ Family & Administrative source & Levels & Targets \\
 }
 \caption{Calibration target families and their administrative sources. Counts and sources are read from
 the full-surface target registry used by the run. In the headline experiment all listed families are fit
-and scored; holdout variants are supplemental diagnostics (Section~\ref{sec:oos}).}
+and scored (Section~\ref{sec:oos}).}
 \label{tab:target_sources}
 \end{table}
-
-\section{From a sparsity penalty to a record budget}
-\label{app:presets}
-
-The sparsity penalty sets the retained-record count, but the map from a penalty to a count is
-problem-dependent rather than closed-form: a larger penalty prunes more records, and how many depends on
-the candidate universe and the targets. In the matched full-scale probe we use a normalized penalty share,
-$\lambda_{\mathrm{share}}\sum_i\bar{z}_i/n$, so the coefficient has the same interpretation as the
-candidate universe changes. With $n=337{,}704$ candidate household records and
-$\lambda_{\mathrm{share}}=0.8$, the raw coefficient passed to the optimizer is
-$2.37\times10^{-6}$ and the deterministic gates retain 57{,}240 records. A full frontier should sweep
-$\lambda_{\mathrm{share}}$ rather than hard-coding raw $\lambda_{L_0}$ values.
 
 \section{Optimization hyperparameters}
 \label{app:hyperparameters}
@@ -84,7 +71,7 @@ Epochs & 1{,}500 & Training iterations in the reported fixed-penalty probe \\
 Target loss cap $c$ & 1 & Caps a single target's contribution to $\mathcal{L}_{\text{cal}}$; the runs reported here use Populace's production US-fiscal value $c=1$ \\
 $\lambda_{\mathrm{share}}$ & 0.8 & Normalized sparsity share in $\lambda_{\mathrm{share}}\sum_i\bar{z}_i/n$; raw $\lambda_{L_0}=2.37\times10^{-6}$ for 337{,}704 records \\
 $\lambda_{L_2}$ & $0$ & Soft concentration penalty on $(w_i/w_{0,i})^2$ (mean over records); held at zero in the reported full-surface run \\
-Budget bisection steps & None & The reported full-scale probe uses one fixed normalized penalty; a future frontier should sweep this value \\
+Budget bisection steps & None & The reported full-surface probe uses one fixed normalized penalty; a future frontier should sweep this value \\
 \texttt{max\_weight\_ratio} & None (uncapped) & Hard per-record weight cap: $w_i \leq \text{ratio}\times w_{0,i}$, clamped each step \\
 \bottomrule
 \end{tabular}
@@ -155,7 +142,7 @@ assembled dataset.
 \label{app:cost}
 
 Figure~\ref{fig:cost_accuracy} is retained as a supplemental cost diagnostic from the earlier budget
-sweep. The matched full-scale probe's current runtimes are reported in Section~\ref{sec:results}: dense
+sweep. The matched full-surface probe's current runtimes are reported in Section~\ref{sec:results}: dense
 no-$L_0$ took 38.7 minutes for 1{,}500 epochs, $L_0$ selection plus refit took 48.9 minutes combined, and
 random + reweight took 7.3 minutes.
 
@@ -164,7 +151,7 @@ random + reweight took 7.3 minutes.
     \includegraphics[width=0.8\textwidth]{figures/f5_cost_accuracy}
     \caption{Supplemental historical cost against accuracy: wall-clock runtime (log scale) against
     full-surface median ARE (log scale), each point labelled by its requested record budget. This figure
-    predates the fixed normalized-penalty full-scale probe and is used only to motivate reporting runtime
+    predates the fixed normalized-penalty full-surface probe and is used only to motivate reporting runtime
     alongside accuracy.}
     \label{fig:cost_accuracy}
 \end{figure}

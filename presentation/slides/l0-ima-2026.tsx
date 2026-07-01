@@ -1,6 +1,5 @@
 "use client";
 
-import AutoFitMath from "@/components/content/AutoFitMath";
 import BulletList from "@/components/content/BulletList";
 import ContentCard from "@/components/content/ContentCard";
 import DonorFusion from "@/components/content/DonorFusion";
@@ -8,12 +7,12 @@ import EquationCard from "@/components/content/EquationCard";
 import FactAnatomy from "@/components/content/FactAnatomy";
 import Figure from "@/components/content/Figure";
 import FrameAnatomy from "@/components/content/FrameAnatomy";
-import GeographyHierarchy from "@/components/content/GeographyHierarchy";
 import HardConcreteGate from "@/components/content/HardConcreteGate";
-import Math from "@/components/content/Math";
+import LossBars from "@/components/content/LossBars";
 import PipelineDiagram from "@/components/content/PipelineDiagram";
 import StatNumber from "@/components/content/StatNumber";
 import TranslationTable from "@/components/content/TranslationTable";
+import WeightFormats from "@/components/content/WeightFormats";
 import Slide from "@/components/core/Slide";
 import CoverSlide from "@/components/layout/CoverSlide";
 import EndSlide from "@/components/layout/EndSlide";
@@ -87,114 +86,38 @@ export function PolicyGoalSlide() {
             stretched to fit.
           </p>
         </div>
-        <GeographyHierarchy subnote="Levels shown are the United States; the same nesting applies to any country with its own subnational divisions." />
+        <Figure
+          src="/figures/snap_benefits_by_district.png"
+          width={4788}
+          height={3431}
+          alt="Hexagonal cartogram of estimated SNAP benefits for every US congressional district"
+        />
       </div>
     </Slide>
   );
 }
 
-export function LocalAreaModelingSlide() {
+export function WeightLayoutWideSlide() {
   return (
     <Slide>
       <div className="flex h-full flex-col justify-center">
-        <SlideTitle kicker="Why US pruning is different">
-          The UK local-area approach did not transfer cleanly
+        <SlideTitle kicker="Weight layout">
+          Two matrix representations of subnational weights
         </SlideTitle>
-        <div className="mt-9 grid grid-cols-3 gap-5">
-          <ContentCard title="PolicyEngine scope" accent="teal">
-            <p className="text-xl leading-snug text-slate-600">
-              PolicyEngine maintains open-source microsimulation models for the US and UK, with
-              applications that need national and local estimates from the same policy logic.
-            </p>
-          </ContentCard>
-          <ContentCard title="UK first implementation" accent="slate">
-            <p className="text-xl leading-snug text-slate-600">
-              Our first local-area system kept one national microdataset and built a matrix of
-              weights by parliamentary constituency and local authority.
-            </p>
-          </ContentCard>
-          <ContentCard title="The limitation" accent="amber">
-            <p className="text-xl leading-snug text-slate-600">
-              Separate area-weight columns can disagree across overlapping geographies. The
-              inconsistency gets worse as users ask for more geographic breakdowns.
-            </p>
-          </ContentCard>
-        </div>
-        <p className="mt-8 max-w-6xl text-2xl leading-snug text-slate-600">
-          In the US, users need state, county, congressional-district, and state-legislative
-          views. Policy also varies locally, mostly by state and sometimes by county, so local
-          geography has to live on the records themselves.
-        </p>
+        <WeightFormats className="mt-12" showLong={false} />
       </div>
     </Slide>
   );
 }
 
-export function LongwiseGeographySlide() {
+export function WeightLayoutBothSlide() {
   return (
     <Slide>
       <div className="flex h-full flex-col justify-center">
-        <SlideTitle kicker="US design choice">
-          Go longwise: assign records to the finest geography
+        <SlideTitle kicker="Weight layout">
+          Two matrix representations of subnational weights
         </SlideTitle>
-        <div className="mt-9 grid grid-cols-4 gap-4">
-          <ContentCard title="1. Place households" accent="teal">
-            <p className="text-lg leading-snug text-slate-600">
-              Assign each household a Census block, the finest local identifier in the build.
-            </p>
-          </ContentCard>
-          <ContentCard title="2. Derive geographies" accent="slate">
-            <p className="text-lg leading-snug text-slate-600">
-              Build state, county, congressional-district, and legislative-district views from the
-              block assignment.
-            </p>
-          </ContentCard>
-          <ContentCard title="3. Oversaturate support" accent="amber">
-            <p className="text-lg leading-snug text-slate-600">
-              Synthesize many candidate households because the source survey lacks true local
-              identifiers.
-            </p>
-          </ContentCard>
-          <ContentCard title="4. Calibrate and prune" accent="teal">
-            <p className="text-lg leading-snug text-slate-600">
-              Use targets to decide which synthetic placements survive in a deployable dataset.
-            </p>
-          </ContentCard>
-        </div>
-        <p className="mt-8 max-w-6xl text-2xl leading-snug text-slate-600">
-          The block assignment makes every geography internally consistent, but it creates a large
-          candidate universe with many plausible household-to-place assignments. L0 is a way to prune
-          that universe using the same target loss that calibrates it.
-        </p>
-      </div>
-    </Slide>
-  );
-}
-
-export function NestedTargetsSlide() {
-  return (
-    <Slide>
-      <div className="grid h-full grid-cols-[1fr_1fr] items-center gap-12">
-        <div>
-          <SlideTitle kicker="The requirement">
-            One weighted dataset must reproduce nested administrative totals
-          </SlideTitle>
-          <p className="mt-8 max-w-2xl text-2xl leading-snug text-slate-600">
-            Calibration finds weights so the weighted dataset reproduces published totals. Subnational
-            work makes this hierarchical: districts sum to states, and states to the nation, in a single
-            set of weights.
-          </p>
-          <div className="mt-8 rounded-md bg-slate-50 px-6 py-5">
-            <AutoFitMath>
-              <Math
-                display
-                tex="\sum_i w_i\, x_{ij} = T_j \quad \text{for every target } j,\ \text{at every level}"
-                className="text-[1.3rem]"
-              />
-            </AutoFitMath>
-          </div>
-        </div>
-        <GeographyHierarchy showSummation />
+        <WeightFormats className="mt-12" showLong />
       </div>
     </Slide>
   );
@@ -240,16 +163,6 @@ export function BuildBigThenPruneSlide() {
 /* ------------------------------------------------------------------ */
 /* 2 · The data engine: Ledger + Populace                                */
 /* ------------------------------------------------------------------ */
-
-export function DataEngineSectionSlide() {
-  return (
-    <SectionSlide
-      section="The data engine"
-      title="From government publications to a shipped dataset"
-      subtitle="Ledger turns published values into source-backed facts; Populace carries a weighted sampling frame through imputation, geography, and calibration."
-    />
-  );
-}
 
 export function LedgerSlide() {
   return (
@@ -323,6 +236,7 @@ export function RepresentativenessSlide() {
           <BulletList
             className="mt-9"
             items={[
+              "The spine is three years of CPS ASEC pooled and aged to one period — more households and variability, while keeping the CPS survey design.",
               "Fill each gap from whichever survey measures it best — many surveys can be donors.",
               "The fitting step learns a conditional distribution on the donor data, not a single prediction.",
               "Predicting the whole distribution and sampling a draw per record preserves real variability.",
@@ -557,28 +471,146 @@ export function CalibrationObjectiveSlide() {
   );
 }
 
-export function MainFrontierSlide() {
+// --- Main result: progressive loss-bar arc (one beat per slide; the deck has no
+// in-slide reveal, so each beat is its own slide sharing the LossBars component). ---
+
+export function ResultsArcBaselinesSlide() {
   return (
     <Slide>
       <div className="grid h-full grid-cols-[0.78fr_1.22fr] items-center gap-10">
         <div>
-          <SlideTitle kicker="Main result">L0 selects a better support than random</SlideTitle>
+          <SlideTitle kicker="Main result · where we start">
+            Two reference points before we prune cleverly
+          </SlideTitle>
           <p className="mt-8 text-2xl leading-snug text-slate-600">
-            On the current full Populace target surface, the raw gated L0 weights are not the publication
-            weights. But the records selected by the gates become substantially more accurate after an
-            ordinary calibration refit.
+            Keep every record and calibrate (dense no-L0) and you reach 5.07% on the full Populace
+            surface. Naively prune to 57,240 at random and refit weights on that subset, and you get
+            7.55%.
           </p>
           <p className="mt-6 text-xl leading-snug text-slate-500">
-            At 57,240 records, L0 + refit reaches 4.74% Populace loss. Dense no-L0 with all records is
-            5.07%, and random + reweight at the same count is 7.55%.
+            Dense uses all 337,704 records, so it is a reference, not a deployable budget. The question
+            is how close a 57,240-record file can get.
           </p>
         </div>
-        <Figure
-          src="/figures/f0_objective_frontier.png"
-          width={2168}
-          height={886}
-          alt="Matched full-surface Populace objective loss for L0 gated weights, L0 refit, and random reweight"
-        />
+        <LossBars revealed={["dense_full", "random_reweight"]} />
+      </div>
+    </Slide>
+  );
+}
+
+export function ResultsArcScaledSlide() {
+  return (
+    <Slide>
+      <div className="grid h-full grid-cols-[0.78fr_1.22fr] items-center gap-10">
+        <div>
+          <SlideTitle kicker="Main result · skip the reweighting?">
+            The reweighting was doing the work
+          </SlideTitle>
+          <p className="mt-8 text-2xl leading-snug text-slate-600">
+            Take the same random sample but keep the dense weights and just rescale them to the
+            population total, with no refit. Loss jumps to 24.24%.
+          </p>
+          <p className="mt-6 text-xl leading-snug text-slate-500">
+            So the gain from random + reweight came from re-fitting the weights on the retained subset,
+            not from the sample itself.
+          </p>
+        </div>
+        <LossBars revealed={["dense_full", "random_reweight", "dense_scaled"]} />
+      </div>
+    </Slide>
+  );
+}
+
+export function ResultsArcL0Slide() {
+  return (
+    <Slide>
+      <div className="grid h-full grid-cols-[0.78fr_1.22fr] items-center gap-10">
+        <div>
+          <SlideTitle kicker="Main result · the informed selector: L0">
+            A target-informed selector &mdash; yet it underperforms
+          </SlideTitle>
+          <p className="mt-8 text-2xl leading-snug text-slate-600">
+            Informed L0 chooses the 57,240 records jointly with their gated weights. It should beat a
+            blind random sample. But the raw gated weights score 9.86% &mdash; worse than random +
+            reweight.
+          </p>
+          <p className="mt-6 text-xl leading-snug text-slate-500">
+            The gates select the support well, but the gated weights they return are not publication
+            weights.
+          </p>
+        </div>
+        <LossBars revealed={["dense_full", "random_reweight", "dense_scaled", "l0_gated"]} />
+      </div>
+    </Slide>
+  );
+}
+
+export function ResultsArcRefitSlide() {
+  return (
+    <Slide>
+      <div className="grid h-full grid-cols-[0.78fr_1.22fr] items-center gap-10">
+        <div>
+          <SlideTitle kicker="Main result · refit once more">
+            Refit the selected records and L0 wins
+          </SlideTitle>
+          <p className="mt-8 text-2xl leading-snug text-slate-600">
+            Keep the records the gates chose, drop the gates, and refit ordinary calibration weights on
+            that subset. Loss drops to 4.74% &mdash; below dense no-L0&rsquo;s 5.07%, and well below every
+            sampling baseline.
+          </p>
+          <p className="mt-6 text-xl leading-snug text-slate-500">
+            L0&rsquo;s value is <span className="font-bold text-pe-dark">support selection</span>,
+            realized only after the post-selection refit.
+          </p>
+        </div>
+        <LossBars revealed={["dense_full", "random_reweight", "dense_scaled", "l0_gated", "l0_refit"]} />
+      </div>
+    </Slide>
+  );
+}
+
+export function GeographyAccuracySlide() {
+  const rows = [
+    { level: "National", targets: "478", median: "1.30", mean: "20.12", max: "557" },
+    { level: "State", targets: "7,815", median: "0.31", mean: "86.36", max: "122,712" },
+    { level: "Congressional district", targets: "24,340", median: "1.48", mean: "85.29", max: "162,496" },
+  ];
+  return (
+    <Slide>
+      <div className="flex h-full flex-col justify-center">
+        <SlideTitle kicker="Main result · by geography">
+          The refit fit holds at every geographic level
+        </SlideTitle>
+        <p className="mt-6 max-w-5xl text-xl leading-snug text-slate-600">
+        </p>
+        <div className="mt-8 overflow-hidden rounded-lg border border-slate-200">
+          <div className="grid grid-cols-[1.6fr_1fr_1fr_1fr_1fr] bg-slate-50 px-6 py-3 text-sm font-bold uppercase tracking-[0.12em] text-pe-dark">
+            <div>Geographic level</div>
+            <div className="text-right">Targets</div>
+            <div className="text-right">Median ARE</div>
+            <div className="text-right">Mean ARE</div>
+            <div className="text-right">Max ARE</div>
+          </div>
+          {rows.map((r) => (
+            <div
+              key={r.level}
+              className="grid grid-cols-[1.6fr_1fr_1fr_1fr_1fr] border-t border-slate-100 px-6 py-3 text-lg text-slate-700"
+            >
+              <div className="font-semibold text-pe-dark">{r.level}</div>
+              <div className="text-right tabular-nums">{r.targets}</div>
+              <div className="text-right font-bold tabular-nums text-pe-teal">{r.median}%</div>
+              <div className="text-right tabular-nums text-slate-500">{r.mean}%</div>
+              <div className="text-right tabular-nums text-slate-500">{r.max}%</div>
+            </div>
+          ))}
+          <div className="grid grid-cols-[1.6fr_1fr_1fr_1fr_1fr] border-t-2 border-slate-200 bg-pe-light/40 px-6 py-3 text-lg font-bold text-pe-dark">
+            <div>All scored targets</div>
+            <div className="text-right tabular-nums">32,633</div>
+            <div className="text-right tabular-nums text-pe-teal">0.89%</div>
+            <div className="text-right tabular-nums">84.64%</div>
+            <div className="text-right tabular-nums">162,496%</div>
+          </div>
+        </div>
       </div>
     </Slide>
   );
@@ -616,33 +648,20 @@ export function OperabilitySlide() {
       <div className="grid h-full grid-cols-[0.78fr_1.22fr] items-center gap-10">
         <div>
           <SlideTitle kicker="Concentration">The selected subset is also better conditioned</SlideTitle>
-          <p className="mt-7 text-xl leading-snug text-slate-600">
-            Effective sample size is a primary result, not a footnote. In this matched probe, dense
-            calibration has the highest sparse-fit ESS because it retains all records; among sparse
-            supports, L0 + refit beats random + reweight on both target loss and concentration.
-          </p>
-          <div className="mt-6 space-y-2.5">
-            <p className="border-l-[3px] border-pe-teal pl-4 text-lg leading-snug text-slate-600">
-              <span className="font-bold text-pe-dark">L0 + refit:</span> ESS 4,726; max weight 913,836.
-            </p>
-            <p className="border-l-[3px] border-teal-700 pl-4 text-lg leading-snug text-slate-600">
-              <span className="font-bold text-pe-dark">Dense no-L0:</span> ESS 5,970; max weight 579,298.
-            </p>
-            <p className="border-l-[3px] border-slate-400 pl-4 text-lg leading-snug text-slate-600">
-              <span className="font-bold text-pe-dark">Random + reweight:</span> ESS 2,480; max weight
-              1,163,939.
-            </p>
-          </div>
-          <p className="mt-5 text-lg leading-snug text-slate-500">
-            The next methodological work is a normalized-penalty sweep, with concentration controls added
-            around this full-surface result.
-          </p>
+          <BulletList
+            className="mt-8"
+            items={[
+              "Effective sample size is a primary result, not a footnote.",
+              "The raw L0-gated weights are the ones with highest ESS, lowest max weight, as the L0 selects the most informative records.",
+              "The refit that restores accuracy gives some of that concentration back, but L0 + refit still beats the matched random support.",
+            ]}
+          />
         </div>
         <Figure
           src="/figures/f2_usability.png"
           width={2168}
           height={886}
-          alt="Effective sample size and largest fitted weight versus retained records for the four samplers"
+          alt="Effective sample size and largest household weight across the five method arms"
         />
       </div>
     </Slide>
@@ -656,23 +675,34 @@ export function OperabilitySlide() {
 export function FutureWorkSlide() {
   return (
     <Slide>
-      <div className="grid h-full grid-cols-[0.9fr_1.1fr] items-center gap-12">
+      <div className="flex h-full flex-col justify-center">
         <SlideTitle kicker="Future work">From proof of concept to production-scale pruning</SlideTitle>
-        <div className="space-y-5">
+        <div className="mt-9 grid grid-cols-2 gap-5">
           <ContentCard title="Build really large, then prune" accent="teal">
-            <p className="text-xl leading-snug text-slate-600">
+            <p className="text-lg leading-snug text-slate-600">
               Sweep normalized L0 penalties on the three-year support and larger over-built pools, then
               prune back to a publishable artifact.
             </p>
           </ContentCard>
+          <ContentCard title="Contrast penalty designs" accent="teal">
+            <p className="text-lg leading-snug text-slate-600">
+              Compare the L0 penalty against an{" "}
+              <span className="font-bold text-pe-dark">L1 penalty</span> as an alternative
+              sparsity-inducing selector, and sweep the{" "}
+              <span className="font-bold text-pe-dark">
+                &lambda;<sub>L2</sub> penalty and weight cap against &lambda;<sub>L0</sub>
+              </span>{" "}
+              to trace the accuracy&ndash;concentration trade-off.
+            </p>
+          </ContentCard>
           <ContentCard title="Complete the comparator set" accent="amber">
-            <p className="text-xl leading-snug text-slate-600">
-              Add PPS survey-weight sampling, categorical-margin raking panels, longer dense convergence
-              checks, and concentration controls around the same Populace loss.
+            <p className="text-lg leading-snug text-slate-600">
+              Add PPS survey-weight sampling, categorical-margin raking panels, and longer dense
+              convergence checks under the same Populace loss.
             </p>
           </ContentCard>
           <ContentCard title="Targeted robustness" accent="slate">
-            <p className="text-xl leading-snug text-slate-600">
+            <p className="text-lg leading-snug text-slate-600">
               Keep family holdouts separate from the headline fit; use them to test robustness, not as the
               production objective.
             </p>
@@ -688,7 +718,7 @@ export function TakeawaySlide() {
     <SectionSlide
       section="In closing"
       title="Target-informed pruning works as support selection"
-      subtitle="The full-surface probe says: choosing a sparse support with L0 and then refitting reaches lower completed-run loss than dense no-L0 and matched random baselines."
+      subtitle="The full-surface probe says: choosing a sparse support with L0 and then refitting reaches lower completed-run loss than dense no-L0 and matched random baselines, at the production scale."
     />
   );
 }

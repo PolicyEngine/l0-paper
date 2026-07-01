@@ -51,7 +51,7 @@ rescaled to contribute equal total weight, so the far more numerous dollar cells
 targets. A final step sets the mean weight to one. Because the loss divides by $\sum_j \omega_j$, only
 the relative weights enter the objective and their absolute scale does not.
 
-\subsection{Selection and weighting as one optimization in our proposed method}
+\subsection{Selection and weighting as one optimization}
 
 Informed $L_0$ sampling adds two terms to the shared calibrator that turn weight fitting into record
 selection. Each candidate $i$ carries a Hard Concrete gate $z_i \in [0, 1]$ \citep{louizos2018}, the
@@ -67,7 +67,7 @@ The first term is the capped weighted MAPE of Equation~\ref{eq:loss_cal}, now ev
 weights $w_i z_i$. The second term is the $L_0$ penalty and sets the sample size: $\bar{z}_i = \Pr(z_i \neq 0)$ is the
 expected activation of gate $i$ (Equation~\ref{eq:l0penalty}), so $\sum_i \bar{z}_i$ is the expected number of open gates, the
 expected retained-record count, and $\lambda_{L_0}$ sets how aggressively the optimizer prunes. In the
-full-scale probe we report $\lambda_{L_0}$ through a normalized penalty share,
+full-surface probe we report $\lambda_{L_0}$ through a normalized penalty share,
 $\lambda_{\mathrm{share}}\sum_i\bar{z}_i/n$, so the sparsity price is comparable when the candidate
 record count changes. The raw coefficient passed to the optimizer is therefore
 $\lambda_{L_0}=\lambda_{\mathrm{share}}/n$. The third term is a soft concentration penalty: $\lambda_{L_2}$ multiplies the mean squared ratio of each
@@ -81,7 +81,7 @@ term matters because an $L_0$ penalty on its own can reach a sparse solution tha
 optimizer can match the targets by placing very large weights on a few retained records. Both
 concentration controls act on the ratio of each fitted weight to its initial weight, $w_i / w_{0,i}$.
 The $L_2$ term is a soft penalty on the mean square of that ratio that discourages large inflations
-smoothly, and it is the control we sweep to trace the accuracy-concentration trade-off.
+smoothly, and it is the natural control for tracing the accuracy-concentration trade-off.
 \texttt{max\_weight\_ratio} is a hard per-record cap on the same ratio: no fitted weight may exceed a
 fixed multiple of that record's initial weight, clamped after every optimizer step. The soft penalty
 shapes the whole weight distribution during optimization; the cap bounds the single largest weight.
@@ -116,20 +116,18 @@ balanced sampling is designed for fixed balancing variables, and combinatorial o
 discrete and costly at production scale. The headline comparison therefore keeps the candidate
 universe, target surface, positivity restriction, and calibration loss fixed, and varies only the way
 records are selected and, for the post-selection arms, refit. From one candidate universe and one target
-set, the matched full-scale probe compares five method arms: informed $L_0$ selection, informed $L_0$
+set, the matched full-surface probe compares five method arms: informed $L_0$ selection, informed $L_0$
 selection followed by an ordinary calibration refit on the selected records, dense no-$L_0$ calibration on
 the full candidate universe, random sampling followed by gradient reweighting, and a no-refit random
-sample of dense calibrated weights scaled back to total mass. The survey-weight sampling arm is
-implemented in the code and remains the natural probability-proportional-to-size calibrate-then-reduce
-baseline for the next full sweep, but it was not run in the current matched probe. The run arms are:
+sample of dense calibrated weights scaled back to total mass. The run arms are:
 
 \begin{itemize}
     \item \textbf{Informed $L_0$ sampling with Hard Concrete gates.} The shared calibrator with the
     gate and concentration terms above selects records and fits their weights jointly at a chosen
     budget, set through $\lambda_{L_0}$.
-    \item \textbf{Informed $L_0$ plus refit.} The same selected records are kept, but the gates are removed
+    \item \textbf{Informed $L_0$ + refit.} The same selected records are kept, but the gates are removed
     and the shared calibrator refits ordinary dense weights on that retained subset, initialized from the
-    informed $L_0$ weights. This post-selection refit isolates the value of the selected subset from the
+    informed $L_0$ weights. This post-$L_0$ refit isolates the value of the selected subset from the
     particular gated weights returned by the joint optimization.
     \item \textbf{Dense no-$L_0$ calibration.} The shared calibrator fits positive weights on the full
     337{,}704-record candidate universe, with gates off and no sparsity or concentration penalty. This is
@@ -137,7 +135,7 @@ baseline for the next full sweep, but it was not run in the current matched prob
     \item \textbf{Random sampling with gradient-descent reweighting.} A random subset of the candidate
     universe of the same size is drawn, then the shared calibrator fits its weights to the same targets
     without the gate or concentration terms. This is the reduce-first, calibrate-after baseline.
-    \item \textbf{Dense random sample, scaled.} Dense no-$L_0$ weights are fit once on the full universe;
+    \item \textbf{Dense random scaled sample.} Dense no-$L_0$ weights are fit once on the full universe;
     a uniform random subset of the matched size is retained; the retained dense weights are then scaled so
     their total equals the dense total, with no post-sampling refit. This tests whether dense calibration
     alone can be made sparse by random thinning and mass scaling.
@@ -155,62 +153,26 @@ each record's initial weight $w_{0,i}$ is one shared constant. The reported prob
 $\lambda_{\mathrm{share}}=0.8$, which equals raw $\lambda_{L_0}=2.37\times10^{-6}$ for the 337{,}704
 candidate records and retains 57{,}240 records. The post-$L_0$ refit, dense no-$L_0$, and random +
 reweight baselines each use a 1{,}500-epoch optimizer budget; the sparse baselines use the same
-57{,}240-record count. Multi-seed sweeps across penalties and concentration controls are the next
+57{,}240-record count. Sweeps across penalties and concentration controls are the next
 robustness panel rather than part of the headline evidence here.
 
-\subsection{Full-surface scoring and holdout robustness}
+\subsection{Full-surface scoring}
 \label{sec:oos}
 
-The production motivation is not to predict a hidden target family; it is to construct a deployable
-dataset that fits the full target surface \populace{} currently assembles. The headline experiment
-therefore fits and scores every materialized target, including validation-only families and
-congressional-district targets. In the run reported here, 37{,}053 Ledger facts compile to 32{,}633
-materialized calibration targets on 337{,}704 candidate household records. The reported objective is the
-same capped, weighted calibration loss in Equation~\ref{eq:loss_cal}, evaluated on the final retained
-weights and excluding the $L_0$ and $L_2$ penalties. This is the frontier an analyst would use
-when choosing a publishable record budget for the actual \populace{} build.
+The production motivation is to construct a deployable dataset that fits the full target surface 
+\populace{} currently assembles. The headline experiment therefore fits and scores every materialized 
+target, including validation-only families and congressional-district targets. In the run reported here, 
+37{,}053 Ledger facts compile to 32{,}633 materialized calibration targets on 337{,}704 candidate 
+household records. The reported objective is the same capped, weighted calibration loss in 
+Equation~\ref{eq:loss_cal}, evaluated on the final retained weights and excluding the $L_0$ and $L_2$ 
+penalties. This is the frontier an analyst would use when choosing a publishable record budget for 
+the actual \populace{} build.
 
-Generalization is still useful, but it answers a different question. A sampler can match the targets it is
-fit to and fail on structurally different targets that were never fit. When we run holdout diagnostics, we
-therefore hold out whole target families rather than a random subset of target rows. The reason is
-structural: targets within a family nest (a national total is the sum of its state cells), so a random
-target split leaks: a held-out cell is nearly determined by its retained siblings, which would overstate
-generalization. Holding out a whole family removes that leakage.
-
-The fixed holdout design used as a robustness panel holds out the \texttt{cms\_medicaid},
-\texttt{usda\_snap}, and \texttt{state\_income\_tax} families, plus the \texttt{cbo} validation-only family.
-Each contemporaneous held-out family keeps a related family in the fit, so the test asks each method to
-reproduce a held-out family while a structurally similar family remains in the fit, rather than orphaning a
-domain entirely (Table~\ref{tab:holdout_siblings}). We report this as supplemental evidence, not as the
-headline target-fit result.
-
-\begin{table}[H]
-\centering
-{\tablefont
-\begin{tabular}{p{0.26\textwidth}p{0.30\textwidth}p{0.30\textwidth}}
-\toprule
-Held-out family & Domain & Related family kept in the fit \\
-\midrule
-\texttt{cms\_medicaid} & Medicaid enrollment and spending & \texttt{cms\_aca}, \texttt{cms\_medicare} (other health-program enrollment) \\
-\texttt{state\_income\_tax} & State income tax & \texttt{irs\_soi} (federal income-tax aggregates) \\
-\texttt{usda\_snap} & SNAP enrollment and spending & \texttt{hhs\_acf\_tanf} (a related means-tested transfer) \\
-\texttt{cbo} & CBO revenue and aging projections & none; validation-only, never fit \\
-\bottomrule
-\end{tabular}
-}
-\caption{The fixed family-level holdout. Each contemporaneous held-out family keeps a structurally
-related family in the fit, so generalization is tested against a similar but unseen family rather than
-an orphaned domain. The \texttt{cbo} family is held out as a validation-only diagnostic.}
-\label{tab:holdout_siblings}
-\tablenote{Family counts are read from the run manifest. The related-family pairing is a property of the
-target system, not of any method.}
-\end{table}
-
-As a stricter robustness check, future runs can rotate whole families through the holdout in a
-family-grouped five-fold design: the families are dealt into five folds balanced by target count, and each
-fold is held out in turn. Because the folds hold out structurally different families rather than independent
-draws, they should be reported per fold rather than as a single inferential test; the rotation would surface
-in particular the fold that holds out the dominant \texttt{irs\_soi} family.
+Generalization to structurally different targets is a separate question this proof of concept does not
+test. A meaningful holdout here would withhold whole target families rather than random target rows,
+because targets nest within a family (a national total is the sum of its state cells) and a random split
+would leak, with a held-out cell nearly determined by its retained siblings; we leave that family-level
+holdout robustness to future work (Section~\ref{sec:future_work}).
 
 \subsection{Evaluation metrics}
 \label{sec:metrics}
@@ -230,7 +192,6 @@ Metric & Definition & Why reported \\
 Populace objective loss & Equation~\ref{eq:loss_cal}: capped, target-weighted relative error, penalty-free & Headline target-fit metric; this is the loss the production calibrator optimizes \\
 Median ARE & Median absolute relative error $|\hat{t}_j - t_j| / |t_j|$ over scored targets & Supplemental accuracy diagnostic, robust to the near-zero-denominator tail \\
 Mean and max ARE & Mean and maximum of the same per-target errors & Supplemental, tail-sensitive diagnostics \\
-Micro vs.\ macro average & Mean over all targets vs.\ mean of the per-family means & The micro mean is dominated by \texttt{irs\_soi} (71\% of targets); the macro mean weights each family equally \\
 Effective sample size & $\mathrm{ESS} = (\sum_i w_i)^2 / \sum_i w_i^2$ and the implied design effect & A sampler can fit the targets while concentrating population mass on a few records, so ESS is a primary result, not a footnote \\
 Retained count & Non-zero record count & Sample size \\
 Max weight & Largest fitted weight & Weight concentration \\
@@ -244,8 +205,8 @@ accuracy is achieved at.}
 \label{tab:metrics}
 \end{table}
 
-Errors are reported by geographic level and by target family as well as in aggregate, because a sampler
-can match national totals while missing local ones, or match one source while missing another.
+Errors are reported by geographic level as well as in aggregate, because a sampler can match national
+totals while missing local ones.
 
 A small number of targets have denominators so small that a single record can swing their relative error
 past 100 per cent. We identify these structurally rather than by an arbitrary cutoff: target $j$ is

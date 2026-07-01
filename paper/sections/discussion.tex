@@ -8,9 +8,8 @@ qualification. If the claim is that the raw gated weights returned by the joint 
 be the final publication weights, the evidence does not support it: the thresholded gated weights have a
 9.86\% Populace loss. If the claim is instead that target-informed gates can select a useful support for
 ordinary calibration, the evidence is positive. After the gates choose 57{,}240 records, an ordinary
-calibration refit on that support reaches 4.74\% loss, compared with 5.07\% for the 1{,}500-epoch dense
-no-$L_0$ calibration, 7.55\% for a matched random support followed by the same reweighting, and 24.24\%
-for a random sample of dense calibrated weights scaled back to total mass without refitting.
+calibration refit on that support reaches 4.74\% loss, below the dense no-$L_0$ calibration and the
+matched sampling baselines reported in Section~\ref{sec:results}.
 
 That distinction is useful. It separates selection from weighting. The Hard Concrete gates appear valuable
 as a way to decide which records survive, but the final dataset should be produced by a post-selection
@@ -40,10 +39,11 @@ not bought by making the random baseline look better-conditioned.
 
 \subsubsection{Single penalty and seed}
 
-The current result is a matched full-scale probe, not a completed frontier. It uses one normalized
+The current result is a matched full-surface probe, not a completed frontier. It uses one normalized
 sparsity penalty and one seed. The next version should sweep $\lambda_{\mathrm{share}}$ across multiple
-retained counts, repeat the most important points over seeds, add concentration controls, and run dense
-no-$L_0$ to an explicit stopping rule. The present result is enough to justify that sweep because it shows
+retained counts and run dense no-$L_0$ to an explicit stopping rule; replicating the key points across
+seeds would harden the comparison but is secondary to mapping the penalty frontier. The present result is
+enough to justify that sweep because it shows
 a clear separation from random + reweight at one large, realistic support size and a small finite-budget
 edge over dense no-$L_0$.
 
@@ -58,11 +58,11 @@ version, materialization registry, or production weighting scheme could change t
 
 The random + reweight baseline is strong because it uses the same gradient calibrator as the post-$L_0$
 refit after drawing the subset. It is therefore not a straw baseline: it is the practical reduce-first,
-calibrate-after workflow an analyst could run today. The dense random scaled baseline answers a different
+calibrate-after workflow an analyst could run today. The dense random scaled sample answers a different
 question: whether one can dense-calibrate once, keep a random subset of the dense weights, scale the
 retained mass back up, and avoid refitting. On this surface that is not competitive. A fuller paper should
-still add the implemented probability-proportional-to-size calibrate-then-sample baseline and classical
-calibration comparators on target subsets where they are well-defined.
+still add the probability-proportional-to-size calibrate-then-sample comparator from the literature and
+classical calibration comparators on target subsets where they are well-defined.
 
 \subsubsection{Raw error metrics}
 

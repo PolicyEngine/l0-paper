@@ -19,7 +19,7 @@ and scores 32{,}633 materialized calibration targets, including 24{,}340 congres
 target surface, and optimizer budget fixed, we vary how records are chosen across target-informed $L_0$
 selection, dense no-$L_0$ calibration, and matched sampling baselines, all scored by the same Populace
 capped weighted calibration loss. A normalized $L_0$ penalty retaining 57{,}240 records produces a sparse
-support whose raw gated weights score poorly, but an ordinary post-selection refit on that support lowers
+support whose raw gated weights score poorly, but an ordinary post-$L_0$ refit on that support lowers
 the Populace loss to 4.74\%. The 1{,}500-epoch dense no-$L_0$ calibration reaches 5.07\%, a random subset
 followed by the same reweighting reaches 7.55\%, and a random sample of the dense calibrated weights
 scaled back to total mass reaches 24.24\%. The useful finding is therefore specific and actionable: the

@@ -1,6 +1,6 @@
 # IMA 2026 — talking points
 
-L0 regularization for subnational microsimulation calibration · ~23 minutes.
+L0 regularization for subnational microsimulation calibration · ~24 minutes.
 
 The deck is deliberately front-loaded on context: the paper results are a proof of
 concept, so most of the value is in the production goal, the data engine (Ledger +
@@ -11,14 +11,14 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
 | Section | Slides | Target |
 |---|---|---|
 | 0 · Open | 1–2 | 1:00 |
-| 1 · Motivation | 3–5 | 2:30 |
-| 2 · Data engine (Ledger + Populace) | 6–9 | 3:00 |
+| 1 · Motivation | 3–6 | 2:30 |
+| 2 · Data engine (Ledger + Populace) | 7–9 | 2:30 |
 | 3 · Imputation | 10 | 1:30 |
 | 4 · Reduction + Louizos + method | 11–15 | 4:00 |
-| **First half** | **1–15** | **~12:00** |
-| 5 · Proof of concept (design + results) | 16–20 | 5:30 |
-| 6 · Close | 21–23 | 2:00 |
-| **Second half** | **16–23** | **~7:30** |
+| **First half** | **1–15** | **~11:30** |
+| 5 · Proof of concept (design + results) | 16–24 | 6:30 |
+| 6 · Close | 25–27 | 2:00 |
+| **Second half** | **16–27** | **~8:30** |
 
 ## Delivery notes (PolicyEngine voice)
 
@@ -45,37 +45,57 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
 - **TRANSITION:** "Let me start with why we have a rich-but-too-big dataset at all."
 
 ## Slide 2 · Roadmap
-- **KEY MESSAGE:** Five beats; the first four are context, the last is the experiment.
-- **SAY:** Walk the five bullets in one breath each. Flag explicitly that you will
-  spend most of the time on the data engine and the method, because the results are a
-  proof of concept.
+- **KEY MESSAGE:** Six beats.
+- **SAY:** Walk the five bullets in one breath each.
 - **TRANSITION:** "It starts from what we are trying to produce."
 
 ## Slide 3 · Policy goal
-- **KEY MESSAGE:** Reform questions can be asked at the national or subnationa 
-  levels, (such as states, and congressional districts); each needs data that 
+- **KEY MESSAGE:** Reform questions can be asked at the national or subnational
+  levels (such as states and congressional districts); each needs data that
   represents that geography.
 - **SAY:**
-  - PolicyEngine runs live tax-and-benefit microsimulation for the US and UK.
+  - PolicyEngine is a free, open-source platform that computes how tax and benefit 
+    policy affects households and government budgets, for the US and UK. Anyone can 
+    model a reform and see its distributional and fiscal impact. Policy questions can 
+    be asked at different geographic questions.
   - A national average stretched to a district is not a district estimate.
-  - So the data problem is subnational from the start, in the US: 1 nation, 
-    51 state-level units, 435 congressional districts.
-- **TRANSITION:** "Representing those levels means reproducing administrative totals at
-  all of them at once."
+  - So the data problem is subnational from the start.
+  - (Visual) The map is estimated SNAP benefits for every congressional district (435
+    plus DC), produced from one calibrated dataset — exactly the kind of subnational
+    estimate this work enables.
+- **TRANSITION:** "Representing all those levels at once is first a question of how the
+  weights are laid out on the records."
 
-## Slide 4 · Nested targets
-- **KEY MESSAGE:** One set of weights must reproduce published totals across nested
-  geographies — hierarchical calibration.
+## Slide 4 · Weight layout — wide (the UK layout)
+- **KEY MESSAGE:** One layout is *wide* — a record carries one weight per subnational
+  area. That is how our first (UK) local-area system worked.
 - **SAY:**
-  - Calibration finds weights so the weighted dataset reproduces published totals:
-    the weighted sum of a variable equals the target T.
-  - Subnational makes it hierarchical: district totals sum to state totals, state to
-    national — in a *single* weight vector, not three independent fits.
+  - Keep one national microdataset and build a matrix of weights by area: each record
+    gets a weight in every area column.
+  - The limitation: weight columns for overlapping geographies can disagree, and the
+    inconsistency grows as users ask for more breakdowns.
+- **TRANSITION:** "The US case has many overlapping views and local policy, which forced
+  a different layout."
+
+## Slide 5 · Weight layout — long (the US layout)
+- **KEY MESSAGE:** The other layout is *long* — each record carries a single weight with
+  its geography on the record, and that one weight set must reproduce nested totals.
+- **SAY:**
+  - The US needs state, county, congressional-district, and legislative views at once,
+    and policy varies locally — so geography moves onto the records, one weight each.
+  - This is the requirement that makes the long layout necessary: calibration finds
+    weights so the weighted dataset reproduces published totals (the weighted sum of a
+    variable equals the target T), and subnational work makes it *hierarchical* — district
+    totals sum to state totals, state to national, in a *single* weight vector, not three
+    independent fits.
+  - The long layout keeps every geography internally consistent, but it inflates the
+    candidate universe.
   - Classical calibration (Deville–Särndal, GREG, IPF) answers this for a fixed set of
     records; the open question is which records to fit on.
-- **TRANSITION:** "And the candidate set of records is large, on purpose."
+- **TRANSITION:** "Let me explain why the candidate set of records that has to satisfy all 
+  those nested totals is large, on purpose."
 
-## Slide 5 · Build big, then prune
+## Slide 6 · Build big, then prune
 - **KEY MESSAGE:** Fidelity makes the candidate dataset rich enough to represent the
   targets, and too large to simulate.
 - **SAY:**
@@ -84,33 +104,28 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
     shipped file still has to be cheap to load and simulate.
   - So we prune with evidence — keep records because they help reproduce a source-backed
     target, not because they won a random draw.
-- **TRANSITION:** "To make that concrete, here is the engine that builds and prunes."
-
-## Slide 6 · Section — the data engine
-- **KEY MESSAGE:** Two pieces: Ledger, the source-data foundation, and Populace, the
-  microdata engine.
-- **SAY:** One sentence: "Ledger turns government publications into source-backed facts;
-  Populace is the engine that builds survey microdata into a calibrated, deployable
-  population."
+- **TRANSITION:** "To make that concrete, here is the engine that builds and prunes — two
+  pieces: Ledger turns government publications into source-backed facts, and Populace builds
+  survey microdata into a calibrated, deployable population."
 
 ## Slide 7 · Ledger
-- **KEY MESSAGE:** Ledger is PolicyEngine's *source-data foundation* for social simulation: 
-  it captures source publications, preserves provenance, and represents published values 
+- **KEY MESSAGE:** Ledger is PolicyEngine's *source-data foundation* for social simulation:
+  it captures source publications, preserves provenance, and represents published values
   as structured, queryable facts.
 - **SAY:**
-  - "Ledger captures source publications, preserves provenance, and represents published 
+  - "Ledger captures source publications, preserves provenance, and represents published
     values as structured, queryable facts."
   - A fact = geography × entity × measure × aggregation × source provenance. Example:
     California, tax unit, adjusted gross income, sum, IRS SOI.
-  - Ledger may re-express a published value, but never reconciles, ages, or imputes 
+  - Ledger may re-express a published value, but never reconciles, ages, or imputes
     — that keeps the fact layer auditable.
 - **TRANSITION:** "Populace is what consumes those facts."
 
 ## Slide 8 · Populace — the frame
-- **KEY MESSAGE:** Populace is PolicyEngine's *microdata engine*, the micro stack: weighted 
+- **KEY MESSAGE:** Populace is PolicyEngine's *microdata engine*, the micro stack: weighted
   entity bundles, synthesis, calibration, and rules-engine adapters for survey microdata.
 - **SAY:**
-  - "Populace is our microdata engine — weighted entity bundles, synthesis, calibration, 
+  - "Populace is our microdata engine — weighted entity bundles, synthesis, calibration,
     and rules-engine adapters for survey microdata."
   - A population is a *weighted sampling frame*, not a flat table: entity tables keep the
     structure (person, household, tax unit, family).
@@ -140,12 +155,10 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
   - Fill each gap from whichever survey measures it best — many surveys can be donors.
   - The fitting step learns a *conditional distribution* on the donor data —
     P(variable | demographics, income) — not a single point prediction.
-  - We use Quantile Regression Forests to predict the whole distribution and sample a 
-    draw per record, preserving the variability (similar people get a realistic spread), 
+  - We use Quantile Regression Forests to predict the whole distribution and sample a
+    draw per record, preserving the variability (similar people get a realistic spread),
     not collapsed to a mean.
-  - (If asked, the mechanics: quantile regression forests — weighted bootstrap, regime
-    gates, sequential chaining.)
-- **TRANSITION:** "All this richness multiplies the record count — which is why we prune."
+- **TRANSITION:** "Now that we know why this richness is important but costly, lets look at pruning."
 
 ## Slide 11 · The reduction problem
 - **KEY MESSAGE:** With the universe and targets fixed, reduction is a sampling problem
@@ -167,31 +180,23 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
     scaled** calibrates the full universe first, then randomly keeps dense weights and scales
     them back to total mass without refitting.
   - Targets and universe stay fixed, so the comparison isolates *where selection enters*.
-- **TRANSITION:** "The two sparse methods come from a deep-learning idea — here is L0."
+- **TRANSITION:** "Before we move to the results, let me explain the intution behind our developed method."
 
 ## Slide 13 · Louizos foundation
 - **KEY MESSAGE:** Louizos, Welling and Kingma (2018) made L0 trainable by gradient
   descent for neural-network sparsification; we reuse that machinery.
 - **SAY:**
-  - Their goal was to make a neural network smaller by automatically driving some of its
-    weights to exactly zero.
-  - Why pure L0 "norm" (the count of non-zero weights) cannot be trained directly: 
-    a count is a step function. It stays flat as a weight changes, then jumps by 
-    one the instant the weight crosses zero. So its gradient is zero almost everywhere 
-    and undefined at the jumps — gradient descent gets no signal telling it which weight 
-    to turn off and thus cannot learn from it.
-  - The fix is to make the on/off decision *soft and learnable*: put a stochastic gate on
-    each weight and learn the probability that the gate is open.
-  - The stretch-and-clip intuition (point to the diagram): draw a smooth random number
-    that normally lives between 0 and 1, deliberately stretch its range so it can spill
-    slightly below 0 and above 1, then clip — anything below 0 becomes exactly 0, anything
-    above 1 becomes exactly 1. The clipping piles up probability mass *exactly* at 0
-    (fully off, weight dropped) and *exactly* at 1 (fully on, weight kept), while values in
-    between stay smooth. So a gate can be genuinely off or on, yet the knob that controls
-    it moves continuously.
-  - Crucially, the probability a gate is open is closed-form (point to the formula), so
-    the *expected number of open gates* is differentiable — that is what we penalize, and
-    gradient descent can now push toward fewer open gates.
+  - Their goal: shrink a network by driving some weights to exactly zero.
+  - The catch: the L0 "norm" (count of non-zeros) is a step function — flat, then a unit
+    jump as a weight crosses zero — so its gradient is zero almost everywhere or undefined at
+    jumps and gives gradient descent no signal about which weight to turn off.
+  - The fix: replace each hard on/off with a *stochastic gate* and learn its probability of
+    being open. The hard-concrete gate (point to the diagram) draws a smooth value in
+    [0,1], stretches it past both ends, and clips — piling probability mass *exactly* at 0
+    (off, weight dropped) and *exactly* at 1 (on, weight kept) while the middle stays
+    smooth.
+  - This makes the open probability is closed-form, so the *expected number of open gates*
+    is differentiable — that is what we penalize, pushing toward fewer open gates.
 - **TRANSITION:** "Now translate this from network weights to microdata records."
 
 ## Slide 14 · Translation
@@ -208,13 +213,9 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
 - **SAY:**
   - The training objective has three terms: the calibration loss on *gated* weights,
     an L0 penalty equal to the expected retained count, and an L2 penalty on the ratio of
-    fitted to initial weight.
-  - The L2 term penalizes the squared magnitude of each fitted weight
-    (relative to its starting weight), which discourages loading the fit onto a few very
-    large weights — that keeps population mass spread across records, so the effective
-    sample size stays high and the dataset stays usable downstream. A hard per-record cap
-    bounds the single largest weight as a backstop.
-  - A a record only contributes to the training objective when its gate is open.
+    fitted to initial weight (to control how the population mass spreads across records).
+  - For our experiments, however, we set L2 to 0 to isolate L0.
+  - A record only contributes to the training objective when its gate is open.
   - At publication, gates are evaluated deterministically: the output is an ordinary
     sparse dataset with calibrated positive weights.
   - The point: **selection is trained against the same target system the final weights must**
@@ -223,7 +224,7 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
 
 ---
 
-# Second half — proof of concept (slides 16–23)
+# Second half — proof of concept (slides 16–27)
 
 > Numbers and figures below are from the full-surface matched probe:
 > 37,053 Ledger facts compile to 32,633 materialized targets on 337,704 candidate
@@ -251,55 +252,87 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
   - Relative error puts count and dollar targets on one scale; the cap c limits any single
     hard-to-fit target, so one bad row cannot dominate the gradient.
   - The reported runs use the production cap c=1, so targets more than 100% away do not contribute
-    to the gradient. 
+    to the gradient.
   - The per-target weights ω_j scale each target by the square root of its size, within two
-    bases (count vs dollar) that are rescaled to contribute equally — so large aggregates
-    count for more, and the many dollar cells do not swamp the count targets.
-  - Same targets, same loss, same weight bounds — only the sampler changes.
-- **TRANSITION:** "So where does informed selection actually win?"
+    bases (count vs dollar) that are rescaled to contribute equally — so dollar cells do not 
+    swamp the count targets.
+- **TRANSITION:** "So where does informed selection actually win? Build it up one arm at a time."
 
-## Slide 18 · Main result
-- **KEY MESSAGE:** L0 is useful as support selection: choose records with gates, then
-  refit ordinary calibration weights.
+## Slide 18 · Main result · where we start
+- **KEY MESSAGE:** Two reference points before the clever pruning — keep everything, or prune at random.
 - **SAY:**
-  - Lead with Populace capped weighted loss. Raw median/mean ARE are supplemental.
-  - The raw gated L0 weights are not the publication weights: they score 9.86% loss.
-  - Keep those 57,240 selected records, remove the gates, and refit ordinary calibration
-    weights: the loss falls to 4.74%.
-  - Dense no-L0 on all 337,704 records with the same 1,500-epoch budget reaches 5.07%.
-    It is still declining, so say "completed-run loss", not "dense optimum".
-  - A random subset of exactly the same size, with the same 1,500-epoch reweighting,
-    reaches 7.55%; a random sample of dense weights scaled back up without refitting reaches
-    24.24%.
-  - So the result is support selection, not direct publication of the gated weights.
-- **TRANSITION:** "Accuracy is not the whole story — what does it cost?"
+  - Dense no-L0 calibrates all 337,704 records and reaches 5.07% on the full Populace
+    surface. It is a reference, not a deployable budget.
+  - Naively prune to exactly 57,240 records at random and refit weights on that subset:
+    7.55%.
+  - The question for the rest of the arc: how close can a 57,240-record file get to dense?
+- **TRANSITION:** "First, confirm that the reweighting — not the sample — is what helped."
 
-## Slide 19 · Full-surface diagnostics
+## Slide 19 · Main result · skip the reweighting?
+- **KEY MESSAGE:** The reweighting was doing the work, not the random sample.
+- **SAY:**
+  - Take the same random sample, keep the dense weights, and just rescale them to the
+    population total with no refit: loss jumps to 24.24%.
+  - So the gain from random + reweight came from re-fitting the weights on the retained
+    subset, not from the sample itself.
+- **TRANSITION:** "Now bring in the target-informed selector."
+
+## Slide 20 · Main result · the informed selector: L0
+- **KEY MESSAGE:** Informed L0 selects the support well, but its raw gated weights are not the publication weights.
+- **SAY:**
+  - Informed L0 chooses the 57,240 records jointly with their gated weights; it should beat
+    a blind random sample.
+  - But the raw gated weights score 9.86% — worse than random + reweight's 7.55%.
+  - The gates select the support well; but the gated weights they return do not seem publication
+    ready.
+- **TRANSITION:** "So keep the records the gates chose, drop the gates, and refit."
+
+## Slide 21 · Main result · refit once more
+- **KEY MESSAGE:** L0's value is support selection, realized only after a post-selection refit.
+- **SAY:**
+  - Keep the 57,240 L0-selected records, remove the gates, and refit ordinary calibration
+    weights on that subset: the loss falls to 4.74%.
+  - That is below dense no-L0's 5.07% and well below every sampling baseline
+    (random + reweight 7.55%, dense sample scaled 24.24%).
+  - So the result is support selection, not direct publication of the gated weights.
+- **TRANSITION:** "Does that fit hold across geography levels?"
+
+## Slide 22 · Main result · by geography
+- **KEY MESSAGE:** The L0 + refit fit holds at every geographic level.
+- **SAY:**
+  - Absolute relative error for the L0 + refit run at 57,240 records, by level: National
+    median 1.30%, State 0.31%, Congressional district 1.48% — including the 24,340
+    congressional-district targets.
+  - Overall median ARE is 0.89% across 32,633 targets; the mean (84.64%) and max
+    (162,496%) are tail-sensitive diagnostics, dominated by a few near-zero-denominator
+    targets.
+- **TRANSITION:** "Median and mean tell different stories — here is why we lead with the median."
+
+## Slide 23 · Median and mean tell different stories
 - **KEY MESSAGE:** Populace loss is the headline; raw median and mean ARE explain what is
   underneath it.
 - **SAY:**
   - Median ARE shows typical target fit; mean ARE shows the tail.
-  - In this run raw ARE is defined for 32,607 of 32,633 targets; 26 IRS SOI national rows
-    have target and achieved value both equal to zero.
-  - Dense no-L0 has 0.56% median ARE; L0 + refit has 0.89%; random + reweight has
-    6.70%; raw gated L0 has 11.66%; dense sample scaled has 55.24%.
+  - Across methods: dense no-L0 has 0.56% median ARE; L0 + refit has 0.89%; random +
+    reweight has 6.70%; raw gated L0 has 11.66%; dense sample scaled has 55.24%.
   - The raw mean remains tail-sensitive, so use it as a diagnostic, not the main score.
 - **TRANSITION:** "Accuracy is not the whole story — what does it cost?"
 
-## Slide 20 · Concentration
-- **KEY MESSAGE:** Effective sample size is a primary result; among sparse supports, L0 + refit
-  also beats random on concentration.
+## Slide 24 · Concentration
+- **KEY MESSAGE:** Effective sample size is a primary result. The L0 gates already produce the
+  best-conditioned weights; the accuracy refit trades some of that back, but L0 + refit still
+  beats the matched random support.
 - **SAY:**
-  - Dense no-L0 uses all records and reaches ESS 5,970.
-  - At 57,240 records, L0 + refit reaches ESS 4,726; random + reweight is 2,480; dense
-    sample scaled is 981.
-  - The largest post-L0-refit weight is about 914k, versus about 1.16m for random + reweight
-    and 2.18m for dense sample scaled.
-  - So this point is not just lower loss; it is also better conditioned than the matched
-    random support.
+  - Read ESS as a primary result — how much independent information the weighted file carries.
+  - Raw L0-gated weights are the most spread-out of any arm — the *highest*, above dense full, 
+    also with the lowest max weight.
+  - The refit that restores accuracy gives back some concentration, though it still performs better
+    than random samples. Dense full is the all-records reference at 5,970 / 579k.
+  - So the deployable point is not just lower loss — among sparse supports it is the best trade
+    of accuracy against concentration.
 - **TRANSITION:** "Where does this go next?"
 
-## Slide 21 · Future work
+## Slide 25 · Future work
 - **KEY MESSAGE:** The proof of concept points at two production extensions; classical
   calibrators are related work, not missing baselines.
 - **SAY:**
@@ -317,14 +350,14 @@ Populace), the imputation mechanics, and the L0 foundation and our translation.
     completed full-surface run.]
 - **TRANSITION:** "To wrap up."
 
-## Slide 22 · Conclusion
+## Slide 26 · Conclusion
 - **KEY MESSAGE:** Target-informed pruning works as support selection.
 - **SAY:** The full-surface probe says: choose a sparse support with L0, then refit ordinary
   calibration weights on the retained support. This is not the final frontier; the next
   step is a normalized-penalty sweep with longer dense convergence checks, missing comparators,
   and concentration controls.
 
-## Slide 23 · Questions
+## Slide 27 · Questions
 - **KEY MESSAGE:** Open the floor.
 - **SAY:** Thank the audience and invite questions. Likely areas: the median/mean split, the
   effective-sample-size cost, and why classical calibrators are not baselines.
